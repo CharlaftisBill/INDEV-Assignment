@@ -1,0 +1,24 @@
+# Secrets: CA private key, generated credentials. NEVER commit.
+.secrets/
+
+# Generated kubeconfigs (admin, operator) and other local outputs
+out/
+
+# etcd snapshots land here via the Lima mount (outside the cluster, outside git)
+backups/*
+!backups/.gitkeep
+
+# Ansible
+*.retry
+ansible/collections/
+.ansible/
+
+# Python / editors / OS
+.venv/
+__pycache__/
+.DS_Store
+.vscode/
+.idea/
+
+# Claude Code: personal, machine-local settings
+.claude/settings.local.json

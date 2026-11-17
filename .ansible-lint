@@ -1,0 +1,20 @@
+---
+# https://ansible.readthedocs.io/projects/lint/configuring/
+profile: production
+offline: true
+
+exclude_paths:
+  # Listed relative to both the repo root and ansible/ (make lint runs from ansible/)
+  - ansible/collections/
+  - collections/
+  - .ansible/
+  - .claude/
+  - lima/
+  - out/
+  - backups/
+  - docs/
+
+# Every role is applied to a single, well-known host; no need for the
+# role-name prefix on every variable to be enforced as an error.
+warn_list:
+  - var-naming[no-role-prefix]

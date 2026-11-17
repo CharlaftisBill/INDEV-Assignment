@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Rejects AI attribution trailers and enforces Conventional Commit subjects.
+# Enabled per clone with: make hooks   (git config core.hooksPath .githooks)
+set -euo pipefail
+
+msg_file="$1"
+# Ignore comment lines git adds to the template
+body="$(grep -v '^#' "$msg_file" || true)"
+
+if printf '%s\n' "$body" | grep -Eiq '^[[:space:]]*co-authored-by:.*(claude|anthropic|noreply@anthropic\.com)|generated with \[?claude code'; then
+  echo "commit-msg: AI attribution lines (Co-Authored-By: Claude / Generated with Claude Code) are not allowed in this repo." >&2
+  exit 1
+fi
+
+subject="$(printf '%s\n' "$body" | sed -n '/./{p;q;}')"
+# Allow git's own merge/revert/fixup subjects
+if [[ "$subject" =~ ^(Merge|Revert|fixup!|squash!) ]]; then
+  exit 0
+fi
+if ! [[ "$subject" =~ ^(feat|fix|docs|chore|build|test|refactor|ci|perf|style)(\([a-z0-9_./-]+\))?!?:\ .+ ]]; then
+  echo "commit-msg: subject must follow Conventional Commits, e.g. 'feat(kubeadm): enable API audit log'." >&2
+  echo "            got: $subject" >&2
+  exit 1
+fi
+if (( ${#subject} > 72 )); then
+  echo "commit-msg: subject is ${#subject} chars; keep it at 72 or less." >&2
+  exit 1
+fi
