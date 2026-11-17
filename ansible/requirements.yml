@@ -1,0 +1,12 @@
+---
+# Pinned Ansible collections. Installed into ansible/collections/ by `make collections`.
+# Versions match those bundled with the Homebrew `ansible` package on 2026-11-17.
+collections:
+  - name: kubernetes.core
+    version: "6.6.0"
+  - name: community.crypto
+    version: "3.5.1"
+  - name: community.general
+    version: "13.5.1"
+  - name: ansible.posix
+    version: "2.2.2"

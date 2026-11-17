@@ -1,0 +1,39 @@
+---
+# Cluster-wide settings. Versions live in versions.yml, never here.
+
+cluster_name: indev
+node_name: k8s-node
+
+# Networking. Lima's user-mode network uses 192.168.5.0/24, so we avoid
+# Calico's 192.168.0.0/16 default.
+pod_cidr: 10.244.0.0/16
+service_cidr: 10.96.0.0/12
+cluster_dns_domain: cluster.local
+
+# Hostnames served by the ingress (resolved on the Mac via /etc/hosts -> 127.0.0.1)
+llm_hostname: llm.local
+grafana_hostname: grafana.local
+
+# Namespaces
+ns_cni_operator: tigera-operator
+ns_storage: local-path-storage
+ns_cert_manager: cert-manager
+ns_ingress: traefik
+ns_monitoring: monitoring
+ns_llm: llm
+
+# Application namespaces get Pod Security Admission "restricted" (enforce/audit/warn)
+app_namespaces:
+  - "{{ ns_llm }}"
+
+# Host-side paths (relative to the repo root; Ansible runs on the Mac)
+repo_root: "{{ playbook_dir }}/.."
+host_out_dir: "{{ repo_root }}/out"
+host_secrets_dir: "{{ repo_root }}/.secrets"
+host_ca_cert: "{{ repo_root }}/certs/ca.crt"
+
+# Node-side paths
+node_backup_dir: /mnt/host-backups      # Lima mount of ./backups on the Mac
+etcd_backup_schedule: "*-*-* *:00/30:00"  # systemd OnCalendar: every 30 min
+etcd_backup_retention: 48               # number of snapshots kept
+audit_log_dir: /var/log/kubernetes/audit

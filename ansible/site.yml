@@ -1,0 +1,38 @@
+---
+# Entry point: builds the whole cluster from a clean Debian 13 VM.
+# Roles are added in order, one per milestone (see TODO.md), each with a matching tag.
+
+- name: Preflight checks
+  hosts: k8s
+  gather_facts: true
+  tags: [always]
+  tasks:
+    - name: Assert the VM matches the assignment environment
+      ansible.builtin.assert:
+        that:
+          - ansible_facts['distribution'] == 'Debian'
+          - ansible_facts['distribution_major_version'] == '13'
+          - ansible_facts['architecture'] in ['aarch64', 'x86_64']
+          - ansible_facts['processor_vcpus'] | int >= 4
+          - ansible_facts['memtotal_mb'] | int >= 7500
+        fail_msg: "Expected Debian 13, >=4 vCPU, ~8 GB RAM. Got {{ ansible_facts['distribution'] }}
+          {{ ansible_facts['distribution_version'] }}, {{ ansible_facts['processor_vcpus'] }} vCPU,
+          {{ ansible_facts['memtotal_mb'] }} MB."
+        quiet: true
+
+- name: Build the single-node cluster
+  hosts: k8s
+  gather_facts: true
+  roles: []
+  # Planned order (uncommented as each milestone lands):
+  #   - { role: os_prep,         tags: [os_prep] }
+  #   - { role: containerd,      tags: [containerd] }
+  #   - { role: kubeadm,         tags: [kubeadm] }
+  #   - { role: cni_calico,      tags: [cni_calico] }
+  #   - { role: storage,         tags: [storage] }
+  #   - { role: pki,             tags: [pki] }
+  #   - { role: ingress_traefik, tags: [ingress_traefik] }
+  #   - { role: monitoring,      tags: [monitoring] }
+  #   - { role: etcd_backup,     tags: [etcd_backup] }
+  #   - { role: hardening,       tags: [hardening] }
+  #   - { role: llm_app,         tags: [llm_app] }

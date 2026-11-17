@@ -1,0 +1,39 @@
+---
+# SINGLE SOURCE OF TRUTH for every pinned version in this project.
+# Rules (see CLAUDE.md and the pin-version skill):
+#   - exact versions only, never "latest" / floating tags / unpinned apt packages
+#   - one comment per entry: where the version was looked up and when
+#   - images must publish an arm64 manifest
+#
+# Entries are added milestone by milestone. Planned keys:
+#
+# M1  os_prep / containerd
+#   containerd_version:            # apt (Debian trixie)
+#   runc_version:                  # apt
+#   cri_tools_version:             # pkgs.k8s.io
+#
+# M2  kubeadm
+#   kubernetes_minor:              # e.g. "v1.xx" (pkgs.k8s.io repo path)
+#   kubernetes_version:            # kubelet/kubeadm/kubectl apt version
+#   helm_version:                  # binary release
+#
+# M3  cni_calico
+#   calico_version:                # tigera-operator chart
+#
+# M4  storage
+#   local_path_provisioner_version:
+#
+# M5  pki + ingress
+#   cert_manager_version:          # chart
+#   traefik_chart_version:
+#
+# M6  monitoring
+#   kube_prometheus_stack_version: # chart
+#
+# M7  etcd_backup
+#   etcdctl_version:               # must match the etcd shipped by kubeadm
+#
+# M9  llm_app
+#   llama_cpp_image:               # ghcr.io/ggml-org/llama.cpp:server-<build>@sha256:...
+#   model_url:
+#   model_sha256:
