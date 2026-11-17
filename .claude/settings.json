@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Bash(make help)",
+      "Bash(make lint)",
+      "Bash(make check)",
+      "Bash(make verify:*)",
+      "Bash(make smoke)",
+      "Bash(make provision:*)",
+      "Bash(make idempotency:*)",
+      "Bash(make collections)",
+      "Bash(make vm-up)",
+      "Bash(yamllint:*)",
+      "Bash(ansible-lint:*)",
+      "Bash(ansible-playbook site.yml --syntax-check)",
+      "Bash(ansible-galaxy collection list:*)",
+      "Bash(ansible -m ansible.builtin.ping:*)",
+      "Bash(scripts/verify.sh:*)",
+      "Bash(./scripts/verify.sh:*)",
+      "Bash(limactl list:*)",
+      "Bash(limactl shell k8s -- sudo kubectl get:*)",
+      "Bash(limactl shell k8s -- sudo kubectl describe:*)",
+      "Bash(limactl shell k8s -- sudo kubectl logs:*)",
+      "Bash(limactl shell k8s -- sudo systemctl status:*)",
+      "Bash(limactl shell k8s -- sudo journalctl:*)",
+      "Bash(limactl shell k8s -- sudo crictl ps:*)",
+      "Bash(limactl shell k8s -- apt-cache madison:*)",
+      "Bash(kubectl --kubeconfig out/admin.conf get:*)",
+      "Bash(kubectl --kubeconfig out/admin.conf describe:*)",
+      "Bash(kubectl --kubeconfig out/admin.conf logs:*)",
+      "Bash(kubectl --kubeconfig out/admin.conf auth can-i:*)",
+      "Bash(kubectl --kubeconfig out/operator.conf get:*)",
+      "Bash(kubectl --kubeconfig out/operator.conf auth can-i:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git ls-files:*)",
+      "Bash(git add -- :*)",
+      "Bash(git show:*)",
+      "Bash(make hooks)"
+    ],
+    "ask": [
+      "Bash(make vm-reset)",
+      "Bash(make vm-destroy)",
+      "Bash(make vm-down)",
+      "Bash(make e2e)",
+      "Bash(limactl delete:*)",
+      "Bash(limactl stop:*)",
+      "Bash(kubectl --kubeconfig out/admin.conf delete:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(git reset:*)",
+      "Bash(sudo:*)"
+    ],
+    "deny": [
+      "Read(./.secrets/**)",
+      "Bash(cat .secrets/*)",
+      "Bash(rm -rf /*)",
+      "Bash(rm -rf ~*)",
+      "Bash(git push --force:*)",
+      "Bash(git add -A:*)",
+      "Bash(git add .)",
+      "Bash(git commit -a:*)",
+      "Bash(git commit --no-verify:*)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/lint-changed.sh",
+            "timeout": 60
+          }
+        ]
+      }
+    ]
+  }
+}
