@@ -15,6 +15,8 @@ esac
 root="${CLAUDE_PROJECT_DIR:-$(git -C "$(dirname "$file")" rev-parse --show-toplevel 2>/dev/null || pwd)}"
 cd "$root" || exit 0
 rel="${file#"$root"/}"
+# Prefer the pinned tools in .venv (Python 3.14) over Homebrew's (B-001)
+[[ -d "$root/.venv/bin" ]] && export PATH="$root/.venv/bin:$PATH"
 
 # Skip vendored / generated paths
 case "$rel" in

@@ -3,6 +3,7 @@ extends: default
 
 ignore: |
   ansible/collections/
+  .venv/
   .ansible/
   out/
   backups/
