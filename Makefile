@@ -1,30 +1,57 @@
 # Single-node Kubernetes on a Lima VM, provisioned with Ansible.
 # Run `make help` for the list of targets.
 
-SHELL        := /bin/bash
-.SHELLFLAGS  := -eu -o pipefail -c
+# Internal variables are `override` so `make <target> VAR=...` on the command line
+# cannot replace them (they are pasted into shell recipe lines; B-019).
+override SHELL        := /bin/bash
+override .SHELLFLAGS  := -eu -o pipefail -c
 .DEFAULT_GOAL := help
 
-ROOT         := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
-VM           ?= k8s
-LIMA_CONFIG  := $(ROOT)/lima/k8s.yaml
-BACKUP_DIR   := $(ROOT)/backups
-ANSIBLE_DIR  := $(ROOT)/ansible
-KUBECONFIG_ADMIN := $(ROOT)/out/admin.conf
+override ROOT         := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
+override LIMA_CONFIG  := $(ROOT)/lima/k8s.yaml
+override BACKUP_DIR   := $(ROOT)/backups
+override ANSIBLE_DIR  := $(ROOT)/ansible
+override KUBECONFIG_ADMIN := $(ROOT)/out/admin.conf
 
+# User-settable variables (validated below)
+VM           ?= k8s
 TAGS         ?=
 REQ          ?=
 ANSIBLE_ARGS ?=
+STRICT       ?=
 
-export ANSIBLE_CONFIG := $(ANSIBLE_DIR)/ansible.cfg
+override ANSIBLE_CONFIG := $(ANSIBLE_DIR)/ansible.cfg
+export ANSIBLE_CONFIG
 
 # Pinned host tooling (ansible-core, ansible-lint, yamllint) lives in .venv on
 # Python 3.14 and takes precedence over Homebrew's copies, which run on Python
 # 3.15, unsupported by ansible-core 2.21 (B-001).
 PYTHON       ?= python3.14
-VENV         := $(ROOT)/.venv
-VENV_STAMP   := $(VENV)/.installed
-export PATH  := $(VENV)/bin:$(PATH)
+override VENV         := $(ROOT)/.venv
+override VENV_STAMP   := $(VENV)/.installed
+override PATH         := $(VENV)/bin:$(PATH)
+export PATH
+
+# ---------------------------------------------------------------- input validation (B-019)
+# User-settable variables end up in recipe shell lines, so they may only contain characters
+# that are inert in a shell. Checked in pure make on the raw, unexpanded text ($(value)),
+# so a `$(shell ...)` or `;` payload is rejected before any shell runs.
+empty  :=
+space  := $(empty) $(empty)
+comma  := ,
+_lower := a b c d e f g h i j k l m n o p q r s t u v w x y z
+_upper := A B C D E F G H I J K L M N O P Q R S T U V W X Y Z
+_digit := 0 1 2 3 4 5 6 7 8 9
+# $(call _strip_chars,TEXT,CHARS): TEXT with every char in the CHARS list removed
+_strip_chars = $(if $(2),$(call _strip_chars,$(subst $(firstword $(2)),,$(1)),$(wordlist 2,999,$(2))),$(1))
+# $(call check_chars,VAR,ALLOWED CHARS,DESCRIPTION): error unless VAR has only allowed chars and spaces
+check_chars = $(if $(subst $(space),,$(call _strip_chars,$(value $(1)),$(2))),$(error $(1) may only contain $(3); got: $(value $(1))))
+_ := $(call check_chars,REQ,$(_digit) a b c,check IDs such as 2 8c)
+_ := $(call check_chars,TAGS,$(_lower) $(_digit) _ $(comma),role names separated by commas)
+_ := $(call check_chars,STRICT,0 1,0 or 1)
+_ := $(call check_chars,VM,$(_lower) $(_digit) -,a Lima instance name)
+_ := $(call check_chars,PYTHON,$(_lower) $(_digit) . / - _,a python executable name or path)
+_ := $(call check_chars,ANSIBLE_ARGS,$(_lower) $(_upper) $(_digit) - _ = . / : $(comma) +,ansible-playbook flags without quotes or shell characters)
 
 .PHONY: help
 help: ## Show this help
@@ -100,6 +127,10 @@ provision: tools ## Run site.yml (TAGS=os_prep,containerd to limit)
 idempotency: tools ## Re-run site.yml and fail unless changed=0
 	cd $(ANSIBLE_DIR) && ansible-playbook site.yml $(if $(TAGS),--tags $(TAGS),) $(ANSIBLE_ARGS) \
 	  | tee /dev/stderr | grep -Eq 'changed=0 +unreachable=0 +failed=0'
+
+.PHONY: ping
+ping: tools ## Check Ansible can reach the VM (fixed command; safe to auto-allow)
+	cd $(ANSIBLE_DIR) && ansible k8s -m ansible.builtin.ping
 
 .PHONY: check
 check: tools ## Syntax-check the playbook
