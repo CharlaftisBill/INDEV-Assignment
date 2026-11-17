@@ -138,8 +138,9 @@ check: tools ## Syntax-check the playbook
 
 # ---------------------------------------------------------------- quality
 .PHONY: lint
-lint: tools ## yamllint + ansible-lint + shellcheck (if installed)
+lint: tools ## yamllint + ansible-lint + TODO.md bug format + shellcheck (if installed)
 	yamllint -s .
+	python3 $(ROOT)/scripts/check_todo.py $(ROOT)/TODO.md
 	cd $(ANSIBLE_DIR) && ansible-lint
 	@if command -v shellcheck >/dev/null; then shellcheck scripts/*.sh .claude/hooks/*.sh .githooks/*; else echo "shellcheck not installed, skipping"; fi
 
