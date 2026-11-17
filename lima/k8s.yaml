@@ -1,0 +1,44 @@
+# Lima VM for the single-node Kubernetes cluster.
+#   make vm-up   (adds the ./backups mount with an absolute path, then starts the VM)
+# Spec from the assignment: 4 vCPU, 8 GB RAM, 40 GB disk, Debian 13 (trixie).
+---
+vmType: vz             # Apple Virtualization.framework (Apple Silicon, macOS 13+)
+cpus: 4
+memory: 8GiB
+disk: 40GiB
+
+# TODO(M1, pin-version skill): replace "latest" with a dated build + digest.
+images:
+  - location: https://cloud.debian.org/images/cloud/trixie/latest/debian-13-genericcloud-arm64.qcow2
+    arch: aarch64
+  - location: https://cloud.debian.org/images/cloud/trixie/latest/debian-13-genericcloud-amd64.qcow2
+    arch: x86_64
+
+# The VM must be a *clean* Debian: no Lima-managed containerd/nerdctl.
+# Ansible installs and owns the container runtime.
+containerd:
+  system: false
+  user: false
+
+# No home-directory mount. The only mount (./backups -> /mnt/host-backups,
+# writable) is injected by the Makefile so it can use an absolute path.
+mounts: []
+mountType: virtiofs
+
+ssh:
+  localPort: 0
+  loadDotSSHPubKeys: false
+
+# Lima forwards ports by watching *listening sockets* in the guest.
+# Traefik must therefore bind 80/443 itself (hostNetwork), not via CNI hostPort
+# (iptables DNAT, no socket -> Lima never sees it). macOS lets non-root bind 443.
+portForwards:
+  - guestPort: 443
+    hostPort: 443
+  - guestPort: 80
+    hostPort: 80
+  - guestPort: 6443
+    hostPort: 6443
+  # Don't forward everything else (NodePorts, metrics, etc.) to the host.
+  - guestPortRange: [1, 65535]
+    ignore: true
