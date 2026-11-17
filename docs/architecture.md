@@ -29,14 +29,14 @@
 | 1 | `os_prep` | — | 1 |
 | 2 | `containerd` | — | 1 |
 | 3 | `kubeadm` | kube-system | 2, 8c |
-| 4 | `cni_calico` | tigera-operator, calico-system | 3 |
+| 4 | `cni_calico` | tigera-operator, calico-system | 3a |
 | 5 | `storage` | local-path-storage | 5 |
 | 6 | `pki` | cert-manager | 4 |
 | 7 | `ingress_traefik` | traefik | 4 |
 | 8 | `monitoring` | monitoring | 6 |
 | 9 | `etcd_backup` | — (systemd on the node) | 7 |
 | 10 | `hardening` | — (cluster RBAC) | 8a |
-| 11 | `llm_app` | llm | 9, 3, 8b |
+| 11 | `llm_app` | llm | 9, 3b, 8b |
 
 ## Components and versions
 

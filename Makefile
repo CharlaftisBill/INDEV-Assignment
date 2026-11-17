@@ -114,11 +114,15 @@ lint: tools ## yamllint + ansible-lint + shellcheck (if installed)
 
 # ---------------------------------------------------------------- verification
 .PHONY: verify
-verify: ## Run requirement checks (REQ=4 for one requirement)
-	$(ROOT)/scripts/verify.sh $(REQ)
+verify: ## Run requirement checks (REQ=4 for one; STRICT=1 makes SKIP fail)
+	$(ROOT)/scripts/verify.sh $(if $(filter 1,$(STRICT)),--strict,) $(REQ)
 
 .PHONY: e2e
-e2e: vm-reset provision idempotency verify ## Full run from a clean VM
+e2e: ## Full run from a clean VM; any FAIL or SKIP fails it
+	$(MAKE) vm-reset
+	$(MAKE) provision
+	$(MAKE) idempotency
+	$(MAKE) verify STRICT=1
 
 .PHONY: smoke
 smoke: ## The acceptance curl from the assignment
