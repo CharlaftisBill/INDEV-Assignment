@@ -22,6 +22,7 @@ curl --cacert certs/ca.crt https://llm.local/v1/chat/completions \
 | Storage | local-path-provisioner (default StorageClass) | [0004](docs/decisions/0004-local-path-storage.md) |
 | TLS | internal root CA (host-generated) + cert-manager CA issuer | [0005](docs/decisions/0005-internal-ca-and-renewal.md) |
 | Backups | etcd snapshots → `./backups` on the host via Lima mount | [0006](docs/decisions/0006-etcd-backups-outside-cluster.md) |
+| Agent permissions | allow-list + ask + narrow deny in `.claude/settings.json`, a guardrail, not a boundary | [0009](docs/decisions/0009-agent-permissions-guardrail.md) |
 | Workload security | Pod Security Admission `restricted` for app namespaces | [0007](docs/decisions/0007-pod-security-restricted.md) |
 | Monitoring | kube-prometheus-stack (Prometheus, Alertmanager, Grafana) | [architecture](docs/architecture.md) |
 | Sample app | llama.cpp server + Qwen2.5-0.5B-Instruct Q4 GGUF, model cached on a PVC | [0008](docs/decisions/0008-model-caching.md) |
