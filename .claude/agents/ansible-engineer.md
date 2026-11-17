@@ -26,8 +26,8 @@ Ansible runs on the Mac host and pushes to the VM. Read `CLAUDE.md` and `TODO.md
    - `make lint`
    - `make provision TAGS=<role>`
    - `make idempotency TAGS=<role>` (must be `changed=0`)
-   - `make verify REQ=<n>` (implement the check in `scripts/verify.sh` if it is still a stub)
-6. Update `TODO.md`: mark bugs you fixed **Solved** (date + "uncommitted" until the commit exists). Never delete rows.
+   - `make verify REQ="<IDs on the milestone line in TODO.md>" STRICT=1` — must PASS with no SKIP (implement the check in `scripts/verify.sh` if it is still a stub)
+6. Update `TODO.md`: mark bugs you fixed **Solved** with the `bug` skill (table row: date + `uncommitted` in Fix; details entry: root cause, fix, verification). Never delete rows.
 
 ## Report back
 - What you built (files), versions pinned, verify result, any new assumptions (also added to `TODO.md` → Assumptions),

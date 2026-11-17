@@ -8,29 +8,35 @@ description: Run one milestone of the INDEV Kubernetes assignment end to end (M1
 Argument: a milestone ID (`M5`) or "next". If "next", take the first unchecked milestone in `TODO.md`.
 
 ## 0. Load state
-- Read `TODO.md`: the milestone line, the Status line, and every **Open** bug tagged with this milestone.
+- Read `TODO.md`: the milestone line, the Status line, and every **Open** bug for this milestone or an earlier one (in scope; later ones are deferred).
 - Read the matching rows in `docs/requirements-matrix.md`.
 - Check the VM is running: `limactl list`. If not, use the `vm-lifecycle` skill (`make vm-up`).
 - Update the Status line in `TODO.md` to this milestone.
 
 ## 1. Implement
 Delegate to the **ansible-engineer** agent with: the milestone ID, the requirement number(s), the role(s) involved,
-the Open bugs for this milestone, and the definition of done from `CLAUDE.md`.
+the in-scope Open bugs (this milestone or earlier, stuck ones included), and the definition of done from `CLAUDE.md`.
 It returns after lint, provision and idempotency pass.
 
 ## 2. Verify
-Delegate to the **k8s-verifier** agent with the requirement number(s).
+Delegate to the **k8s-verifier** agent with the requirement IDs this milestone delivers (as listed on its line in `TODO.md`,
+including sub-IDs such as `8c`) in **strict** mode: `make verify REQ="<ids>" STRICT=1`. A SKIP is a failure here.
 - If it opened bugs → send them back to **ansible-engineer**, then verify again. Max 3 loops; after that stop and ask the user.
 
-## 3. Security review (milestones touching req 3, 4, 8, 9 → M3, M5, M8, M9, M10)
-Delegate to the **security-reviewer** agent scoped to this milestone. Critical/High/Medium findings are Open bugs → back to step 1.
+## 3. Review until clean
+Run the **review-loop** skill scoped to this milestone (`M<n>`). The **sre-reviewer** agent reviews the changes and tests the
+infrastructure; for milestones touching req 3, 4, 8, 9 (M3, M5, M8, M9, M10) the **security-reviewer** runs alongside it.
+Their findings are fixed one by one with **fix-next-bug** and re-reviewed until a round finds nothing new, **at most 2 review rounds**; then stop and ask the user.
+At M10 run it with `disruptive` (ask the user first): reboot, kubelet restart, etcd restore drill, `make e2e`.
 
 ## 4. Document
 Delegate to the **docs-writer** agent: milestone ID, what was built, versions pinned, bug IDs found and solved.
 
 ## 5. Close
-- Refuse to close if any bug for this milestone is still **Open**. Report them and stop.
-- Tick the milestone in `TODO.md`, update Status (`Current milestone` → next one, `Last verified` → today + verify score).
+- Refuse to close while any bug for this milestone **or an earlier one** is Open, **including** bugs marked `[stuck rN]` (stuck only means the automatic loop gave up; it still needs a fix or an explicit decision from the user). Deferred bugs for later milestones don't block. Report the blocking bugs and stop.
+- Run the final gate **after** the review-loop fixes, right before ticking: `make verify REQ="<this milestone's IDs + IDs of all
+  ticked milestones>" STRICT=1`. Refuse to tick unless it passes (no FAIL, no SKIP); a regression in an earlier milestone blocks too.
+- Tick the milestone in `TODO.md`, update Status (`Current milestone` → next one, `Last verified` → today + the result of that final run).
 - Commit with the `split-commits` skill (focused Conventional Commits, e.g. one `feat(<role>)` per role, `fix(...)` per bug,
   `docs`, then `chore(todo)` last with the bug hashes filled in). Mention the milestone and requirement numbers in the bodies.
   Commit only when the user approves. No AI attribution trailers.

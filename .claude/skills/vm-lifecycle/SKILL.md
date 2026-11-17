@@ -19,11 +19,12 @@ Config: `lima/k8s.yaml`. Instance name: `k8s`. Ansible connects through `~/.lima
 ## After create/start, confirm reachability
 ```bash
 limactl list k8s
-ansible -i ansible/inventory/hosts.yml k8s -m ansible.builtin.ping
+make ping                       # Ansible reachability, using the pinned .venv tools
 limactl shell k8s -- cat /etc/os-release | grep VERSION_CODENAME   # expect trixie
 limactl shell k8s -- nproc; limactl shell k8s -- free -g; limactl shell k8s -- df -h /
 ```
-Run `ansible` with `ANSIBLE_CONFIG=ansible/ansible.cfg` from the repo root, or `cd ansible` first.
+Prefer the make targets (`make ping`, `make provision`): they use the pinned `.venv` tools and are pre-approved. To run
+`ansible` yourself: `source .venv/bin/activate && cd ansible` (ansible.cfg and the inventory path are relative to `ansible/`).
 
 ## Troubleshooting
 - `limactl start` hangs on "Waiting for ssh": `limactl shell k8s` / check `~/.lima/k8s/ha.stderr.log` and `serial*.log`.

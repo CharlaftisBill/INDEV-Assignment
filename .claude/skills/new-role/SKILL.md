@@ -34,6 +34,6 @@ Create only the directories the role actually uses (no empty `handlers/` if noth
 
 ## Wire it in
 1. `ansible/site.yml`: move the commented line for the role into `roles:` (keep order), tag = role name.
-2. `scripts/verify.sh`: make sure `check_<N>` exists; leave `skip "not implemented"` until the checks are written.
+2. `scripts/verify.sh`: make sure `check_<id>` exists for each requirement ID the role delivers (e.g. `check_8c`); leave `skip "not implemented"` until the checks are written.
 3. `docs/requirements-matrix.md`: set the Implementation column to `ansible/roles/<role>/`.
 4. `make lint && make check`.

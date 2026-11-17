@@ -70,7 +70,7 @@ EOF
 Message rules: Conventional Commits, imperative mood, body explains *why*. No trailers of any kind.
 
 **TODO.md bug hashes:** bugs marked Solved with `uncommitted` reference the commit that fixed them. Commit the fix first,
-take its short hash (`git log -1 --format=%h -- <fixed file>`), replace `uncommitted` in `TODO.md`, then include `TODO.md` in the last commit.
+take its short hash (`git log -1 --format=%h -- <fixed file>`), replace `uncommitted` in that bug's Fix column in `TODO.md`, then include `TODO.md` in the last commit.
 
 ## 5. Verify and report
 ```bash
