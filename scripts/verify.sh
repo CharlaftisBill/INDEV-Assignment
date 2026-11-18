@@ -69,12 +69,9 @@ check_1() { # OS preparation, containerd, pinned packages
 # Pinned value from versions.yml (single source of truth), e.g. pinned kubernetes_version -> 1.35.10-1.1
 pinned() { sed -n "s/^$1: \"\\([^\"]*\\)\".*/\\1/p" "$ROOT/ansible/group_vars/all/versions.yml"; }
 NODE_NAME="${NODE_NAME:-k8s-node}"
-# No CNI config yet (M3 installs Calico): the node is NotReady and CoreDNS Pending for that reason only.
-no_cni() { [[ -z "$(node find /etc/cni/net.d -maxdepth 1 -name '*.conf*' 2>/dev/null)" ]]; }
 
-check_2() { # kubeadm single node, schedulable control plane (node Ready + workload pods: check_3a once the CNI exists)
+check_2() { # kubeadm single node, schedulable control plane (node Ready, control-plane pods healthy; CNI details: check_3a)
   need_cluster || return 0
-  local cni=1; no_cni && cni=0
 
   # B-007: the host kubeconfig uses Lima's 127.0.0.1 forward and kubectl verifies the API server cert.
   local server insecure
@@ -104,26 +101,20 @@ check_2() { # kubeadm single node, schedulable control plane (node Ready + workl
   done
   if [[ "$(node systemctl is-active kubelet 2>&1)" == "active" ]]; then pass "kubelet is active"; else fail "kubelet is not active"; fi
 
-  # Workloads allowed: no control-plane taint; any other NoSchedule/NoExecute taint only while the CNI is missing
+  # Workloads allowed: no NoSchedule/NoExecute taint at all (control-plane taint removed, node Ready so no not-ready taint)
   local taints t bad=""; taints="$(k get node "$NODE_NAME" -o jsonpath='{range .spec.taints[*]}{.key}:{.effect}{"\n"}{end}' 2>&1)"
   while IFS= read -r t; do
     [[ -z "$t" ]] && continue
-    case "$t" in
-      node.kubernetes.io/not-ready:*) [[ $cni -eq 0 ]] || bad+="$t " ;;
-      *:NoSchedule|*:NoExecute) bad+="$t " ;;
-    esac
+    case "$t" in *:NoSchedule|*:NoExecute) bad+="$t " ;; esac
   done <<<"$taints"
-  if [[ -z "$bad" ]]; then pass "no NoSchedule/NoExecute taint blocks workloads$([[ $cni -eq 0 ]] && echo " (not-ready taint until the CNI, M3)")"
-  else fail "blocking taints: $bad"; fi
+  if [[ -z "$bad" ]]; then pass "no NoSchedule/NoExecute taint blocks workloads"; else fail "blocking taints: $bad"; fi
 
   local ready reason
   ready="$(k get node "$NODE_NAME" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>&1)"
   reason="$(k get node "$NODE_NAME" -o jsonpath='{.status.conditions[?(@.type=="Ready")].message}' 2>&1)"
-  if [[ "$ready" == "True" ]]; then pass "node Ready"
-  elif [[ $cni -eq 0 && "$reason" == *"cni plugin not initialized"* ]]; then pass "node NotReady only because no CNI is installed yet (M3, check_3a)"
-  else fail "node Ready=$ready: $reason"; fi
+  if [[ "$ready" == "True" ]]; then pass "node Ready"; else fail "node Ready=$ready: $reason"; fi
 
-  # Control plane: static pods + kube-proxy Running and Ready; CoreDNS may be Pending only while the CNI is missing
+  # Control plane: static pods + kube-proxy Running and Ready, every kube-system pod healthy
   local pods name phase pready
   pods="$(k get pods -n kube-system -o jsonpath='{range .items[*]}{.metadata.name} {.status.phase} {.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}' 2>&1)"
   for name in "etcd-$NODE_NAME" "kube-apiserver-$NODE_NAME" "kube-controller-manager-$NODE_NAME" "kube-scheduler-$NODE_NAME" "kube-proxy-"; do
@@ -132,16 +123,69 @@ check_2() { # kubeadm single node, schedulable control plane (node Ready + workl
   bad=""
   while read -r name phase pready; do
     [[ -z "$name" || ( "$phase" == "Running" && "$pready" == "True" ) ]] && continue
-    [[ $cni -eq 0 && "$name" == coredns-* && "$phase" == "Pending" ]] && continue
     bad+="$name($phase) "
   done <<<"$pods"
-  if [[ -z "$bad" ]]; then pass "all kube-system pods healthy$([[ $cni -eq 0 ]] && echo " (CoreDNS Pending until the CNI, M3)")"
+  if [[ -z "$bad" ]]; then pass "all kube-system pods healthy"
   else fail "unhealthy kube-system pods: $bad"; fi
 }
 
-check_3a() { # CNI installed and healthy (M3)
+# ip_in_cidr <ip> <a.b.c.d/len>: IPv4 membership in pure bash
+ip_in_cidr() {
+  local ip="$1" net="${2%/*}" len="${2#*/}" a b c d n i m
+  IFS=. read -r a b c d <<<"$ip"; i=$(( (a << 24) + (b << 16) + (c << 8) + d ))
+  IFS=. read -r a b c d <<<"$net"; n=$(( (a << 24) + (b << 16) + (c << 8) + d ))
+  m=$(( (0xFFFFFFFF << (32 - len)) & 0xFFFFFFFF ))
+  (( (i & m) == (n & m) ))
+}
+
+check_3a() { # CNI installed and healthy (M3): Calico via tigera-operator, node Ready, pods get pod-CIDR IPs
   need_cluster || return 0
-  skip "not implemented (M3)"
+  local cidr; cidr="$(sed -n 's/^pod_cidr:[[:space:]]*\([0-9./]*\).*/\1/p' "$ROOT/ansible/group_vars/all/main.yml")"
+  [[ -n "$cidr" ]] || { fail "pod_cidr not found in group_vars/all/main.yml"; return 0; }
+
+  local ready; ready="$(k get node "$NODE_NAME" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>&1)"
+  if [[ "$ready" == "True" ]]; then pass "node $NODE_NAME Ready"; else fail "node Ready=$ready"; fi
+
+  local comp avail
+  for comp in calico ippools apiserver tiers; do
+    avail="$(k get tigerastatus "$comp" -o jsonpath='{.status.conditions[?(@.type=="Available")].status}' 2>&1)"
+    if [[ "$avail" == "True" ]]; then pass "tigerastatus $comp Available"; else fail "tigerastatus $comp Available='$avail'"; fi
+  done
+
+  local ds; ds="$(k get daemonsets calico-node -n calico-system -o jsonpath='{.status.desiredNumberScheduled} {.status.numberReady}' 2>&1)"
+  if [[ "$ds" =~ ^([1-9][0-9]*)\ \1$ ]]; then pass "calico-node DaemonSet fully ready (desired ready: $ds)"; else fail "calico-node desired/ready: $ds"; fi
+  if [[ -n "$(node find /etc/cni/net.d -maxdepth 1 -name '*calico*' 2>/dev/null)" ]]; then pass "Calico CNI config present in /etc/cni/net.d"; else fail "no Calico CNI config in /etc/cni/net.d"; fi
+
+  local pools; pools="$(k get ippools.crd.projectcalico.org -o jsonpath='{range .items[*]}{.spec.cidr}{"\n"}{end}' 2>&1)"
+  if [[ "$pools" == "$cidr" ]]; then pass "the only Calico IPPool is $cidr"; else fail "IPPool CIDRs: $(tr '\n' ' ' <<<"$pools") (want $cidr)"; fi
+
+  # CoreDNS is the always-present pod that needs the CNI: Ready, with an IP from the pod CIDR
+  local dns name phase pready ip bad="" n=0
+  dns="$(k get pods -n kube-system -l k8s-app=kube-dns -o jsonpath='{range .items[*]}{.metadata.name} {.status.phase} {.status.conditions[?(@.type=="Ready")].status} {.status.podIP}{"\n"}{end}' 2>&1)"
+  while read -r name phase pready ip; do
+    [[ -z "$name" ]] && continue
+    n=$((n + 1))
+    [[ "$phase" == "Running" && "$pready" == "True" ]] || bad+="$name(not Ready) "
+    ip_in_cidr "$ip" "$cidr" 2>/dev/null || bad+="$name(IP '$ip' outside $cidr) "
+  done <<<"$dns"
+  if [[ $n -gt 0 && -z "$bad" ]]; then pass "$n CoreDNS pod(s) Ready with IPs inside $cidr"; else fail "CoreDNS: ${bad:-no pods}"; fi
+
+  local ns_label; ns_label="$(k get namespaces calico-system -o jsonpath='{.metadata.labels.pod-security\.kubernetes\.io/enforce}' 2>&1)"
+  if [[ "$ns_label" == "privileged" ]]; then pass "calico-system PSA enforce=privileged (platform namespace)"; else fail "calico-system PSA enforce='$ns_label'"; fi
+  local mode
+  for mode in audit warn; do
+    ns_label="$(k get namespaces calico-system -o jsonpath="{.metadata.labels.pod-security\\.kubernetes\\.io/$mode}" 2>&1)"
+    if [[ "$ns_label" == "privileged" ]]; then pass "calico-system PSA $mode=privileged"; else fail "calico-system PSA $mode='$ns_label'"; fi
+  done
+
+  # Every Calico pod and the operator declare CPU+memory requests (not BestEffort)
+  local noreq="" ns pods
+  for ns in calico-system tigera-operator; do
+    pods="$(k get pods -n "$ns" -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.status.qosClass}{"\n"}{end}' 2>&1)"
+    [[ -n "$pods" ]] || noreq+="$ns(no pods) "
+    noreq+="$(awk 'NF && $2 == "BestEffort" {printf "%s ", $1}' <<<"$pods")"
+  done
+  if [[ -z "$noreq" ]]; then pass "Calico and tigera-operator pods have resource requests"; else fail "BestEffort/missing pods: $noreq"; fi
 }
 
 check_3b() { # app pods accept only the traffic they need: NetworkPolicies in app namespaces (M9)

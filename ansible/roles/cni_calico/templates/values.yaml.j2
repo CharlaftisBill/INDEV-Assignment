@@ -1,0 +1,52 @@
+# Goldmane flow aggregator and Whisker UI are not needed (observability only): fewer pods and images.
+# The Calico API server stays: operator 1.44's "tiers" TigeraStatus stays Degraded without it.
+apiServer:
+  enabled: true
+  apiServerDeployment:
+    spec:
+      template:
+        spec:
+          containers:
+            - name: calico-apiserver
+              resources: {{ cni_calico_resources.apiserver | to_json }}
+goldmane:
+  enabled: false
+whisker:
+  enabled: false
+resources: {{ cni_calico_resources.operator | to_json }}
+installation:
+  # Replicas of every HA control-plane component (Typha, kube-controllers, apiserver); one node needs 1, default is 2.
+  controlPlaneReplicas: 1
+  calicoNodeDaemonSet:
+    spec:
+      template:
+        spec:
+          containers:
+            - name: calico-node
+              resources: {{ cni_calico_resources.node | to_json }}
+  typhaDeployment:
+    spec:
+      template:
+        spec:
+          containers:
+            - name: calico-typha
+              resources: {{ cni_calico_resources.typha | to_json }}
+  calicoKubeControllersDeployment:
+    spec:
+      template:
+        spec:
+          containers:
+            - name: calico-kube-controllers
+              resources: {{ cni_calico_resources.kube_controllers | to_json }}
+  cni:
+    type: Calico
+    binDir: {{ cni_calico_bin_dir }}
+  calicoNetwork:
+    bgp: Disabled
+    ipPools:
+      - cidr: {{ pod_cidr }}
+        encapsulation: {{ cni_calico_encapsulation }}
+        natOutgoing: Enabled
+        nodeSelector: all()
+    nodeAddressAutodetectionV4:
+      interface: "^{{ cni_calico_interface }}$"
