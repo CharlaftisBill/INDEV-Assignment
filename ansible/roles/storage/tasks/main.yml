@@ -1,0 +1,61 @@
+---
+# local-path-provisioner as the cluster's only default StorageClass (req 5).
+- name: Create the node data directory for local-path volumes
+  ansible.builtin.file:
+    path: "{{ storage_data_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Apply the local-path-provisioner manifests
+  kubernetes.core.k8s:
+    kubeconfig: "{{ storage_kubeconfig }}"
+    state: present
+    template: "{{ item }}"
+  loop:
+    - namespace.yaml.j2
+    - rbac.yaml.j2
+    - configmap.yaml.j2
+    - deployment.yaml.j2
+    - storageclass.yaml.j2
+
+# No wait_condition: a custom condition bypasses the Deployment rollout check (observedGeneration, updatedReplicas).
+- name: Wait for the provisioner Deployment rollout to complete
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ storage_kubeconfig }}"
+    api_version: apps/v1
+    kind: Deployment
+    name: local-path-provisioner
+    namespace: "{{ storage_namespace }}"
+    wait: true
+    wait_timeout: "{{ storage_wait_timeout }}"
+  changed_when: false
+
+- name: List StorageClasses
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ storage_kubeconfig }}"
+    api_version: storage.k8s.io/v1
+    kind: StorageClass
+  register: storage_classes
+  changed_when: false
+
+# Two defaults make PVCs without a class ambiguous; fail instead of silently picking one.
+- name: Assert local-path is the only default StorageClass
+  ansible.builtin.assert:
+    that:
+      - storage_default_classes == [storage_class_name]
+    fail_msg: "Default StorageClasses: {{ storage_default_classes }}, want only {{ storage_class_name }}"
+    quiet: true
+  vars:
+    storage_default_classes: >-
+      {%- set found = namespace(names=[]) -%}
+      {%- for sc in storage_classes.resources -%}
+      {%- set ann = sc.metadata.annotations | default({}) -%}
+      {%- set flags = [ann['storageclass.kubernetes.io/is-default-class'] | default(''),
+          ann['storageclass.beta.kubernetes.io/is-default-class'] | default('')] -%}
+      {%- if 'true' in flags -%}
+      {%- set found.names = found.names + [sc.metadata.name] -%}
+      {%- endif -%}
+      {%- endfor -%}
+      {{ found.names }}

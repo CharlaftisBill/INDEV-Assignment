@@ -54,8 +54,13 @@ calico_image_digests:  # docker buildx imagetools inspect quay.io/<key>:v3.33.0 
   calico/node: "sha256:565d8db3200e443955557f8f28ff44ab8a4a456754bc74a19c4f2f3444af9b1c"
   calico/third-party-cni-plugins: "sha256:0f32f48279484c0d6f0e0d0e767b2d0e1a6c6ca34cb3421a61b989d992f3df41"
 
-# M4  storage
-#   local_path_provisioner_version:
+# M4  storage (images have linux/arm64; digests are the multi-arch index digests)
+# Newest release >= 2 weeks old: v0.0.37 (2026-08-05).
+local_path_provisioner_version: "v0.0.37"  # gh release list rancher/local-path-provisioner, 2026-11-18
+local_path_provisioner_digest: "sha256:e757967a5ec338f6a9b371c5a9688bedaa8c3578ea3dd4db329ea0084be0a86f"  # imagetools inspect, 2026-11-18
+# helperPod image: upstream uses unpinned `busybox`; also the verify test pod. 1.38.0 pushed 2026-10-28.
+local_path_helper_version: "1.38.0"  # hub.docker.com library/busybox tags, 2026-11-18
+local_path_helper_digest: "sha256:a46257e06c82ad85242d0d38077d0a52d9896389ca60a1a59d3463db586e5fa4"  # imagetools inspect (arm64 present), 2026-11-18
 #
 # M5  pki + ingress
 #   cert_manager_version:          # chart

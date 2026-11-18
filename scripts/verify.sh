@@ -220,9 +220,144 @@ check_4() { # Ingress + internal CA TLS + auto renewal
   skip "not implemented (M5)"
 }
 
-check_5() { # default StorageClass
+VERIFY_NS=verify-tmp
+VERIFY_NS_CREATED=0
+# B-034: a namespace deleted by an earlier check or run stays Terminating for a few seconds; creating objects in it fails.
+wait_verify_ns_gone() {
+  if [[ "$(k get namespaces "$VERIFY_NS" -o jsonpath='{.status.phase}' 2>/dev/null)" == "Terminating" ]]; then
+    k wait --for=delete "namespace/$VERIFY_NS" --timeout=120s >/dev/null 2>&1
+  fi
+}
+cleanup_5() {
+  k delete pod verify-storage -n "$VERIFY_NS" --ignore-not-found --wait=false >/dev/null 2>&1
+  k delete pvc verify-storage -n "$VERIFY_NS" --ignore-not-found --wait=false >/dev/null 2>&1
+  if [[ "$VERIFY_NS_CREATED" == 1 ]]; then k delete namespace "$VERIFY_NS" --ignore-not-found --wait=false >/dev/null 2>&1; fi
+}
+
+check_5() { # default StorageClass: local-path-provisioner, dynamic PVC for a non-root pod, volume cleaned on delete (M4)
   need_cluster || return 0
-  skip "not implemented (M4)"
+  local vy="$ROOT/ansible/group_vars/all/versions.yml" role="$ROOT/ansible/roles/storage/defaults/main.yml"
+  local sc_name sc_prov data_dir ns
+  sc_name="$(sed -n 's/^storage_class_name:[[:space:]]*\([a-z-]*\).*/\1/p' "$role")"
+  sc_prov="$(sed -n 's/^storage_provisioner_name:[[:space:]]*\([a-z./-]*\).*/\1/p' "$role")"
+  data_dir="$(sed -n 's/^storage_data_dir:[[:space:]]*\(\/[a-z0-9\/_-]*\).*/\1/p' "$role")"
+  ns="$(sed -n 's/^ns_storage:[[:space:]]*\([a-z-]*\).*/\1/p' "$ROOT/ansible/group_vars/all/main.yml")"
+  if [[ -z "$sc_name" || -z "$sc_prov" || -z "$data_dir" || -z "$ns" ]]; then fail "storage role defaults / ns_storage not found"; return 0; fi
+
+  # Exactly one default class, ours, with the expected behaviour
+  local defaults; defaults="$(k get storageclasses -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.metadata.annotations.storageclass\.kubernetes\.io/is-default-class}{"\n"}{end}' 2>&1 | awk '$2 == "true" {print $1}')"
+  if [[ "$defaults" == "$sc_name" ]]; then pass "$sc_name is the only default StorageClass"; else fail "default StorageClasses: '$(tr '\n' ' ' <<<"$defaults")' (want only $sc_name)"; fi
+  local sc; sc="$(k get storageclasses "$sc_name" -o jsonpath='{.provisioner} {.volumeBindingMode} {.reclaimPolicy}' 2>&1)"
+  if [[ "$sc" == "$sc_prov WaitForFirstConsumer Delete" ]]; then pass "$sc_name: provisioner $sc_prov, WaitForFirstConsumer, reclaimPolicy Delete"; else fail "$sc_name spec: $sc"; fi
+
+  # Provisioner: ready, image by pinned digest, requests set, namespace PSA labels
+  local ready; ready="$(k get deployments local-path-provisioner -n "$ns" -o jsonpath='{.spec.replicas} {.status.readyReplicas}' 2>&1)"
+  if [[ "$ready" =~ ^([1-9][0-9]*)\ \1$ ]]; then pass "provisioner Deployment ready ($ready)"; else fail "provisioner replicas/ready: $ready"; fi
+  local want_img got_img
+  want_img="docker.io/rancher/local-path-provisioner:$(pinned local_path_provisioner_version)@$(pinned local_path_provisioner_digest)"
+  got_img="$(k get deployments local-path-provisioner -n "$ns" -o jsonpath='{.spec.template.spec.containers[0].image}' 2>&1)"
+  if [[ "$got_img" == "$want_img" ]]; then pass "provisioner image is the pinned tag@digest"; else fail "provisioner image '$got_img' (want $want_img)"; fi
+  local pod_info; pod_info="$(k get pods -n "$ns" -l app=local-path-provisioner -o jsonpath='{range .items[*]}{.status.qosClass} {.status.containerStatuses[0].imageID}{"\n"}{end}' 2>&1)"
+  if [[ -n "$pod_info" ]] && ! grep -q '^BestEffort' <<<"$pod_info" && ! grep -qv "@$(pinned local_path_provisioner_digest)\$" <<<"$pod_info"; then
+    pass "provisioner pod has requests (not BestEffort) and runs the pinned digest (imageID)"
+  else fail "provisioner pod: ${pod_info:-no pods}"; fi
+  local mode label
+  for mode in enforce audit warn; do
+    label="$(k get namespaces "$ns" -o jsonpath="{.metadata.labels.pod-security\\.kubernetes\\.io/$mode}" 2>&1)"
+    if [[ "$label" == "privileged" ]]; then pass "$ns PSA $mode=privileged (platform namespace: helper pods use hostPath)"; else fail "$ns PSA $mode='$label'"; fi
+  done
+
+  # The helper pod that creates/removes volume directories must use the pinned busybox, not `busybox`
+  local helper; helper="$(k get configmaps local-path-config -n "$ns" -o jsonpath='{.data.helperPod\.yaml}' 2>&1)"
+  if grep -q "image: docker.io/library/busybox:$(pinned local_path_helper_version)@$(pinned local_path_helper_digest)\$" <<<"$helper"; then pass "helperPod image is pinned by tag@digest"
+  else fail "helperPod image not the pinned busybox: $(grep 'image:' <<<"$helper")"; fi
+
+  # End to end: PVC without storageClassName + PSA-restricted non-root pod writes a file
+  local img; img="docker.io/library/busybox:$(pinned local_path_helper_version)@$(pinned local_path_helper_digest)"
+  wait_verify_ns_gone
+  if ! k get namespaces "$VERIFY_NS" >/dev/null 2>&1; then VERIFY_NS_CREATED=1; fi
+  trap cleanup_5 EXIT
+  local out
+  out="$(k apply -f - 2>&1 <<MANIFEST
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: $VERIFY_NS
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: verify-storage
+  namespace: $VERIFY_NS
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 64Mi
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: verify-storage
+  namespace: $VERIFY_NS
+spec:
+  terminationGracePeriodSeconds: 0
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: t
+      image: $img
+      command: [sh, -c, "mkdir -p /data/sub && echo verify-ok > /data/sub/f && sleep 3600"]
+      resources:
+        requests: {cpu: 10m, memory: 8Mi}
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: [ALL]
+      volumeMounts:
+        - {name: data, mountPath: /data}
+  volumes:
+    - name: data
+      persistentVolumeClaim:
+        claimName: verify-storage
+MANIFEST
+)"
+  if [[ $? -ne 0 ]]; then fail "could not create the test PVC/pod in $VERIFY_NS: $out"; cleanup_5; trap - EXIT; return 0; fi
+
+  if k wait --for=condition=Ready pod/verify-storage -n "$VERIFY_NS" --timeout=180s >/dev/null 2>&1; then pass "non-root pod using a PVC without storageClassName became Ready"
+  else
+    fail "test pod not Ready: $(k get pods verify-storage -n "$VERIFY_NS" -o jsonpath='{.status.phase} {.status.containerStatuses[0].state}' 2>&1)"
+    cleanup_5; trap - EXIT; return 0
+  fi
+  local pvc; pvc="$(k get pvc verify-storage -n "$VERIFY_NS" -o jsonpath='{.status.phase} {.spec.storageClassName} {.spec.volumeName}' 2>&1)"
+  local phase pv_sc pv; read -r phase pv_sc pv <<<"$pvc"
+  if [[ "$phase" == "Bound" && "$pv_sc" == "$sc_name" ]]; then pass "PVC Bound with the default class ($pv_sc)"; else fail "PVC: $pvc"; fi
+  if [[ "$(k exec -n "$VERIFY_NS" verify-storage -- cat /data/sub/f 2>&1)" == "verify-ok" ]]; then pass "file written by the non-root pod reads back"; else fail "could not read /data/sub/f from the pod"; fi
+
+  local hostdir; hostdir="$(k get pv "$pv" -o jsonpath='{.spec.hostPath.path}' 2>&1)"
+  if [[ "$hostdir" == "$data_dir"/* ]] && node test -f "$hostdir/sub/f"; then pass "volume data is on the node under $data_dir"; else fail "PV path '$hostdir' not under $data_dir or file missing"; fi
+
+  # Teardown removes root-owned-parent dirs holding files owned by UID 1000 (needs the helper's DAC_OVERRIDE)
+  k delete pod verify-storage -n "$VERIFY_NS" --wait=true --timeout=60s >/dev/null 2>&1
+  k delete pvc verify-storage -n "$VERIFY_NS" --wait=true --timeout=60s >/dev/null 2>&1
+  local i gone=0
+  for i in $(seq 1 30); do
+    if ! k get pv "$pv" >/dev/null 2>&1; then gone=1; break; fi; sleep 2
+  done
+  if [[ $gone == 1 ]]; then pass "PV $pv deleted after the PVC (reclaimPolicy Delete)"; else fail "PV $pv still present 60s after PVC deletion"; fi
+  gone=0
+  for i in $(seq 1 15); do
+    if node test ! -e "$hostdir"; then gone=1; break; fi; sleep 2
+  done
+  if [[ $gone == 1 ]]; then pass "volume directory removed from the node (non-root-owned files deleted)"; else fail "$hostdir still on the node"; fi
+  cleanup_5; trap - EXIT
 }
 
 check_6() { # Prometheus, Grafana, node + etcd alerts in Alertmanager

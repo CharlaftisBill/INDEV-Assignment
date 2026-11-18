@@ -1,0 +1,14 @@
+---
+# Kubernetes modules run on the node with admin.conf (python3-kubernetes from the kubeadm role).
+storage_kubeconfig: /etc/kubernetes/admin.conf
+storage_namespace: "{{ ns_storage }}"
+storage_class_name: local-path
+storage_provisioner_name: rancher.io/local-path
+# Node directory backing every PVC (hostPath); lives on the VM disk.
+storage_data_dir: /opt/local-path-provisioner
+storage_wait_timeout: 300
+
+# Requests only: limits could OOM-kill the provisioner or a helper pod mid-teardown.
+storage_resources:
+  provisioner: {requests: {cpu: 10m, memory: 32Mi}}
+  helper: {requests: {cpu: 10m, memory: 16Mi}}

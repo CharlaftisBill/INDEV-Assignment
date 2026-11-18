@@ -54,7 +54,8 @@ Filled from `ansible/group_vars/all/versions.yml` as milestones land.
 | python3-kubernetes | 30.1.0-2 | Debian trixie, held; `kubernetes.core` modules run on the VM (not the Mac) with the node's admin.conf |
 | Helm | v4.3.1 (sha256 pinned) | get.helm.sh, `/opt/helm/<version>` |
 | Calico (tigera-operator + CRDs charts) | v3.33.0 (operator v1.44.0) | docs.tigera.io/calico/charts; supports Kubernetes 1.35-1.37; all images pinned by index digest in `versions.yml` ([ADR 0002](decisions/0002-calico-cni.md)) |
-| local-path-provisioner | — | M4 |
+| local-path-provisioner | v0.0.37 (`sha256:e757967a…0a86f`) | own templates mirroring upstream `deploy/local-path-storage.yaml` ([ADR 0004](decisions/0004-local-path-storage.md)); image pinned tag@digest |
+| busybox | 1.38.0 (`sha256:a46257e0…e5fa4`) | helper pod and `check_5` test pod; arm64 digest pinned |
 | cert-manager | — | M5 |
 | Traefik | — | M5 |
 | kube-prometheus-stack | — | M6 |
