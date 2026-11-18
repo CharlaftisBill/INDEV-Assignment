@@ -186,6 +186,28 @@ check_3a() { # CNI installed and healthy (M3): Calico via tigera-operator, node 
     noreq+="$(awk 'NF && $2 == "BestEffort" {printf "%s ", $1}' <<<"$pods")"
   done
   if [[ -z "$noreq" ]]; then pass "Calico and tigera-operator pods have resource requests"; else fail "BestEffort/missing pods: $noreq"; fi
+
+  # Privileged host-root images run by pinned digest only: spec image and running imageID both match versions.yml
+  local vy="$ROOT/ansible/group_vars/all/versions.yml" digests unpinned="" cname img id d n=0
+  digests="$(grep -E '^(calico_operator_digest:|  calico/[a-z0-9-]+:)' "$vy" | grep -o 'sha256:[0-9a-f]\{64\}')"
+  if [[ -z "$digests" ]]; then fail "no Calico image digests in versions.yml"; else
+    local pod
+    for ns in calico-system tigera-operator; do
+      for pod in $(k get pods -n "$ns" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null); do
+        while read -r cname img id; do
+          [[ -z "$cname" ]] && continue
+          n=$((n + 1))
+          d="${img##*@}"
+          if [[ "$img" != *@sha256:* ]] || ! grep -qx "$d" <<<"$digests" || [[ "${id##*@}" != "$d" ]]; then unpinned+="$pod/$cname "; fi
+        done < <(k get pods "$pod" -n "$ns" -o jsonpath='{range .spec.containers[*]}S {.name} {.image}{"\n"}{end}{range .spec.initContainers[*]}S {.name} {.image}{"\n"}{end}{range .status.containerStatuses[*]}I {.name} {.imageID}{"\n"}{end}{range .status.initContainerStatuses[*]}I {.name} {.imageID}{"\n"}{end}' 2>&1 \
+          | awk '$1 == "S" {img[$2] = $3; order[++m] = $2} $1 == "I" {id[$2] = $3} END {for (i = 1; i <= m; i++) print order[i], img[order[i]], id[order[i]]}')
+      done
+    done
+    if [[ $n -gt 0 && -z "$unpinned" ]]; then pass "all $n Calico/operator containers run by pinned digest (spec image and imageID)"
+    else fail "not digest-pinned (n=$n): ${unpinned:-no containers}"; fi
+  fi
+  local is; is="$(k get imagesets "calico-$(sed -n 's/^calico_chart_version:[[:space:]]*"\([^"]*\)".*/\1/p' "$vy")" -o name 2>&1)"
+  if [[ "$is" == imageset* ]]; then pass "ImageSet $is exists"; else fail "ImageSet missing: $is"; fi
 }
 
 check_3b() { # app pods accept only the traffic they need: NetworkPolicies in app namespaces (M9)

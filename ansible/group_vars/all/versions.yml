@@ -45,6 +45,14 @@ helm_checksums:                                 # get.helm.sh/helm-v4.3.1-linux-
 # M3  cni_calico (Calico 3.33 supports Kubernetes 1.35-1.37; operator images are multi-arch incl. arm64)
 # Newest release >= 2 weeks old: v3.33.0 (2026-10-01); v3.33.1 is 2026-11-16, 2 days old.
 calico_chart_version: "v3.33.0"  # helm search repo calico/tigera-operator (docs.tigera.io/calico/charts) + gh release list projectcalico/calico, 2026-11-18
+# Operator image shipped by chart v3.33.0 (values.yaml tigeraOperator.version); pinned by index digest (has linux/arm64).
+calico_operator_version: "v1.44.0"  # helm show values tigera-operator v3.33.0, 2026-11-18
+calico_operator_digest: "sha256:066c2e8d67452903a516fa54aabc22a604ec911b5882467b4de550d10fa8b21e"  # imagetools inspect quay.io/tigera/operator, 2026-11-18
+# ImageSet entries (operator image keys) for the Calico images it deploys for our config; multi-arch index digests of quay.io/<key>:v3.33.0.
+calico_image_digests:  # docker buildx imagetools inspect quay.io/<key>:v3.33.0 (amd64+arm64 present), 2026-11-18
+  calico/calico: "sha256:4ebc20730127bc9e8bf1db5f5a2d8b58cf37fe0e891b3c7b5471992221d213e5"
+  calico/node: "sha256:565d8db3200e443955557f8f28ff44ab8a4a456754bc74a19c4f2f3444af9b1c"
+  calico/third-party-cni-plugins: "sha256:0f32f48279484c0d6f0e0d0e767b2d0e1a6c6ca34cb3421a61b989d992f3df41"
 
 # M4  storage
 #   local_path_provisioner_version:

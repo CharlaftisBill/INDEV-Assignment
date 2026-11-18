@@ -59,6 +59,14 @@
     | map(attribute='metadata.name') | list }}"
   changed_when: false
 
+# The ImageSet name must equal the Calico release the operator ships; with it the operator pulls images by digest only.
+# Applied before the chart so the Installation never reconciles by tag.
+- name: Pin the Calico images by digest with an ImageSet
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cni_calico_kubeconfig }}"
+    state: present
+    template: imageset.yaml.j2
+
 - name: Install the tigera-operator chart
   kubernetes.core.helm:
     kubeconfig: "{{ cni_calico_kubeconfig }}"
