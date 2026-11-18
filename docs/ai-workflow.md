@@ -114,3 +114,5 @@ per project: the plugin stays available elsewhere.
   unrelated extensions, de-duplicated prompts; details in [Cost settings](#cost-settings). The user chose Sonnet for `ansible-engineer`.
 - **Branch workflow (2026-11-18)**: the user asked for a branch per milestone and per bug, landed by GitHub PR
   ([Git workflow](#git-workflow)); every bug gets its own branch, even mid-milestone. `pre-commit` hook added.
+- B-020 (round 5 leftover) fixed on `fix/b-020-make-allow-rules` with the user's choice: exact make allows + Makefile
+  variable whitelist; security-reviewer confirmed, 2 Lows reported (residuals in ADR 0009).
