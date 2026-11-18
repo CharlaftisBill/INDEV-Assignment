@@ -5,16 +5,31 @@
 #   - one comment per entry: where the version was looked up and when
 #   - images must publish an arm64 manifest
 #
-# Entries are added milestone by milestone. Planned keys:
+# Entries are added milestone by milestone; commented keys are planned.
 #
-# M1  os_prep / containerd
-#   containerd_version:            # apt (Debian trixie)
-#   runc_version:                  # apt
-#   cri_tools_version:             # pkgs.k8s.io
-#
+# Lima base image (used by lima/k8s.yaml, which holds the URL + sha512 digest)
+debian_image_build: "20261103-2651"  # cloud.debian.org/images/cloud/trixie/ dated dirs + SHA512SUMS, 2026-11-18
+
+# M1  os_prep / containerd (Debian trixie apt, held with dpkg_selections)
+# apt-transport-https is a transitional dummy in apt 3.x (https is built in), so it is not installed.
+os_base_packages:
+  ca-certificates: "20250419+deb13u1"  # apt-cache madison (trixie-security), 2026-11-18
+  curl: "8.14.1-2+deb13u7"             # apt-cache madison (trixie-security); backports 8.21 skipped, 2026-11-18
+  gpg: "2.4.7-21+deb13u1+b5"           # apt-cache madison (trixie), 2026-11-18
+  conntrack: "1:1.4.8-2+b1"            # apt-cache madison (trixie), kubeadm preflight, 2026-11-18
+  socat: "1.8.0.3-1+deb13u1"           # apt-cache madison (trixie), kubeadm preflight, 2026-11-18
+  ebtables: "2.0.11-6+b2"              # apt-cache madison (trixie), kubeadm preflight, 2026-11-18
+  iptables: "1.8.11-2"                 # apt-cache madison (trixie), kubeadm preflight, 2026-11-18
+  ethtool: "1:6.14.2-1"                # apt-cache madison (trixie), kubeadm preflight, 2026-11-18
+  iproute2: "6.15.0-1"                 # apt-cache madison (trixie), kubeadm preflight (ip, tc), 2026-11-18
+containerd_version: "1.7.24~ds1-6+deb13u1"  # apt-cache madison (trixie + trixie-security), 2026-11-18
+runc_version: "1.1.15+ds1-2+b4"             # apt-cache madison (trixie), 2026-11-18
+# cri-tools (crictl) comes from pkgs.k8s.io with kubeadm: M2 (cri_tools_version)
+
 # M2  kubeadm
 #   kubernetes_minor:              # e.g. "v1.xx" (pkgs.k8s.io repo path)
 #   kubernetes_version:            # kubelet/kubeadm/kubectl apt version
+#   cri_tools_version:             # pkgs.k8s.io, crictl
 #   helm_version:                  # binary release
 #
 # M3  cni_calico

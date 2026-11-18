@@ -23,9 +23,9 @@
 - name: Build the single-node cluster
   hosts: k8s
   gather_facts: true
-  roles: []
+  roles:
+    - { role: os_prep, tags: [os_prep] }
   # Planned order (uncommented as each milestone lands):
-  #   - { role: os_prep,         tags: [os_prep] }
   #   - { role: containerd,      tags: [containerd] }
   #   - { role: kubeadm,         tags: [kubeadm] }
   #   - { role: cni_calico,      tags: [cni_calico] }
