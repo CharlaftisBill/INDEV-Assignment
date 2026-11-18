@@ -3,7 +3,7 @@
 Live project state and bug tracker. Agents read this first and update it last (protocol in `CLAUDE.md`).
 
 ## Status
-Current milestone: **M1 — VM up + os_prep + containerd** · Last verified: — (no cluster yet) · Last SRE review: working tree (94e16a0+) 2026-11-18 — B-021 round 2: 1 new bug
+Current milestone: **M1 — VM up + os_prep + containerd** · Last verified: — (no cluster yet) · Last SRE review: 2423837 2026-11-18 — clean (B-022 re-check)
 
 ## Milestones
 - [x] M0 Scaffolding: repo layout, agentic layer (`.claude/`), Makefile, lint configs, Lima config, docs skeleton, commit tooling (`split-commits` skill, `.githooks/commit-msg`)
