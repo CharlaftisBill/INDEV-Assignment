@@ -69,6 +69,7 @@ for each bug are in [Bug details](#bug-details) below.
 - The Lima base image is the dated Debian trixie cloud build `20261103-2651` (sha512-pinned in `lima/k8s.yaml`).
 - M1 pins every apt package the roles install explicitly (`os_base_packages`, containerd, runc) and holds them; transitive dependencies are not pinned. `apt-transport-https` is skipped (transitional dummy, https is built into apt 3.x). Debian only keeps the current point-release version, so a pin can break `apt install` after a point release: bump it via `pin-version`.
 - Debian trixie ships containerd 1.7.24 (config schema `version = 2`, CRI plugin `io.containerd.grpc.v1.cri`), not 2.x. The pause image stays containerd's default (`pause:3.8`); M2 aligns it with kubeadm's if preflight warns.
+- **Accepted risk (user, 2026-11-18, B-026):** runc stays Debian trixie's `1.1.15` (EOL upstream, no fix for the Nov-2025 container-escape CVEs 2025-31133/52565/52881; trixie has no newer build). Reason: single-user local VM running only our own workloads, which are PSA `restricted`. Revisit if trixie-security ships a fixed runc, or before any shared/production use.
 
 ## Bug details
 
