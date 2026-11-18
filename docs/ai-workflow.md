@@ -20,13 +20,29 @@ The detailed evidence trail of what was found and fixed is the bug table in [TOD
 | Skill: `fix-next-bug` | `.claude/skills/` | Picks the next Open bug **in scope** (current or earlier milestone; later ones are deferred), ordered `[sec]` → Sev Critical → Sev High → rest, oldest first, reproduces it, fixes the root cause via the right agent, verifies, marks it Solved |
 | Skill: `split-commits` | `.claude/skills/` | Groups uncommitted work into focused Conventional Commits, fills bug hashes in `TODO.md`, never adds AI attribution |
 | Git hook: `commit-msg` | `.githooks/commit-msg` | Enforces Conventional Commit subjects (≤ 72 chars) and rejects `Co-Authored-By: Claude` / "Generated with Claude Code" |
+| Git hook: `pre-commit` | `.githooks/pre-commit` | Rejects commits on `main` or a detached HEAD ([Git workflow](#git-workflow)) |
 | Hook: lint on edit | `.claude/hooks/lint-changed.sh` | yamllint + ansible-lint on every YAML file the agent writes; errors go back to the agent |
-| Permissions | `.claude/settings.json` | Read-only checks allowed; VM deletion, commits, pushes, sudo need approval; `kubectl get` auto-allowed only for listed resource kinds (Secrets prompt in any spelling); commands near secrets (`--raw`, node PKI, CA-key directory) prompt; reading the secret files themselves (CA key, kubeconfigs, etcd snapshots, node keys, `config view --raw`) is hard-denied; best effort, see [ADR 0009](decisions/0009-agent-permissions-guardrail.md) |
+| Permissions | `.claude/settings.json` | Read-only checks allowed; VM deletion, commits, merges, pushes, PRs, sudo need approval; `kubectl get` auto-allowed only for listed resource kinds (Secrets prompt in any spelling); commands near secrets (`--raw`, node PKI, CA-key directory) prompt; reading the secret files themselves (CA key, kubeconfigs, etcd snapshots, node keys, `config view --raw`) is hard-denied; best effort, see [ADR 0009](decisions/0009-agent-permissions-guardrail.md) |
 
 ### Why split it this way
 - **Separation of duties**: the agent that writes the code is not the one that declares it working. The verifier and reviewer can only open bugs; the engineer solves them.
 - **Small context per task**: each agent gets one role or one requirement, not the whole project.
 - **Guardrails over trust**: pinning and idempotency are rules in `CLAUDE.md` *and* checked (`make idempotency`, the pin-version skill); destructive commands need a human yes.
+
+## Git workflow
+Every milestone and every bug lands on its own branch; nothing is committed on `main`.
+
+| Work | Branch | Cut from | Lands by |
+|---|---|---|---|
+| Milestone | `feat/m<n>-<slug>` | `main` | PR to `main` |
+| Bug in code already on `main` | `fix/b-nnn-<slug>` | `main` | PR to `main` (an open milestone branch then merges `main`) |
+| Bug in code only on a milestone branch | `fix/b-nnn-<slug>` | that milestone branch | `git merge --no-ff` into it |
+| Other tooling/docs | `chore/<slug>` | `main` | PR to `main` |
+
+- Agents work on the current branch; only the main session (skills `milestone`, `fix-next-bug`, `split-commits`) creates,
+  merges and pushes branches, each step with the user's approval.
+- The user merges PRs with **Create a merge commit**: squash/rebase would change the hashes `TODO.md` records for solved bugs.
+- Reviews default to the branch diff (`main...HEAD` + uncommitted).
 
 ## Cost settings
 Goal: spend premium models and deep reasoning only where judgment matters. Source of truth is the frontmatter in
@@ -96,3 +112,5 @@ per project: the plugin stays available elsewhere.
   The user also asked mid-loop to fix the unreadable bug table, which became the compact table + `## Bug details` format.
 - **Cost pass (2026-11-18)**: the user asked for a leaner agent setup. Per-agent model/effort, diff-scoped reviews, disabled
   unrelated extensions, de-duplicated prompts; details in [Cost settings](#cost-settings). The user chose Sonnet for `ansible-engineer`.
+- **Branch workflow (2026-11-18)**: the user asked for a branch per milestone and per bug, landed by GitHub PR
+  ([Git workflow](#git-workflow)); every bug gets its own branch, even mid-milestone. `pre-commit` hook added.
