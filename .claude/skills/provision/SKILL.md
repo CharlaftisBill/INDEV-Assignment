@@ -10,11 +10,11 @@ effort: low
    - `make check` (syntax) and `make lint`. Fix lint errors first.
    - VM running (`limactl list`), collections installed (`ls ansible/collections/ansible_collections` — else `make collections`).
 2. Apply
-   - One role: `make provision TAGS=<role>`; several: `TAGS=a,b`; everything: `make provision`.
+   - One role: `make provision TAGS=<role>`; several: one call per role, in `site.yml` order; everything: `make provision`.
    - Extra flags through `ANSIBLE_ARGS`, e.g. `ANSIBLE_ARGS="--diff"`, `ANSIBLE_ARGS="-vv"`, `ANSIBLE_ARGS="--check --diff"`.
    - Long runs (helm installs, model download) can exceed 2 minutes: run them in the background and wait for completion.
 3. Idempotency
-   - `make idempotency TAGS=<same tags>` must end in `changed=0 unreachable=0 failed=0`.
+   - `make idempotency TAGS=<role>` (per role, as above) must end in `changed=0 unreachable=0 failed=0`.
    - If something reports `changed` on the second run, find the task (look for `changed:` lines) and fix it:
      missing `creates:`/`changed_when:`, templating that renders non-deterministically, `helm` values drift,
      `k8s` objects with server-defaulted fields in the manifest.

@@ -22,7 +22,7 @@ It returns after lint, provision and idempotency pass.
 
 ## 2. Verify
 Delegate to the **k8s-verifier** agent with the requirement IDs this milestone delivers (as listed on its line in `TODO.md`,
-including sub-IDs such as `8c`) in **strict** mode: `make verify REQ="<ids>" STRICT=1`. A SKIP is a failure here.
+including sub-IDs such as `8c`) in **strict** mode: `make verify REQ=<id> STRICT=1` for each ID in the set. A SKIP is a failure here.
 - If it opened bugs → fix each with **fix-next-bug** (own `fix/b-nnn-*` branch, merged back into this one), then verify again. Max 3 loops; after that stop and ask the user.
 
 ## 3. Review until clean
@@ -36,8 +36,8 @@ Delegate to the **docs-writer** agent: milestone ID, what was built, versions pi
 
 ## 5. Close
 - Refuse to close while any bug for this milestone **or an earlier one** is Open, **including** bugs marked `[stuck rN]` (stuck only means the automatic loop gave up; it still needs a fix or an explicit decision from the user). Deferred bugs for later milestones don't block. Report the blocking bugs and stop.
-- Run the final gate **after** the review-loop fixes, right before ticking: `make verify REQ="<this milestone's IDs + IDs of all
-  ticked milestones>" STRICT=1`. Refuse to tick unless it passes (no FAIL, no SKIP); a regression in an earlier milestone blocks too.
+- Run the final gate **after** the review-loop fixes, right before ticking: `make verify REQ=<id> STRICT=1` for each ID in this milestone's IDs
+  plus those of all ticked milestones. Refuse to tick unless it passes (no FAIL, no SKIP); a regression in an earlier milestone blocks too.
 - Tick the milestone in `TODO.md`, update Status (`Current milestone` → next one, `Last verified` → today + the result of that final run).
 - Commit with the `split-commits` skill (focused Conventional Commits, e.g. one `feat(<role>)` per role, `fix(...)` per bug,
   `docs`, then `chore(todo)` last with the bug hashes filled in). Mention the milestone and requirement numbers in the bodies.
