@@ -53,7 +53,7 @@ Filled from `ansible/group_vars/all/versions.yml` as milestones land.
 | pause image | 3.10.1 | `kubeadm config images list`, set in containerd |
 | python3-kubernetes | 30.1.0-2 | Debian trixie, held; `kubernetes.core` modules run on the VM (not the Mac) with the node's admin.conf |
 | Helm | v4.3.1 (sha256 pinned) | get.helm.sh, `/opt/helm/<version>` |
-| Calico (tigera-operator + CRDs charts) | v3.33.0 (operator v1.44.0) | docs.tigera.io/calico/charts; supports Kubernetes 1.35-1.37 |
+| Calico (tigera-operator + CRDs charts) | v3.33.0 (operator v1.44.0) | docs.tigera.io/calico/charts; supports Kubernetes 1.35-1.37; all images pinned by index digest in `versions.yml` ([ADR 0002](decisions/0002-calico-cni.md)) |
 | local-path-provisioner | — | M4 |
 | cert-manager | — | M5 |
 | Traefik | — | M5 |
