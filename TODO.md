@@ -3,11 +3,11 @@
 Live project state and bug tracker. Agents read this first and update it last (protocol in `CLAUDE.md`).
 
 ## Status
-Current milestone: **M1 — VM up + os_prep + containerd** (branch `feat/m1-os-prep-containerd`) · Last verified: 2026-11-18 (1: 17 PASS · 0 FAIL · 0 SKIP, strict) · Last SRE review: working tree 2026-11-18 — 4 new bugs (M1 round 1)
+Current milestone: **M2 — kubeadm** · Last verified: 2026-11-18 final gate M1 (`make idempotency` changed=0; 1: 17 PASS · 0 FAIL · 0 SKIP, strict) · Last SRE review: 6ea9ce9 2026-11-18 — clean (B-028 re-check)
 
 ## Milestones
 - [x] M0 Scaffolding: repo layout, agentic layer (`.claude/`), Makefile, lint configs, Lima config, docs skeleton, commit tooling (`split-commits` skill, `.githooks/commit-msg`)
-- [ ] M1 VM up + `os_prep` + `containerd` (req 1)
+- [x] M1 VM up + `os_prep` + `containerd` (req 1)
 - [ ] M2 `kubeadm`: init, untaint, audit policy, PSA admission config, metrics binds, `out/admin.conf` (req 2, 8c)
 - [ ] M3 `cni_calico` (req 3a)
 - [ ] M4 `storage`: local-path-provisioner as default StorageClass (req 5)
@@ -56,10 +56,11 @@ for each bug are in [Bug details](#bug-details) below.
 | B-021 | [sre] Agent/skill make commands (quoted `REQ`, multi-ID, `TAGS=a,b`) miss the exact allows, prompt | Medium | Solved | M0 | 2026-11-18 | 2026-11-18 | 49d3ebc |
 | B-022 | [sre] B-021 rewrite narrowed the DoD idempotency gate from whole playbook to per role | Medium | Solved | M0 | 2026-11-18 | 2026-11-18 | 951c425 |
 | B-023 | `make ping`/Ansible can't reach the VM: ssh `-F ~/.lima/...` is not tilde-expanded | High | Solved | M0 | 2026-11-18 | 2026-11-18 | 4c6ed45 |
-| B-024 | [sre] containerd restart deferred to play end: M2 kubeadm init would run on Debian's default config | Medium | Open | M1 | 2026-11-18 |  |  |
-| B-025 | [sec] Lima catch-all `ignore` misses 0.0.0.0/:: and UDP listeners: guest ports reach Mac loopback | Medium | Open | M1 | 2026-11-18 |  |  |
-| B-026 | [sec] Pinned runc 1.1.15 lacks fixes for the Nov-2025 container-escape CVEs | Medium | Open | M1 | 2026-11-18 |  |  |
+| B-024 | [sre] containerd restart deferred to play end: M2 kubeadm init would run on Debian's default config | Medium | Solved | M1 | 2026-11-18 | 2026-11-18 | c28a8f0 |
+| B-025 | [sec] Lima catch-all `ignore` misses 0.0.0.0/:: and UDP listeners: guest ports reach Mac loopback | Medium | Solved | M1 | 2026-11-18 | 2026-11-18 | 6364132 |
+| B-026 | [sec] Pinned runc 1.1.15 lacks fixes for the Nov-2025 container-escape CVEs | Medium | Solved | M1 | 2026-11-18 | 2026-11-18 | 2ba39bb |
 | B-027 | [sre] Exact Debian apt pins vanish after the next DSA/point release: clean rebuild fails | Medium | Open | M10 | 2026-11-18 |  |  |
+| B-028 | [sec] regression of B-025: catch-all ignore no longer matches 127.0.0.1; loopback ports forwarded | Medium | Solved | M1 | 2026-11-18 | 2026-11-18 | 6ea9ce9 |
 
 ## Assumptions / open questions
 - Host is an Apple Silicon Mac → VM is Debian 13 **arm64** under Lima (vz). amd64 image is listed in `lima/k8s.yaml` for Intel hosts but untested. Linux hosts are planned (Backlog), Windows is out of scope (Ansible needs WSL2).
@@ -207,16 +208,28 @@ Max 5 lines per bug (heading + up to 4 one-line bullets, ~200 chars each). Full 
 
 ### B-024: [sre] containerd restart deferred to play end: M2 kubeadm init would run on Debian's default config
 - **Report** (sre M1 r1): apt postinst starts containerd on the packaged config (journal 15:17:29); the template's handler restarts it only at play end (15:17:30), after later roles in the same play.
-- **Direction:** `ansible.builtin.meta: flush_handlers` at the end of the containerd role (consider `force_handlers = True` so a failed run still restarts); verify with a fresh-VM run.
+- **Root cause:** handlers run at play end by default; nothing flushed them after the containerd role.
+- **Fix:** `meta: flush_handlers` at the end of the role; `force_handlers = True` in ansible.cfg.
+- **Verification:** fresh VM (`make vm-reset` + `make provision`): restart handler runs right after the role; idempotency changed=0; verify 1 17 PASS.
 
 ### B-025: [sec] Lima catch-all `ignore` misses 0.0.0.0/:: and UDP listeners: guest ports reach Mac loopback
 - **Report** (sre M1 r1): `ha.stderr.log` "Forwarding TCP from 0.0.0.0:5355 / [::]:5355" + UDP ephemeral ports; `lsof -c limactl` shows 127.0.0.1:5355 LISTEN. Later kubelet, node-exporter, metrics follow.
-- **Direction:** ignore rules matching `guestIP: 0.0.0.0` and `::` with `proto: any` after the 443/80/6443 rules; prove via `lsof -nP -a -c limactl -i` that only those (plus ssh) are bound; add to a check.
+- **Root cause:** the catch-all ignore defaulted to `proto: tcp`; Lima's appended fallback rule (`proto: any`) forwarded the rest.
+- **Fix:** catch-all ignore with `guestIP: 0.0.0.0` (any bind) and `proto: any`.
+- **Verification:** fresh VM log: 5353/5355/ephemeral UDP and TCP "Not forwarding"; guest listener 0.0.0.0:6443 forwarded (HTTP 200), 8080 not.
 
 ### B-026: [sec] Pinned runc 1.1.15 lacks fixes for the Nov-2025 container-escape CVEs
 - **Report** (sre M1 r1): runc `1.1.15+ds1-2+b4` (trixie, no security/backports update); changelog has no CVE-2025-31133/52565/52881 fix (upstream fixed in 1.2.8/1.3.3; 1.1.x EOL).
-- **Direction:** install a pinned upstream static runc (>= 1.2.8, sha256 in versions.yml) and point containerd's runc `BinaryName` at it, or record an explicit risk acceptance in Assumptions.
+- **Root cause:** Debian trixie ships no runc newer than 1.1.15 (no security or backports update).
+- **Fix:** user accepted the risk: Assumption in TODO.md with reason and revisit trigger; comment on the pin.
+- **Verification:** `apt-cache madison runc`: only 1.1.15 available; assumption present; lint OK.
 
 ### B-027: [sre] Exact Debian apt pins vanish after the next DSA/point release: clean rebuild fails
 - **Report** (sre M1 r1): `apt-cache madison curl`: pinned `+deb13u7` exists only in trixie-security; the next curl/containerd DSA removes it and `os_prep` fails on `make e2e` or a grader's clean VM.
 - **Direction:** add a `snapshot.debian.org` source at a pinned timestamp (trixie + trixie-security, `check-valid-until=no`) so `pkg=ver` stays installable; keep only runtime packages exact-pinned.
+
+### B-028: [sec] regression of B-025: catch-all ignore no longer matches 127.0.0.1; loopback ports forwarded
+- **Report** (sre M1 r2): Lima 2.3.0 sets `guestIPMustBeZero: true` on explicit `guestIP: 0.0.0.0`; ha.stderr.log "Forwarding TCP from 127.0.0.1:46137" (containerd), Mac `lsof` LISTEN 127.0.0.1:46137.
+- **Root cause:** an explicit `guestIP: 0.0.0.0` defaults to `guestIPMustBeZero: true`, so loopback binds fell through to Lima's fallback rule.
+- **Fix:** `guestIPMustBeZero: false` on the catch-all; applied with `limactl stop` + `limactl edit --set` + `make vm-up` (user's choice).
+- **Verification:** log: every guest port "Not forwarding" (incl. 127.0.0.1:34975, :9100), 0.0.0.0:6443 forwarded (200); Mac lsof: Lima internals only; security-reviewer: resolved.
