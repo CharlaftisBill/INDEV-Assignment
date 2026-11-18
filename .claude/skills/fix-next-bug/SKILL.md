@@ -26,6 +26,14 @@ To work a deferred bug early, the user names it explicitly (`fix-next-bug B-008`
 stop instead if the fix needs a role that is not built yet.
 Announce the pick in one line: `Fixing B-NNN (<milestone>): <title>`.
 
+## 1b. Branch
+Every bug gets its own branch `fix/b-nnn-<slug>` (e.g. `fix/b-020-make-allow-rules`). Pick the parent:
+- the code to fix exists only on the current milestone branch (`feat/m<n>-*`) → branch from that branch;
+- otherwise → `git switch main && git pull --ff-only` and branch from `main`.
+
+Commit or stash nothing on your own: if the working tree has unrelated uncommitted changes, stop and ask.
+`git switch -c fix/b-nnn-<slug>`. Note the parent; step 6 merges back into it.
+
 ## 2. Reproduce before touching anything
 - Re-read the bug's details entry in `TODO.md` (Report: evidence, suggested direction).
 - Reproduce the symptom with a concrete command: the failing `make verify REQ=n` check, `make lint`, `make idempotency TAGS=<role>`,
@@ -71,7 +79,9 @@ If verification fails after 3 attempts: put what you learned in its one-line **D
 - Add one line to the current milestone's entry in `docs/ai-workflow.md` if the bug was found by an agent or hook
   (it's evidence of the workflow catching something).
 - Report: bug ID, root cause, files changed, verification commands and results.
-- Offer to commit with the `split-commits` skill (`fix(<scope>): <summary> (B-NNN)`). Commit only when the user says so.
-  No AI attribution trailers.
+- Commit with the `split-commits` skill (`fix(<scope>): <summary> (B-NNN)`, then `chore(todo)` with the hash) when the user approves.
+  No AI attribution trailers. Then land the branch (each step asks): parent is a milestone branch → `git switch <parent>`,
+  `git merge --no-ff fix/b-nnn-<slug>`, `git branch -d fix/b-nnn-<slug>`; parent is `main` → push + `gh pr create --base main`,
+  and stop until the user merges (a running milestone branch then merges `main`).
 - If more bugs are Open, say which one is next; don't start it without being asked
   (inside the `review-loop` skill, the loop decides what runs next).

@@ -91,6 +91,9 @@
       "Bash(git ls-files:*)",
       "Bash(git add -- :*)",
       "Bash(git show:*)",
+      "Bash(git branch --show-current)",
+      "Bash(git switch -c:*)",
+      "Bash(git pull --ff-only)",
       "Bash(make hooks)"
     ],
     "ask": [
@@ -103,6 +106,10 @@
       "Bash(kubectl --kubeconfig out/admin.conf delete:*)",
       "Bash(git commit:*)",
       "Bash(git push:*)",
+      "Bash(git merge:*)",
+      "Bash(git switch:*)",
+      "Bash(gh pr create:*)",
+      "Bash(gh pr merge:*)",
       "Bash(git reset:*)",
       "Bash(sudo:*)",
       "Bash(*kubectl* get *,*)",

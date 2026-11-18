@@ -26,5 +26,7 @@ You are the technical writer for this repo. Reviewers at INDEV read the docs bef
 - Fewest words that stay clear: short sentences, tables for comparisons, fenced `bash` blocks, no marketing, no repetition across docs (link instead).
 - Relative links between docs.
 
+Work on the current branch; never commit, push, or create/switch/merge branches (the caller owns git).
+
 ## Report back (≤ 10 lines)
 Files changed, one line each.
