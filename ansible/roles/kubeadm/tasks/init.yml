@@ -38,6 +38,27 @@
     owner: root
     group: root
 
+# init is guarded only by admin.conf; if that file is lost on a running node, init would fail
+# preflight and the rescue below would reset (wipe) etcd. Refuse instead (B-029).
+- name: Look for an existing control plane
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - "{{ kubeadm_admin_conf }}"
+    - /etc/kubernetes/manifests/kube-apiserver.yaml
+    - /var/lib/etcd/member
+  register: kubeadm_existing
+
+- name: Refuse to init over an existing control plane
+  ansible.builtin.fail:
+    msg: >-
+      {{ kubeadm_admin_conf }} is missing but a control plane exists (apiserver manifest or etcd data).
+      Not running kubeadm init/reset. Recreate it with
+      `kubeadm init phase kubeconfig admin --config {{ kubeadm_config_path }}`, or rebuild with `make vm-reset`.
+  when:
+    - not kubeadm_existing.results[0].stat.exists
+    - kubeadm_existing.results[1].stat.exists or kubeadm_existing.results[2].stat.exists
+
 - name: Initialise the control plane
   block:
     - name: Run kubeadm init
