@@ -35,7 +35,35 @@ need_cluster() {
 
 # ------------------------------------------------------------------ checks
 check_1() { # OS preparation, containerd, pinned packages
-  skip "not implemented (M1)"
+  CURRENT_REQ=1
+  if ! limactl list --quiet 2>/dev/null | grep -qx "$VM"; then fail "Lima VM '$VM' not found"; return 0; fi
+
+  if [[ "$(node systemctl is-active containerd 2>&1)" == "active" ]]; then pass "containerd is active"; else fail "containerd is not active"; fi
+
+  local cfg; cfg="$(node containerd config dump 2>&1)"
+  if grep -Eq '^[[:space:]]*SystemdCgroup = true' <<<"$cfg"; then pass "containerd effective config: SystemdCgroup = true"; else fail "SystemdCgroup is not true in 'containerd config dump'"; fi
+  if grep -Eq '^disabled_plugins = \[\]' <<<"$cfg"; then pass "containerd CRI plugin enabled"; else fail "containerd disables plugins (CRI?)"; fi
+
+  local swap; swap="$(node swapon --show --noheadings 2>&1)"
+  if [[ -z "$swap" ]]; then pass "swap is off"; else fail "swap is on: $swap"; fi
+  if node grep -Eq '^[^#]\S*\s+\S+\s+swap\s' /etc/fstab; then fail "fstab still has an active swap entry"; else pass "no active swap entry in fstab"; fi
+
+  local mods m; mods="$(node cat /proc/modules 2>&1)"
+  for m in overlay br_netfilter; do
+    if grep -q "^$m " <<<"$mods"; then pass "kernel module $m loaded"; else fail "kernel module $m not loaded"; fi
+    if node grep -rqx "$m" /etc/modules-load.d/; then pass "kernel module $m persisted"; else fail "kernel module $m not in /etc/modules-load.d"; fi
+  done
+
+  local key
+  for key in net.bridge.bridge-nf-call-iptables net.bridge.bridge-nf-call-ip6tables net.ipv4.ip_forward; do
+    if [[ "$(node sysctl -n "$key" 2>&1)" == "1" ]]; then pass "sysctl $key = 1"; else fail "sysctl $key != 1"; fi
+    if node grep -rqE "^$key[[:space:]]*=[[:space:]]*1\$" /etc/sysctl.d/; then pass "sysctl $key persisted"; else fail "sysctl $key not persisted in /etc/sysctl.d"; fi
+  done
+
+  local holds pkg; holds="$(node apt-mark showhold 2>&1)"
+  for pkg in containerd runc; do
+    if grep -qx "$pkg" <<<"$holds"; then pass "$pkg is held (apt-mark showhold)"; else fail "$pkg is not held"; fi
+  done
 }
 
 check_2() { # kubeadm single node, schedulable control plane

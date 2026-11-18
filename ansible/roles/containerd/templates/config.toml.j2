@@ -1,0 +1,10 @@
+# Managed by Ansible. Packaged containerd 1.x: config schema version 2, CRI plugin io.containerd.grpc.v1.cri.
+# Everything not set here keeps containerd's built-in default (CRI enabled, default pause image; kubeadm may override in M2).
+version = 2
+
+[plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc]
+  runtime_type = "io.containerd.runc.v2"
+
+  [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc.options]
+    # Must match the kubelet's systemd cgroup driver.
+    SystemdCgroup = true

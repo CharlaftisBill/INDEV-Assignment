@@ -25,8 +25,8 @@
   gather_facts: true
   roles:
     - { role: os_prep, tags: [os_prep] }
+    - { role: containerd, tags: [containerd] }
   # Planned order (uncommented as each milestone lands):
-  #   - { role: containerd,      tags: [containerd] }
   #   - { role: kubeadm,         tags: [kubeadm] }
   #   - { role: cni_calico,      tags: [cni_calico] }
   #   - { role: storage,         tags: [storage] }
