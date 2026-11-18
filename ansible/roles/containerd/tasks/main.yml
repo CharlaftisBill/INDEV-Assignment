@@ -1,0 +1,43 @@
+---
+# Container runtime: containerd + runc from Debian, systemd cgroups (req 1).
+- name: Install containerd and runc at pinned versions
+  ansible.builtin.apt:
+    name:
+      - "containerd={{ containerd_version }}"
+      - "runc={{ runc_version }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 86400
+
+- name: Hold containerd and runc
+  ansible.builtin.dpkg_selections:
+    name: "{{ item }}"
+    selection: hold
+  loop: [containerd, runc]
+
+- name: Create containerd config directory
+  ansible.builtin.file:
+    path: "{{ containerd_config_path | dirname }}"
+    state: directory
+    mode: "0755"
+    owner: root
+    group: root
+
+- name: Configure containerd
+  ansible.builtin.template:
+    src: config.toml.j2
+    dest: "{{ containerd_config_path }}"
+    mode: "0644"
+    owner: root
+    group: root
+  notify: Restart containerd
+
+- name: Enable and start containerd
+  ansible.builtin.systemd_service:
+    name: containerd
+    enabled: true
+    state: started
+
+# Restart now, not at play end: later roles (kubeadm init) must see this config (B-024).
+- name: Apply containerd config before later roles
+  ansible.builtin.meta: flush_handlers

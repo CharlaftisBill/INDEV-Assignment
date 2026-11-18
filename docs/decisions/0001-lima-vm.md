@@ -1,6 +1,6 @@
 # 0001 — Lima for the VM
 
-Status: Proposed (accepted when implemented) · Date: 2026-11-17
+Status: Accepted (M1) · Date: 2026-11-17
 
 ## Context
 The assignment needs one Debian 13 VM (4 vCPU, 8 GB, 40 GB) created with Vagrant, Lima or similar. The host is an Apple Silicon Mac.
@@ -15,4 +15,6 @@ Use Lima with `vmType: vz` (Apple Virtualization.framework) and the official Deb
 ## Consequences
 - Native speed on arm64, one YAML file, SSH config generated for Ansible, port forwarding and host mounts built in.
 - Lima forwards ports by watching listening sockets in the guest, so ingress must bind 443 directly (see 0003).
+- The image is a dated build (`debian_image_build`) pinned by sha512, not `latest`, so rebuilds are reproducible.
+- Only TCP 443/80/6443 are forwarded. A catch-all ignore rule (`guestIP 0.0.0.0`, `guestIPMustBeZero: false`, `proto: any`) stops Lima auto-forwarding other guest listeners, including loopback and UDP (B-025, B-028).
 - Intel hosts would use the amd64 image entry; untested.
