@@ -222,6 +222,12 @@ check_4() { # Ingress + internal CA TLS + auto renewal
 
 VERIFY_NS=verify-tmp
 VERIFY_NS_CREATED=0
+# B-034: a namespace deleted by an earlier check or run stays Terminating for a few seconds; creating objects in it fails.
+wait_verify_ns_gone() {
+  if [[ "$(k get namespaces "$VERIFY_NS" -o jsonpath='{.status.phase}' 2>/dev/null)" == "Terminating" ]]; then
+    k wait --for=delete "namespace/$VERIFY_NS" --timeout=120s >/dev/null 2>&1
+  fi
+}
 cleanup_5() {
   k delete pod verify-storage -n "$VERIFY_NS" --ignore-not-found --wait=false >/dev/null 2>&1
   k delete pvc verify-storage -n "$VERIFY_NS" --ignore-not-found --wait=false >/dev/null 2>&1
@@ -268,6 +274,7 @@ check_5() { # default StorageClass: local-path-provisioner, dynamic PVC for a no
 
   # End to end: PVC without storageClassName + PSA-restricted non-root pod writes a file
   local img; img="docker.io/library/busybox:$(pinned local_path_helper_version)@$(pinned local_path_helper_digest)"
+  wait_verify_ns_gone
   if ! k get namespaces "$VERIFY_NS" >/dev/null 2>&1; then VERIFY_NS_CREATED=1; fi
   trap cleanup_5 EXIT
   local out
