@@ -14,7 +14,7 @@ effort: low
    - Extra flags through `ANSIBLE_ARGS`, e.g. `ANSIBLE_ARGS="--diff"`, `ANSIBLE_ARGS="-vv"`, `ANSIBLE_ARGS="--check --diff"`.
    - Long runs (helm installs, model download) can exceed 2 minutes: run them in the background and wait for completion.
 3. Idempotency
-   - `make idempotency TAGS=<role>` (per role, as above) must end in `changed=0 unreachable=0 failed=0`.
+   - `make idempotency TAGS=<role>` (per role, as above), then bare `make idempotency` after a multi-role run, must end in `changed=0 unreachable=0 failed=0`.
    - If something reports `changed` on the second run, find the task (look for `changed:` lines) and fix it:
      missing `creates:`/`changed_when:`, templating that renders non-deterministically, `helm` values drift,
      `k8s` objects with server-defaulted fields in the manifest.
