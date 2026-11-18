@@ -21,6 +21,9 @@ and build them in layers that fail safe:
 2. **Allow-list, not block-list**: auto-approve only fixed, known-safe command shapes (listed `kubectl get <kind>`,
    exact `make` commands with no `:*` wildcard (`make verify`, `make provision TAGS=<role>`, `make verify REQ=<id> STRICT=1`),
    `make ping`, read-only node commands). Anything else falls through to a prompt.
+   Exception (user's choice, 2026-11-18): `limactl:*`, `git:*` and `gh:*` are allowed broadly to cut prompts, with ask
+   rules for their destructive and outward-facing subcommands. This lets agents run most commands as root in the VM
+   (`limactl shell k8s -- sudo …`) unprompted; the VM is rebuildable and holds no secret the host lacks.
 3. **Ask** for secret-adjacent patterns (Secrets, `--raw`, identity flags, remote shell metacharacters, node PKI,
    the CA-key directory). A human sees the command.
 4. **Deny** only for printing the secret files themselves (CA key, kubeconfigs, snapshots, node keys, `config view --raw`).
