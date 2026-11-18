@@ -84,6 +84,11 @@ git log -n <k> --format=%B | grep -i 'co-authored-by' && echo "TRAILER FOUND" ||
 ```
 Report the commit list (hash + subject) and anything you left uncommitted on purpose, and why.
 Then offer the next git step (each needs the user's yes): a `fix/` branch cut from a milestone branch → `git switch <parent>`,
-`git merge --no-ff <branch>`, `git branch -d <branch>`; any other branch → `git push -u origin <branch>` and
+`git merge --no-ff <branch>`, `git branch -d <branch>`; any other branch → **review gate**, then `git push -u origin <branch>` and
 `gh pr create --base main` (title = the main commit subject, body = short summary + req/bug IDs, no AI attribution).
 Remind the user to merge with **Create a merge commit** (squash/rebase changes the hashes in `TODO.md`).
+
+**Review gate (before every push for a PR):** ask the user whether to run the `review-loop` skill on the branch first
+(scope `main...HEAD`), and say what already reviewed it. Skip the question only when a review-loop round or targeted re-check
+came back clean after the branch's last code change. If the loop opens bugs, they are fixed on their own branches and the gate
+is asked again before the PR.

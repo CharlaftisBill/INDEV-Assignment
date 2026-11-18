@@ -81,7 +81,7 @@ If verification fails after 3 attempts: put what you learned in its one-line **D
 - Report: bug ID, root cause, files changed, verification commands and results.
 - Commit with the `split-commits` skill (`fix(<scope>): <summary> (B-NNN)`, then `chore(todo)` with the hash) when the user approves.
   No AI attribution trailers. Then land the branch (each step asks): parent is a milestone branch → `git switch <parent>`,
-  `git merge --no-ff fix/b-nnn-<slug>`, `git branch -d fix/b-nnn-<slug>`; parent is `main` → push + `gh pr create --base main`,
+  `git merge --no-ff fix/b-nnn-<slug>`, `git branch -d fix/b-nnn-<slug>`; parent is `main` → review gate (`split-commits` step 5), push + `gh pr create --base main`,
   and stop until the user merges (a running milestone branch then merges `main`).
 - If more bugs are Open, say which one is next; don't start it without being asked
   (inside the `review-loop` skill, the loop decides what runs next).
