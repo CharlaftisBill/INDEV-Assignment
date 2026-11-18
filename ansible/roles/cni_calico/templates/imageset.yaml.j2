@@ -1,0 +1,10 @@
+apiVersion: operator.tigera.io/v1
+kind: ImageSet
+metadata:
+  name: calico-{{ calico_chart_version }}
+spec:
+  images:
+{% for image, digest in calico_image_digests.items() %}
+    - image: {{ image }}
+      digest: {{ digest }}
+{% endfor %}

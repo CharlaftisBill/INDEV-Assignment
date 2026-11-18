@@ -14,6 +14,8 @@ goldmane:
 whisker:
   enabled: false
 resources: {{ cni_calico_resources.operator | to_json }}
+tigeraOperator:
+  version: {{ (calico_operator_version ~ '@' ~ calico_operator_digest) | to_json }}
 installation:
   # Replicas of every HA control-plane component (Typha, kube-controllers, apiserver); one node needs 1, default is 2.
   controlPlaneReplicas: 1
