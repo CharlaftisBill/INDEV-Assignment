@@ -24,7 +24,8 @@ The assignment is `k8s-single-node-assignment.pdf`. Project state and bugs: **`T
 ## Commands
 - `make help` · `make deps` · `make tools` (pinned `.venv` on Python 3.14 + collections; all make targets use it — run ansible/ansible-lint outside make via `source .venv/bin/activate`, never Homebrew's copies) · `make vm-up` / `vm-down` / `vm-reset` (destructive) / `vm-shell`
 - `make provision [TAGS=role]` · `make idempotency [TAGS=role]` (fails unless `changed=0`) · `make check`
-- `make hooks` (enable `.githooks/`) · `make lint` · `make verify [REQ="2 8c"] [STRICT=1]` (STRICT: SKIP fails) · `make smoke` (the acceptance curl) · `make e2e` (clean VM → all green)
+- **Agents run one ID or role per call, unquoted, in this order**: `make verify REQ=<id> STRICT=1`, `make provision TAGS=<role>`, `make idempotency TAGS=<role>`. A set of IDs/roles = one call each, all must pass; bare `make provision`/`make idempotency` (whole playbook) are allowed too. Other forms (quoted, multi-ID, `TAGS=a,b`, reordered) prompt by design (B-020).
+- `make hooks` (enable `.githooks/`) · `make lint` · `make verify [REQ=8c STRICT=1]` (STRICT: SKIP fails) · `make smoke` (the acceptance curl) · `make e2e` (clean VM → all green)
 
 ## Hard rules
 - **Versions**: every version/tag/digest lives in `ansible/group_vars/all/versions.yml`, with a source+date comment. Never `latest`, never unpinned apt installs; hold apt packages (`dpkg_selections: hold`). Images must have an arm64 manifest. Use the `pin-version` skill.
@@ -51,7 +52,7 @@ The assignment is `k8s-single-node-assignment.pdf`. Project state and bugs: **`T
 - Assumptions made where the PDF is unclear go under "Assumptions" in `TODO.md`.
 
 ## Definition of done (per milestone)
-`make lint` clean → `make provision TAGS=...` OK → `make idempotency` `changed=0` → `make verify REQ="<IDs on the milestone line>" STRICT=1` PASS (no SKIP) →
+`make lint` clean → `make provision TAGS=<role>` OK → `make idempotency TAGS=<role>` (per role) and bare `make idempotency` (whole playbook) `changed=0` → `make verify REQ=<id> STRICT=1` for each ID in the milestone line PASS (no SKIP) →
 `review-loop` clean (SRE review + tests, plus security review for reqs 3, 4, 8, 9, fixes re-reviewed until no new bugs) → docs/ADR + requirements matrix updated → `TODO.md` updated → commits via `split-commits` (user approves commits).
 
 ## Agents and skills

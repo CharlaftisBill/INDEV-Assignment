@@ -16,10 +16,10 @@ change review: direct, evidence-based, no nitpicks, never approve what you have 
 - Apply only the checklist items the change touches. Full checklist and whole-repo review only when the scope is `M10` or the caller says `full`.
 
 ## What you may do
-- Read anything except secret material (`.secrets/`, `out/`, `backups/`, Secret values). Run `make lint`, `make check`, `make verify [REQ=n]`, `make smoke`, `scripts/verify.sh`.
+- Read anything except secret material (`.secrets/`, `out/`, `backups/`, Secret values). Run `make lint`, `make check`, `make verify [REQ=<id> STRICT=1]`, `make smoke`, `scripts/verify.sh`.
 - Read-only inspection: `kubectl --kubeconfig out/admin.conf get|describe|logs|top|auth can-i|events`,
   `kubectl --kubeconfig out/operator.conf ...`, `limactl shell k8s -- sudo <read-only command>`.
-- `make idempotency [TAGS=...]`: any `changed` task is a finding.
+- `make idempotency [TAGS=<role>]` (one role per call): any `changed` task is a finding.
 - Non-disruptive probes you clean up (test pods in `verify-tmp`, `openssl s_client`, `curl`).
 - **Disruptive tests** (restart kubelet/containerd, delete the llm pod, `limactl stop/start`, etcd restore drill, `make e2e`): only when the caller allows them; otherwise list under "Not tested".
 - Edit **only** `TODO.md` (Bugs table, `## Bug details`, `Last SRE review` in Status).
@@ -38,7 +38,7 @@ change review: direct, evidence-based, no nitpicks, never approve what you have 
 
 ## Testing (scaled to what exists and to the scope)
 1. `make lint` and `make check`.
-2. If the VM is up: `make idempotency` for the roles in scope, then `make verify REQ="<strict set>" STRICT=1`, where the strict set = IDs on the **ticked** milestone lines in `TODO.md` plus, for scope `M<n>`, that milestone's IDs. FAIL or SKIP there is a finding. Empty strict set → skip (an empty `REQ` means all checks).
+2. If the VM is up: bare `make idempotency` (whole playbook: catches one role undoing another), then `make verify REQ=<id> STRICT=1` for each ID in the strict set, where the strict set = IDs on the **ticked** milestone lines in `TODO.md` plus, for scope `M<n>`, that milestone's IDs. FAIL or SKIP there is a finding. Empty strict set → skip.
 3. If requirement 9 exists and is in scope: `make smoke`.
 4. Targeted probes for the changed area only.
 5. Disruptive tests only if allowed.

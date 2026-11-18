@@ -9,7 +9,7 @@ effort: low
 You verify; you do not fix. `CLAUDE.md` is already in your context; read `TODO.md` Status and the Bugs table.
 
 ## Allowed actions
-- `make verify [REQ=...] [STRICT=1]`, `make smoke`, `scripts/verify.sh [--strict]`.
+- `make verify REQ=<id> STRICT=1` (one ID per call, unquoted), `make smoke`, `scripts/verify.sh [--strict]`.
   Use **strict mode** whenever your result decides something (closing a milestone or a bug, e2e): a SKIP is then a failure.
   The caller passes the requirement IDs (sub-IDs like `8c`).
 - Read-only inspection: `kubectl --kubeconfig out/admin.conf get|describe|logs|top|auth can-i|events`,

@@ -3,7 +3,7 @@
 Live project state and bug tracker. Agents read this first and update it last (protocol in `CLAUDE.md`).
 
 ## Status
-Current milestone: **M1 — VM up + os_prep + containerd** · Last verified: — (no cluster yet) · Last SRE review: working tree (60f510a+) 2026-11-18 — B-020 round 1: 1 new bug
+Current milestone: **M1 — VM up + os_prep + containerd** · Last verified: — (no cluster yet) · Last SRE review: working tree (94e16a0+) 2026-11-18 — B-021 round 2: 1 new bug
 
 ## Milestones
 - [x] M0 Scaffolding: repo layout, agentic layer (`.claude/`), Makefile, lint configs, Lima config, docs skeleton, commit tooling (`split-commits` skill, `.githooks/commit-msg`)
@@ -53,7 +53,8 @@ for each bug are in [Bug details](#bug-details) below.
 | B-018 | [sec] Secrets dumpable unprompted via the operator kubeconfig allow (B-015 follow-up) | Medium | Solved | M0 | 2026-11-17 | 2026-11-17 | 6ba2a85 |
 | B-019 | [sec] `make`, `git diff` and `ansible` allow rules run arbitrary commands unprompted | Medium | Solved | M0 | 2026-11-17 | 2026-11-17 | 9277b57 |
 | B-020 | [sec] Pre-approved `make verify`/`provision` still run any command or `vm-destroy` (B-019 follow-up) | Medium | Solved | M0 | 2026-11-17 | 2026-11-18 | f92e955 |
-| B-021 | [sre] Agent/skill make commands (quoted `REQ`, multi-ID, `TAGS=a,b`) miss the exact allows, prompt | Medium | Open | M0 | 2026-11-18 |  |  |
+| B-021 | [sre] Agent/skill make commands (quoted `REQ`, multi-ID, `TAGS=a,b`) miss the exact allows, prompt | Medium | Solved | M0 | 2026-11-18 | 2026-11-18 | 49d3ebc |
+| B-022 | [sre] B-021 rewrite narrowed the DoD idempotency gate from whole playbook to per role | Medium | Solved | M0 | 2026-11-18 | 2026-11-18 | 951c425 |
 
 ## Assumptions / open questions
 - Host is an Apple Silicon Mac → VM is Debian 13 **arm64** under Lima (vz). amd64 image is listed in `lima/k8s.yaml` for Intel hosts but untested. Linux hosts are planned (Backlog), Windows is out of scope (Ansible needs WSL2).
@@ -180,4 +181,12 @@ Max 5 lines per bug (heading + up to 4 one-line bullets, ~200 chars each). Full 
 
 ### B-021: [sre] Agent/skill make commands (quoted `REQ`, multi-ID, `TAGS=a,b`) miss the exact allows, prompt
 - **Report** (sre B-020 round 1): ansible-engineer.md:31, milestone/SKILL.md:25,39, fix-next-bug/SKILL.md:65,68, sre-reviewer.md:41 say `make verify REQ="<ids>"`; provision/SKILL.md:13 `TAGS=a,b`: none match the allows.
-- **Direction:** tell agents to run one unquoted ID/role per call (`make verify REQ=1 STRICT=1`, `make provision TAGS=os_prep`) and that other forms prompt by design.
+- **Root cause:** B-020 changed the allows to exact forms but not the instructions that build the commands.
+- **Fix:** CLAUDE.md convention (one unquoted ID/role per call, fixed order); agents and skills rewritten to it.
+- **Verification:** every concrete make command in `.claude/` and CLAUDE.md matches an allow; template forms covered for all 12 IDs; lint OK.
+
+### B-022: [sre] B-021 rewrite narrowed the DoD idempotency gate from whole playbook to per role
+- **Report** (sre B-021 round 2): CLAUDE.md:55 was bare `make idempotency` (all delivered roles), now `TAGS=<role>` only; cross-role drift or earlier-role regressions surface only at M10 `make e2e`.
+- **Root cause:** the B-021 rewrite converted every idempotency call to per-role, including the whole-playbook gate that already matched an allow.
+- **Fix:** bare `make idempotency` back in the DoD, ansible-engineer, sre-reviewer testing and the milestone final gate; per-role runs kept.
+- **Verification:** grep: each idempotency gate has a bare run; `make -n idempotency` runs the whole playbook; matches an exact allow; lint OK.

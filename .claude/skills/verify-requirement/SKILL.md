@@ -7,7 +7,7 @@ effort: low
 # Verify a requirement
 
 `scripts/verify.sh [N]` runs the checks for requirement ID N (`1 2 3a 3b 4 5 6 7 8a 8b 8c 9`; `3` and `8` expand to their parts), or all of them. Each milestone line in `TODO.md` names the IDs it delivers. Output is a PASS/FAIL/SKIP table; exit code is non-zero on any FAIL.
-Same through make: `make verify REQ=N`. Add `--strict` (`make verify STRICT=1`) whenever the result decides something (closing a milestone or a bug, `make e2e`): then SKIP fails too, because a check that did not run proves nothing. The final acceptance test is `make smoke` (the curl from the assignment).
+Same through make: `make verify REQ=<id> STRICT=1` (one unquoted ID per call; other forms prompt). Use strict whenever the result decides something (closing a milestone or a bug, `make e2e`): then SKIP fails too, because a check that did not run proves nothing. The final acceptance test is `make smoke` (the curl from the assignment).
 
 ## What each requirement is checked by (keep in sync with `scripts/verify.sh` and `docs/requirements-matrix.md`)
 | Req | Function | Key checks |
