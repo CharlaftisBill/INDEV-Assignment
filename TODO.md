@@ -3,7 +3,7 @@
 Live project state and bug tracker. Agents read this first and update it last (protocol in `CLAUDE.md`).
 
 ## Status
-Current milestone: **M4 — storage** · Last verified: 2026-11-18 final gate M3 (`make idempotency` changed=0; 1: 17, 2: 20, 3a: 15, 8c: 8 PASS · 0 FAIL · 0 SKIP, strict) · Last SRE review: 9ededee 2026-11-18 — M3 r2: B-031 (docs) fixed; code clean
+Current milestone: **M5 — pki + cert-manager + ingress_traefik** · Last verified: 2026-11-18 final gate M4 (`make idempotency` changed=0; 1: 17, 2: 20, 3a: 15, 5: 15, 8c: 8 PASS · 0 FAIL · 0 SKIP, strict) · Last SRE review: working tree 2026-11-18 — M4 r2: clean
 
 ## Milestones
 - [x] M0 Scaffolding: repo layout, agentic layer (`.claude/`), Makefile, lint configs, Lima config, docs skeleton, commit tooling (`split-commits` skill, `.githooks/commit-msg`)
@@ -11,7 +11,7 @@ Current milestone: **M4 — storage** · Last verified: 2026-11-18 final gate M3
 - [x] M2 `kubeadm`: init, untaint, audit policy, PSA admission config, metrics binds, `out/admin.conf` (req 2, 8c)
   - Cross-role: `containerd` template sets `sandbox_image` to kubeadm's pause (`pause_image_tag`), else kubeadm preflight warns and two pause images are used.
 - [x] M3 `cni_calico` (req 3a)
-- [ ] M4 `storage`: local-path-provisioner as default StorageClass (req 5)
+- [x] M4 `storage`: local-path-provisioner as default StorageClass (req 5)
 - [ ] M5 `pki` + cert-manager + `ingress_traefik` (req 4)
 - [ ] M6 `monitoring`: kube-prometheus-stack, node + etcd alerts, Grafana ingress (req 6)
 - [ ] M7 `etcd_backup`: systemd timer → host `./backups`, staleness alert (req 7)
@@ -65,6 +65,9 @@ for each bug are in [Bug details](#bug-details) below.
 | B-029 | [sre] kubeadm init rescue runs `kubeadm reset --force` on an existing cluster: wipes etcd | Medium | Solved | M2 | 2026-11-18 | 2026-11-18 | 9236ac4 |
 | B-030 | [sec] Calico images (privileged, hostNetwork) pulled by mutable tag only, no digest pins | Medium | Solved | M3 | 2026-11-18 | 2026-11-18 | 7e58592 |
 | B-031 | [sre] Matrix/ADR 0002 omit B-030 digest pinning and the new 3a checks (says 10, runs 15) | Medium | Solved | M3 | 2026-11-18 | 2026-11-18 | 9ededee |
+| B-032 | local-path-provisioner crash-loops: helper pod template adds capabilities, fatal at startup | — | Solved | M4 | 2026-11-18 | 2026-11-18 | 716f2e1 |
+| B-033 | [sre] storage role passes on a stuck provisioner rollout: waits only for Deployment Available | Medium | Solved | M4 | 2026-11-18 | 2026-11-18 | 9fe3d95 |
+| B-034 | [sre] check_5 fails when re-run within ~10 s: verify-tmp still Terminating from the last run | Medium | Solved | M4 | 2026-11-18 | 2026-11-18 | a3b8ac8 |
 
 ## Assumptions / open questions
 - Host is an Apple Silicon Mac → VM is Debian 13 **arm64** under Lima (vz). amd64 image is listed in `lima/k8s.yaml` for Intel hosts but untested. Linux hosts are planned (Backlog), Windows is out of scope (Ansible needs WSL2).
@@ -83,6 +86,7 @@ for each bug are in [Bug details](#bug-details) below.
 - Metrics bind to the node IP (etcd 2381 also on 127.0.0.1 for its probe; controller-manager 10257, scheduler 10259, kube-proxy 10249); reachable from pods, not forwarded to the Mac. etcd metrics are plain HTTP.
 - Audit: one `Metadata` catch-all rule, `RequestReceived` stage omitted (every request still logs ResponseComplete/ResponseStarted).
 - pkgs.k8s.io signing key `DE15…6436` expires 2026-12-29; the role re-downloads it each run and checks the fingerprint, so an OBS expiry extension is picked up.
+- local-path-provisioner v0.0.37 (`local-path-storage`, PSA `privileged`: helper pods mount hostPath as root) with data in `/opt/local-path-provisioner` on the VM disk (not the Mac mount; PVs die with the VM). The provisioner rejects `capabilities.add` in the helper template unless `--allow-unsafe-helper-pod-template` is set, so the helper drops every default capability except `DAC_OVERRIDE` (teardown deletes files owned by other UIDs) and the flag stays off.
 - **Accepted risk (user, 2026-11-18, B-026):** runc stays Debian trixie's `1.1.15` (EOL upstream, no fix for the Nov-2025 container-escape CVEs 2025-31133/52565/52881; trixie has no newer build). Reason: single-user local VM running only our own workloads, which are PSA `restricted`. Revisit if trixie-security ships a fixed runc, or before any shared/production use.
 
 ## Bug details
@@ -266,3 +270,21 @@ Max 5 lines per bug (heading + up to 4 one-line bullets, ~200 chars each). Full 
 - **Root cause:** B-030 added the ImageSet/digest, requests and audit/warn checks without updating the matrix row or ADR 0002.
 - **Fix:** matrix row 3a lists the 15 checks and pinning, status Done (M3); ADR 0002 documents digest pinning, bump procedure and accepted Lows; architecture Calico row notes digests.
 - **Verification:** `check_3a` pass/fail calls counted in `scripts/verify.sh` = 15; docs read against `cni_calico` and `versions.yml`.
+
+### B-032: local-path-provisioner crash-loops: helper pod template adds capabilities, fatal at startup
+- **Report** (verify REQ 5): provisioner pod restarted 6× in 8 min; previous log: `helper pod template must not add capabilities unless allow-unsafe-helper-pod-template`.
+- **Root cause:** the restarts (last 20:44:54) came from the role's first draft, whose helper template used `capabilities.add`; v0.0.37 rejects it without the unsafe flag.
+- **Fix:** the helper template only drops capabilities (keeps DAC_OVERRIDE by not dropping it); live ConfigMap has no `add`.
+- **Verification:** restartCount stayed 6, Ready, running since 20:47:36 through 20:54:35; `make verify REQ=5 STRICT=1` 15 PASS.
+
+### B-033: [sre] storage role passes on a stuck provisioner rollout: waits only for Deployment Available
+- **Report** (sre round 1): `storage/tasks/main.yml` waits on `wait_condition: Available`; with 1 replica (maxUnavailable 0) the old pod keeps Available=True while a new template crash-loops, so provision is green.
+- **Root cause:** with `wait_condition` set, kubernetes.core's `get_waiter()` uses a custom condition instead of `deployment_ready` (observedGeneration, replicas).
+- **Fix:** `wait_condition` dropped from the storage role's rollout wait; comment says why.
+- **Verification:** scratch Deployment in verify-tmp with a bad new image: old wait green, new wait fails; provision/idempotency changed=0; verify 5 15 PASS.
+
+### B-034: [sre] check_5 fails when re-run within ~10 s: verify-tmp still Terminating from the last run
+- **Report** (sre round 1): `make verify REQ=5 STRICT=1` 3x back to back: 1st 15 PASS, 2nd and 3rd FAIL `verify-tmp ... currently being deleted`; `cleanup_5` deletes the namespace with `--wait=false`.
+- **Root cause:** `cleanup_5` deletes verify-tmp with `--wait=false`; the next run applied into the still-Terminating namespace.
+- **Fix:** `wait_verify_ns_gone` in `scripts/verify.sh` waits for a Terminating verify-tmp to go before check_5 creates it; reusable by later checks.
+- **Verification:** `make verify REQ=5 STRICT=1` twice back to back: 15 PASS both; 1/2/3a/8c strict 17/20/15/8 PASS; lint OK.
