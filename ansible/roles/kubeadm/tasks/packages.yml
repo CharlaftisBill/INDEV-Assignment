@@ -1,0 +1,91 @@
+---
+- name: Create the apt keyring directory
+  ansible.builtin.file:
+    path: "{{ kubeadm_apt_keyring | dirname }}"
+    state: directory
+    mode: "0755"
+    owner: root
+    group: root
+
+# force: picks up OBS re-signing (expiry extensions); reports changed only if the key differs.
+- name: Download the pkgs.k8s.io signing key
+  ansible.builtin.get_url:
+    url: "{{ kubeadm_apt_key_url }}"
+    dest: "{{ kubeadm_apt_key_armored }}"
+    force: true
+    mode: "0644"
+    owner: root
+    group: root
+  register: kubeadm_apt_key
+
+- name: Read the signing key fingerprint
+  ansible.builtin.command: gpg --show-keys --with-colons {{ kubeadm_apt_key_armored }}
+  register: kubeadm_apt_key_info
+  changed_when: false
+
+- name: Assert the signing key fingerprint
+  ansible.builtin.assert:
+    that:
+      - kubeadm_apt_key_info.stdout_lines | select('match', '^pub:') | list | length == 1
+      - (kubeadm_apt_key_info.stdout_lines | select('match', '^fpr:') | first).split(':')[9] == kubernetes_apt_key_fingerprint
+    fail_msg: "pkgs.k8s.io key fingerprint differs from kubernetes_apt_key_fingerprint in versions.yml"
+    quiet: true
+  when: not ansible_check_mode  # get_url doesn't download in --check, so there is nothing to inspect
+
+- name: Check the dearmored keyring
+  ansible.builtin.stat:
+    path: "{{ kubeadm_apt_keyring }}"
+  register: kubeadm_apt_keyring_stat
+
+- name: Dearmor the signing key for apt
+  ansible.builtin.command: gpg --batch --yes --dearmor -o {{ kubeadm_apt_keyring }} {{ kubeadm_apt_key_armored }}
+  when: kubeadm_apt_key is changed or not kubeadm_apt_keyring_stat.stat.exists
+  changed_when: true
+
+- name: Add the pkgs.k8s.io repository
+  ansible.builtin.deb822_repository:
+    name: kubernetes
+    types: [deb]
+    uris: ["{{ kubeadm_apt_repo_url }}"]
+    suites: ["/"]
+    signed_by: "{{ kubeadm_apt_keyring }}"
+  register: kubeadm_apt_repo
+
+- name: Install kubelet, kubeadm, kubectl, cri-tools and the Kubernetes client for Python
+  ansible.builtin.apt:
+    name: "{{ kubeadm_packages.items() | map('join', '=') | list }}"
+    state: present
+    update_cache: true
+    # os_prep's cache is "valid" for a day but predates the new repository.
+    cache_valid_time: "{{ 0 if kubeadm_apt_repo is changed else 86400 }}"
+
+- name: Hold the Kubernetes packages
+  ansible.builtin.dpkg_selections:
+    name: "{{ item }}"
+    selection: hold
+  loop: "{{ kubeadm_packages.keys() | list }}"
+
+- name: Point crictl at containerd
+  ansible.builtin.template:
+    src: crictl.yaml.j2
+    dest: /etc/crictl.yaml
+    mode: "0644"
+    owner: root
+    group: root
+
+- name: List the images kubeadm will use
+  ansible.builtin.command: kubeadm config images list --kubernetes-version {{ kubeadm_kubernetes_version }}
+  register: kubeadm_images
+  changed_when: false
+
+- name: Assert containerd's sandbox image matches kubeadm's pause image
+  ansible.builtin.assert:
+    that: ("registry.k8s.io/pause:" ~ pause_image_tag) in kubeadm_images.stdout_lines
+    fail_msg: "kubeadm wants {{ kubeadm_images.stdout_lines | select('search', '/pause:') | list }}; update pause_image_tag in versions.yml"
+    quiet: true
+  when: not ansible_check_mode  # the images command doesn't run in --check
+
+- name: Enable kubelet (kubeadm starts it)
+  ansible.builtin.systemd_service:
+    name: kubelet
+    enabled: true

@@ -26,8 +26,8 @@
   roles:
     - { role: os_prep, tags: [os_prep] }
     - { role: containerd, tags: [containerd] }
+    - { role: kubeadm, tags: [kubeadm] }
   # Planned order (uncommented as each milestone lands):
-  #   - { role: kubeadm,         tags: [kubeadm] }
   #   - { role: cni_calico,      tags: [cni_calico] }
   #   - { role: storage,         tags: [storage] }
   #   - { role: pki,             tags: [pki] }

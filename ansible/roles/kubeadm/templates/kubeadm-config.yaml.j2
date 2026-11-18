@@ -1,0 +1,81 @@
+---
+# Managed by Ansible. Read only by `kubeadm init` (first run).
+apiVersion: kubeadm.k8s.io/v1beta4
+kind: InitConfiguration
+localAPIEndpoint:
+  advertiseAddress: {{ kubeadm_advertise_address }}
+  bindPort: {{ kubeadm_api_port }}
+nodeRegistration:
+  name: {{ node_name }}
+  criSocket: {{ kubeadm_cri_socket }}
+  imagePullPolicy: IfNotPresent
+  kubeletExtraArgs:
+    - name: node-ip
+      value: {{ kubeadm_advertise_address }}
+---
+apiVersion: kubeadm.k8s.io/v1beta4
+kind: ClusterConfiguration
+clusterName: {{ cluster_name }}
+kubernetesVersion: {{ kubeadm_kubernetes_version }}
+networking:
+  podSubnet: {{ pod_cidr }}
+  serviceSubnet: {{ service_cidr }}
+  dnsDomain: {{ cluster_dns_domain }}
+apiServer:
+  certSANs:
+{% for san in kubeadm_cert_sans %}
+    - "{{ san }}"
+{% endfor %}
+  extraArgs:
+    - name: audit-policy-file
+      value: {{ kubeadm_audit_policy_dir }}/policy.yaml
+    - name: audit-log-path
+      value: {{ audit_log_dir }}/audit.log
+    - name: audit-log-maxage
+      value: "{{ kubeadm_audit_log_maxage }}"
+    - name: audit-log-maxbackup
+      value: "{{ kubeadm_audit_log_maxbackup }}"
+    - name: audit-log-maxsize
+      value: "{{ kubeadm_audit_log_maxsize }}"
+    - name: admission-control-config-file
+      value: {{ kubeadm_admission_dir }}/admission-config.yaml
+  extraVolumes:
+    - name: audit-policy
+      hostPath: {{ kubeadm_audit_policy_dir }}
+      mountPath: {{ kubeadm_audit_policy_dir }}
+      readOnly: true
+      pathType: Directory
+    - name: audit-log
+      hostPath: {{ audit_log_dir }}
+      mountPath: {{ audit_log_dir }}
+      readOnly: false
+      pathType: Directory
+    - name: admission-config
+      hostPath: {{ kubeadm_admission_dir }}
+      mountPath: {{ kubeadm_admission_dir }}
+      readOnly: true
+      pathType: Directory
+# Metrics on the node IP for Prometheus (M6); Lima does not forward these ports.
+controllerManager:
+  extraArgs:
+    - name: bind-address
+      value: {{ kubeadm_advertise_address }}
+scheduler:
+  extraArgs:
+    - name: bind-address
+      value: {{ kubeadm_advertise_address }}
+etcd:
+  local:
+    extraArgs:
+      # kubeadm derives the etcd liveness probe from the first URL, so loopback stays first.
+      - name: listen-metrics-urls
+        value: http://127.0.0.1:2381,http://{{ kubeadm_advertise_address }}:2381
+---
+apiVersion: kubelet.config.k8s.io/v1beta1
+kind: KubeletConfiguration
+cgroupDriver: systemd
+containerRuntimeEndpoint: {{ kubeadm_cri_socket }}
+---
+apiVersion: kubeproxy.config.k8s.io/v1alpha1
+kind: KubeProxyConfiguration
+metricsBindAddress: {{ kubeadm_advertise_address }}:10249

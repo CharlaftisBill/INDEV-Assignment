@@ -66,9 +66,77 @@ check_1() { # OS preparation, containerd, pinned packages
   done
 }
 
-check_2() { # kubeadm single node, schedulable control plane
+# Pinned value from versions.yml (single source of truth), e.g. pinned kubernetes_version -> 1.35.10-1.1
+pinned() { sed -n "s/^$1: \"\\([^\"]*\\)\".*/\\1/p" "$ROOT/ansible/group_vars/all/versions.yml"; }
+NODE_NAME="${NODE_NAME:-k8s-node}"
+# No CNI config yet (M3 installs Calico): the node is NotReady and CoreDNS Pending for that reason only.
+no_cni() { [[ -z "$(node find /etc/cni/net.d -maxdepth 1 -name '*.conf*' 2>/dev/null)" ]]; }
+
+check_2() { # kubeadm single node, schedulable control plane (node Ready + workload pods: check_3a once the CNI exists)
   need_cluster || return 0
-  skip "not implemented (M2)"
+  local cni=1; no_cni && cni=0
+
+  # B-007: the host kubeconfig uses Lima's 127.0.0.1 forward and kubectl verifies the API server cert.
+  local server insecure
+  server="$(k config view -o jsonpath='{.clusters[0].cluster.server}' 2>&1)"
+  insecure="$(k config view -o jsonpath='{.clusters[0].cluster.insecure-skip-tls-verify}' 2>&1)"
+  if [[ "$server" == "https://127.0.0.1:6443" && -z "$insecure" ]]; then pass "out/admin.conf: server https://127.0.0.1:6443, TLS verification on"
+  else fail "out/admin.conf: server '$server', insecure-skip-tls-verify '$insecure'"; fi
+  if [[ "$(k get --raw /readyz 2>&1)" == "ok" ]]; then pass "API /readyz = ok from the host over verified TLS"; else fail "API /readyz from the host failed (TLS or API server)"; fi
+  local sans; sans="$(node openssl x509 -in /etc/kubernetes/pki/apiserver.crt -noout -ext subjectAltName 2>&1)"
+  if grep -q 'IP Address:127.0.0.1' <<<"$sans" && grep -q 'DNS:localhost' <<<"$sans"; then pass "API server cert SANs include 127.0.0.1 and localhost"
+  else fail "API server cert SANs lack 127.0.0.1/localhost: $sans"; fi
+
+  # One node, registered as control plane, running the pinned version
+  local nodes; nodes="$(k get nodes -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>&1)"
+  if [[ "$nodes" == "$NODE_NAME" ]]; then pass "exactly one node: $NODE_NAME"; else fail "nodes: $(tr '\n' ' ' <<<"$nodes")"; fi
+  if k get node "$NODE_NAME" -o jsonpath='{.metadata.labels}' 2>/dev/null | grep -q '"node-role.kubernetes.io/control-plane"'; then pass "$NODE_NAME has the control-plane role"
+  else fail "$NODE_NAME lacks the control-plane role label"; fi
+  local want kubelet_v server_v
+  want="v$(pinned kubernetes_version | sed 's/-.*//')"
+  kubelet_v="$(k get node "$NODE_NAME" -o jsonpath='{.status.nodeInfo.kubeletVersion}' 2>&1)"
+  server_v="$(k version -o json 2>/dev/null | sed -n 's/.*"gitVersion": "\(v[^"]*\)".*/\1/p' | tail -1)"
+  if [[ "$kubelet_v" == "$want" && "$server_v" == "$want" ]]; then pass "kubelet and API server at pinned $want"
+  else fail "versions: kubelet $kubelet_v, API server $server_v, pinned $want"; fi
+  local holds pkg; holds="$(node apt-mark showhold 2>&1)"
+  for pkg in kubelet kubeadm kubectl cri-tools kubernetes-cni; do
+    if grep -qx "$pkg" <<<"$holds"; then pass "$pkg is held"; else fail "$pkg is not held"; fi
+  done
+  if [[ "$(node systemctl is-active kubelet 2>&1)" == "active" ]]; then pass "kubelet is active"; else fail "kubelet is not active"; fi
+
+  # Workloads allowed: no control-plane taint; any other NoSchedule/NoExecute taint only while the CNI is missing
+  local taints t bad=""; taints="$(k get node "$NODE_NAME" -o jsonpath='{range .spec.taints[*]}{.key}:{.effect}{"\n"}{end}' 2>&1)"
+  while IFS= read -r t; do
+    [[ -z "$t" ]] && continue
+    case "$t" in
+      node.kubernetes.io/not-ready:*) [[ $cni -eq 0 ]] || bad+="$t " ;;
+      *:NoSchedule|*:NoExecute) bad+="$t " ;;
+    esac
+  done <<<"$taints"
+  if [[ -z "$bad" ]]; then pass "no NoSchedule/NoExecute taint blocks workloads$([[ $cni -eq 0 ]] && echo " (not-ready taint until the CNI, M3)")"
+  else fail "blocking taints: $bad"; fi
+
+  local ready reason
+  ready="$(k get node "$NODE_NAME" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>&1)"
+  reason="$(k get node "$NODE_NAME" -o jsonpath='{.status.conditions[?(@.type=="Ready")].message}' 2>&1)"
+  if [[ "$ready" == "True" ]]; then pass "node Ready"
+  elif [[ $cni -eq 0 && "$reason" == *"cni plugin not initialized"* ]]; then pass "node NotReady only because no CNI is installed yet (M3, check_3a)"
+  else fail "node Ready=$ready: $reason"; fi
+
+  # Control plane: static pods + kube-proxy Running and Ready; CoreDNS may be Pending only while the CNI is missing
+  local pods name phase pready
+  pods="$(k get pods -n kube-system -o jsonpath='{range .items[*]}{.metadata.name} {.status.phase} {.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}' 2>&1)"
+  for name in "etcd-$NODE_NAME" "kube-apiserver-$NODE_NAME" "kube-controller-manager-$NODE_NAME" "kube-scheduler-$NODE_NAME" "kube-proxy-"; do
+    if grep -Eq "^${name}[^ ]* Running True\$" <<<"$pods"; then pass "${name%-} Running and Ready"; else fail "${name%-} not Running/Ready"; fi
+  done
+  bad=""
+  while read -r name phase pready; do
+    [[ -z "$name" || ( "$phase" == "Running" && "$pready" == "True" ) ]] && continue
+    [[ $cni -eq 0 && "$name" == coredns-* && "$phase" == "Pending" ]] && continue
+    bad+="$name($phase) "
+  done <<<"$pods"
+  if [[ -z "$bad" ]]; then pass "all kube-system pods healthy$([[ $cni -eq 0 ]] && echo " (CoreDNS Pending until the CNI, M3)")"
+  else fail "unhealthy kube-system pods: $bad"; fi
 }
 
 check_3a() { # CNI installed and healthy (M3)
@@ -110,9 +178,55 @@ check_8b() { # app workloads cannot run as root / privileged: PSA restricted on 
   skip "not implemented (M9)"
 }
 
+# Audit policy checker, run on the node (python3-yaml is installed there). Prints "ok" or the problem.
+read -r -d '' AUDIT_POLICY_PY <<'PY'
+import sys, yaml
+p = yaml.safe_load(open(sys.argv[1]))
+rules = p.get("rules") or []
+levels = {"Metadata", "Request", "RequestResponse"}
+if any(r.get("level") not in levels for r in rules):
+    sys.exit(print("a rule has level None or an unknown level"))
+if "ResponseComplete" in (p.get("omitStages") or []):
+    sys.exit(print("policy omits ResponseComplete"))
+filters = {"users", "userGroups", "verbs", "resources", "namespaces", "nonResourceURLs"}
+if not any(not (filters & set(r)) for r in rules):
+    sys.exit(print("no catch-all rule: unmatched requests are not logged"))
+def may_match_secrets(r):
+    if "nonResourceURLs" in r: return False
+    if "resources" not in r: return True
+    return any(g.get("group", "") == "" and (not g.get("resources") or "secrets" in g["resources"]) for g in r["resources"])
+for r in rules:
+    if not may_match_secrets(r): continue
+    if r["level"] != "Metadata": sys.exit(print("a %s rule can log Secret bodies" % r["level"]))
+    if not ({"users", "userGroups", "verbs", "namespaces"} & set(r)): break
+print("ok")
+PY
+
 check_8c() { # every API request recorded: audit policy + log (M2)
   need_cluster || return 0
-  skip "not implemented (M2)"
+  local policy=/etc/kubernetes/audit/policy.yaml log=/var/log/kubernetes/audit/audit.log
+  local manifest=/etc/kubernetes/manifests/kube-apiserver.yaml
+
+  # First-match rule order: every request must hit a non-None rule; no rule may log Secret bodies.
+  local res
+  res="$(node python3 - "$policy" <<<"$AUDIT_POLICY_PY" 2>&1)"
+  if [[ "$res" == "ok" ]]; then pass "audit policy: no None rules, catch-all rule, Secrets at Metadata"; else fail "audit policy: $res"; fi
+
+  local flags f; flags="$(node grep -E -- '--audit-' "$manifest" 2>&1)"
+  for f in "audit-policy-file=$policy" "audit-log-path=$log" "audit-log-maxage=[1-9]" "audit-log-maxbackup=[1-9]" "audit-log-maxsize=[1-9]"; do
+    if grep -Eq -- "--$f" <<<"$flags"; then pass "apiserver manifest sets --${f%%=*}"; else fail "apiserver manifest lacks --$f"; fi
+  done
+  local cmd; cmd="$(k get pod -n kube-system "kube-apiserver-$NODE_NAME" -o jsonpath='{.spec.containers[0].command}' 2>&1)"
+  if [[ "$cmd" == *"--audit-policy-file=$policy"* && "$cmd" == *"--audit-log-path=$log"* ]]; then pass "running API server uses the audit policy and log"
+  else fail "running API server lacks the audit flags"; fi
+
+  # A request with a unique name must show up in the log (a 404 is still an API request).
+  local marker="verify-audit-$$-$RANDOM" i n=0
+  k get configmap "$marker" -n default >/dev/null 2>&1
+  for i in 1 2 3 4 5 6 7 8 9 10; do
+    n="$(node grep -c -- "$marker" "$log" 2>/dev/null)"; [[ "${n:-0}" -gt 0 ]] && break; sleep 1
+  done
+  if [[ "${n:-0}" -gt 0 ]]; then pass "a host request was recorded in $log"; else fail "request $marker not found in $log"; fi
 }
 
 check_9() { # llama.cpp over TLS, model cached across restarts

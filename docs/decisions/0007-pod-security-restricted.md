@@ -1,6 +1,6 @@
 # 0007 — Pod Security Admission `restricted` for application workloads
 
-Status: Proposed (accepted when implemented) · Date: 2026-11-17
+Status: Accepted (cluster defaults implemented in M2: `ansible/roles/kubeadm/files/admission-config.yaml`; namespace labels land in M9) · Date: 2026-11-17
 
 ## Context
 Requirement 8: application workloads cannot run as root or with elevated privileges. Platform components (Calico, node-exporter, Traefik with hostNetwork) legitimately need host access.

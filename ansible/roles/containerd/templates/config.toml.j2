@@ -1,6 +1,10 @@
 # Managed by Ansible. Packaged containerd 1.x: config schema version 2, CRI plugin io.containerd.grpc.v1.cri.
-# Everything not set here keeps containerd's built-in default (CRI enabled, default pause image; kubeadm may override in M2).
+# Everything not set here keeps containerd's built-in default (CRI enabled).
 version = 2
+
+[plugins."io.containerd.grpc.v1.cri"]
+  # Same pause image as kubeadm (asserted in the kubeadm role); kubeadm preflight warns on a mismatch.
+  sandbox_image = "registry.k8s.io/pause:{{ pause_image_tag }}"
 
 [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc]
   runtime_type = "io.containerd.runc.v2"

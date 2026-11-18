@@ -100,6 +100,25 @@ make smoke          # the acceptance curl above
 
 `make e2e` runs all of it from a freshly recreated VM. `make help` lists every target.
 
+## Talking to the cluster
+
+`make provision` writes the admin kubeconfig to `out/admin.conf` (mode 0600, gitignored), pointing at
+`https://127.0.0.1:6443` (Lima's port forward). It does not touch `~/.kube/config`, so pass it explicitly:
+
+```bash
+kubectl --kubeconfig out/admin.conf get nodes
+```
+
+Or set it once per shell, from the repo root:
+
+```bash
+export KUBECONFIG=$PWD/out/admin.conf
+```
+
+It is the cluster-admin credential: don't share or commit it. A VM rebuild needs no manual step;
+`make provision TAGS=kubeadm` writes it again. If it is lost on a running node, see the
+[troubleshooting runbook](docs/runbooks/troubleshooting.md#lost-adminconf).
+
 ## Repository layout
 
 ```

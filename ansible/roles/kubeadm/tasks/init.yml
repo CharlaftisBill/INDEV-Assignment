@@ -1,0 +1,100 @@
+---
+- name: Create the audit, admission and audit log directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    mode: "{{ item.mode }}"
+    owner: root
+    group: root
+  loop:
+    - { path: "{{ kubeadm_audit_policy_dir }}", mode: "0755" }
+    - { path: "{{ kubeadm_admission_dir }}", mode: "0755" }
+    - { path: "{{ audit_log_dir }}", mode: "0700" }
+
+- name: Install the audit policy
+  ansible.builtin.copy:
+    src: audit-policy.yaml
+    dest: "{{ kubeadm_audit_policy_dir }}/policy.yaml"
+    mode: "0644"
+    owner: root
+    group: root
+  notify: Restart kube-apiserver
+
+- name: Install the Pod Security admission config
+  ansible.builtin.copy:
+    src: admission-config.yaml
+    dest: "{{ kubeadm_admission_dir }}/admission-config.yaml"
+    mode: "0644"
+    owner: root
+    group: root
+  notify: Restart kube-apiserver
+
+- name: Render the kubeadm config
+  ansible.builtin.template:
+    src: kubeadm-config.yaml.j2
+    dest: "{{ kubeadm_config_path }}"
+    validate: kubeadm config validate --config %s
+    mode: "0600"
+    owner: root
+    group: root
+
+# init is guarded only by admin.conf; if that file is lost on a running node, init would fail
+# preflight and the rescue below would reset (wipe) etcd. Refuse instead (B-029).
+- name: Look for an existing control plane
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - "{{ kubeadm_admin_conf }}"
+    - /etc/kubernetes/manifests/kube-apiserver.yaml
+    - /var/lib/etcd/member
+  register: kubeadm_existing
+
+- name: Refuse to init over an existing control plane
+  ansible.builtin.fail:
+    msg: >-
+      {{ kubeadm_admin_conf }} is missing but a control plane exists (apiserver manifest or etcd data).
+      Not running kubeadm init/reset. Recreate it with
+      `kubeadm init phase kubeconfig admin --config {{ kubeadm_config_path }}`, or rebuild with `make vm-reset`.
+  when:
+    - not kubeadm_existing.results[0].stat.exists
+    - kubeadm_existing.results[1].stat.exists or kubeadm_existing.results[2].stat.exists
+
+- name: Initialise the control plane
+  block:
+    - name: Run kubeadm init
+      ansible.builtin.command:
+        cmd: kubeadm init --config {{ kubeadm_config_path }} --skip-token-print
+        creates: "{{ kubeadm_admin_conf }}"
+      register: kubeadm_init
+  rescue:
+    # A half-done init blocks the next run's preflight; reset so a re-run starts clean.
+    - name: Reset the failed kubeadm init
+      ansible.builtin.command: kubeadm reset --force
+      changed_when: true
+
+    - name: Fail after resetting kubeadm init
+      ansible.builtin.fail:
+        msg: "kubeadm init failed and was reset: {{ kubeadm_init.stderr | default('') }}"
+
+# Audit policy / admission config changed after init: restart the API server before using it.
+- name: Apply pending API server restarts
+  ansible.builtin.meta: flush_handlers
+
+- name: Wait for the API server to be ready
+  ansible.builtin.uri:
+    url: "https://{{ kubeadm_advertise_address }}:{{ kubeadm_api_port }}/readyz"
+    ca_path: /etc/kubernetes/pki/ca.crt
+    return_content: true
+  register: kubeadm_readyz
+  until: kubeadm_readyz.status == 200 and kubeadm_readyz.content == 'ok'
+  retries: 30
+  delay: 5
+
+- name: Allow workloads on the control-plane node
+  kubernetes.core.k8s_taint:
+    kubeconfig: "{{ kubeadm_admin_conf }}"
+    name: "{{ node_name }}"
+    state: absent
+    taints:
+      - key: node-role.kubernetes.io/control-plane
+        effect: NoSchedule

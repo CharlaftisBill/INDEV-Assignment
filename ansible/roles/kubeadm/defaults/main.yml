@@ -1,0 +1,39 @@
+---
+# kubeadm init runs once (creates admin.conf): later edits to the kubeadm config need `make vm-reset`.
+# Audit policy and admission config are re-read via an API server restart (handler).
+kubeadm_apt_repo_url: "https://pkgs.k8s.io/core:/stable:/{{ kubernetes_minor }}/deb/"
+kubeadm_apt_key_url: "{{ kubeadm_apt_repo_url }}Release.key"
+kubeadm_apt_key_armored: /etc/apt/keyrings/kubernetes-apt-keyring.asc
+kubeadm_apt_keyring: /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+
+kubeadm_cri_socket: unix:///run/containerd/containerd.sock
+kubeadm_config_path: /etc/kubernetes/kubeadm-config.yaml
+kubeadm_admin_conf: /etc/kubernetes/admin.conf
+kubeadm_kubernetes_version: "v{{ kubernetes_version | regex_replace('-.*$', '') }}"
+kubeadm_advertise_address: "{{ ansible_facts['default_ipv4']['address'] }}"
+kubeadm_api_port: 6443
+# Host kubeconfigs reach the API through Lima's 127.0.0.1:6443 forward (B-007).
+kubeadm_cert_sans: [127.0.0.1, localhost]
+
+kubeadm_audit_policy_dir: /etc/kubernetes/audit
+kubeadm_audit_log_maxage: 7       # days
+kubeadm_audit_log_maxbackup: 5    # rotated files kept
+kubeadm_audit_log_maxsize: 100    # MB per file
+kubeadm_admission_dir: /etc/kubernetes/admission
+
+# Out-of-VM copy of the admin kubeconfig (gitignored), server rewritten to the Lima forward.
+kubeadm_host_admin_conf: "{{ host_out_dir }}/admin.conf"
+kubeadm_host_api_server: "https://127.0.0.1:{{ kubeadm_api_port }}"
+kubeadm_node_api_server: "https://{{ kubeadm_advertise_address }}:{{ kubeadm_api_port }}"
+
+kubeadm_arch: "{{ {'aarch64': 'arm64', 'x86_64': 'amd64'}[ansible_facts['architecture']] }}"
+kubeadm_helm_dir: "/opt/helm/{{ helm_version }}"
+
+# Pinned + held (versions.yml). python3-kubernetes: client for kubernetes.core modules run on the node.
+kubeadm_packages:
+  kubelet: "{{ kubernetes_version }}"
+  kubeadm: "{{ kubernetes_version }}"
+  kubectl: "{{ kubernetes_version }}"
+  cri-tools: "{{ cri_tools_version }}"
+  kubernetes-cni: "{{ kubernetes_cni_version }}"
+  python3-kubernetes: "{{ python3_kubernetes_version }}"

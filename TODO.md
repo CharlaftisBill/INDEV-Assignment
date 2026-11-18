@@ -3,12 +3,13 @@
 Live project state and bug tracker. Agents read this first and update it last (protocol in `CLAUDE.md`).
 
 ## Status
-Current milestone: **M2 — kubeadm** · Last verified: 2026-11-18 final gate M1 (`make idempotency` changed=0; 1: 17 PASS · 0 FAIL · 0 SKIP, strict) · Last SRE review: 6ea9ce9 2026-11-18 — clean (B-028 re-check)
+Current milestone: **M3 — cni_calico** · Last verified: 2026-11-18 final gate M2 (`make idempotency` changed=0; 1: 17, 2: 20, 8c: 8 PASS · 0 FAIL · 0 SKIP, strict) · Last SRE review: working tree 2026-11-18 — clean (M2 r2)
 
 ## Milestones
 - [x] M0 Scaffolding: repo layout, agentic layer (`.claude/`), Makefile, lint configs, Lima config, docs skeleton, commit tooling (`split-commits` skill, `.githooks/commit-msg`)
 - [x] M1 VM up + `os_prep` + `containerd` (req 1)
-- [ ] M2 `kubeadm`: init, untaint, audit policy, PSA admission config, metrics binds, `out/admin.conf` (req 2, 8c)
+- [x] M2 `kubeadm`: init, untaint, audit policy, PSA admission config, metrics binds, `out/admin.conf` (req 2, 8c)
+  - Cross-role: `containerd` template sets `sandbox_image` to kubeadm's pause (`pause_image_tag`), else kubeadm preflight warns and two pause images are used.
 - [ ] M3 `cni_calico` (req 3a)
 - [ ] M4 `storage`: local-path-provisioner as default StorageClass (req 5)
 - [ ] M5 `pki` + cert-manager + `ingress_traefik` (req 4)
@@ -39,7 +40,7 @@ for each bug are in [Bug details](#bug-details) below.
 | B-004 | [sre] `make verify` / `make e2e` pass when every check is SKIP | Medium | Solved | M0 | 2026-11-17 | 2026-11-17 | 0c72290 |
 | B-005 | [sec] Agent could read CA key, admin kubeconfig and snapshots without a prompt | Medium | Solved | M0 | 2026-11-17 | 2026-11-17 | 6ba2a85 |
 | B-006 | [sre] `review-loop` cannot stop while later-milestone bugs are Open | Medium | Solved | M0 | 2026-11-17 | 2026-11-17 | dfc00b7 |
-| B-007 | [sre] Host kubeconfig at 127.0.0.1:6443 fails TLS (no loopback SAN) | Medium | Open | M2 | 2026-11-17 |  |  |
+| B-007 | [sre] Host kubeconfig at 127.0.0.1:6443 fails TLS (no loopback SAN) | Medium | Solved | M2 | 2026-11-17 | 2026-11-18 | ba24ebb |
 | B-008 | [sec] "Allow from Traefik" NetworkPolicy cannot match a hostNetwork Traefik | Medium | Open | M5 | 2026-11-17 |  |  |
 | B-009 | [sre] hostNetwork Traefik cannot bind :443/:80 as non-root | Medium | Open | M5 | 2026-11-17 |  |  |
 | B-010 | [sre] etcd snapshots can silently land on the VM disk | Medium | Open | M7 | 2026-11-17 |  |  |
@@ -61,6 +62,7 @@ for each bug are in [Bug details](#bug-details) below.
 | B-026 | [sec] Pinned runc 1.1.15 lacks fixes for the Nov-2025 container-escape CVEs | Medium | Solved | M1 | 2026-11-18 | 2026-11-18 | 2ba39bb |
 | B-027 | [sre] Exact Debian apt pins vanish after the next DSA/point release: clean rebuild fails | Medium | Open | M10 | 2026-11-18 |  |  |
 | B-028 | [sec] regression of B-025: catch-all ignore no longer matches 127.0.0.1; loopback ports forwarded | Medium | Solved | M1 | 2026-11-18 | 2026-11-18 | 6ea9ce9 |
+| B-029 | [sre] kubeadm init rescue runs `kubeadm reset --force` on an existing cluster: wipes etcd | Medium | Solved | M2 | 2026-11-18 | 2026-11-18 | 9236ac4 |
 
 ## Assumptions / open questions
 - Host is an Apple Silicon Mac → VM is Debian 13 **arm64** under Lima (vz). amd64 image is listed in `lima/k8s.yaml` for Intel hosts but untested. Linux hosts are planned (Backlog), Windows is out of scope (Ansible needs WSL2).
@@ -69,7 +71,14 @@ for each bug are in [Bug details](#bug-details) below.
 - "Application workloads" = workloads in `app_namespaces` (currently `llm`). Platform namespaces (CNI, monitoring, ingress) are exempt from PSA `restricted` where they genuinely need host access.
 - The Lima base image is the dated Debian trixie cloud build `20261103-2651` (sha512-pinned in `lima/k8s.yaml`).
 - M1 pins every apt package the roles install explicitly (`os_base_packages`, containerd, runc) and holds them; transitive dependencies are not pinned. `apt-transport-https` is skipped (transitional dummy, https is built into apt 3.x). Debian only keeps the current point-release version, so a pin can break `apt install` after a point release: bump it via `pin-version`.
-- Debian trixie ships containerd 1.7.24 (config schema `version = 2`, CRI plugin `io.containerd.grpc.v1.cri`), not 2.x. The pause image stays containerd's default (`pause:3.8`); M2 aligns it with kubeadm's if preflight warns.
+- Debian trixie ships containerd 1.7.24 (config schema `version = 2`, CRI plugin `io.containerd.grpc.v1.cri`), not 2.x. Since M2 the sandbox (pause) image is kubeadm's (`pause_image_tag`, asserted by the kubeadm role).
+- Kubernetes **v1.35** (1.35.10): the last minor supporting containerd 1.x (k8s v1.35 release blog); trixie ships containerd 1.7.24. kubelet logs `RuntimeConfig not implemented` and falls back to its own `cgroupDriver: systemd` (expected until containerd 2.x). containerd's RELEASES.md recommends 1.7.28+ for k8s 1.35; Debian's 1.7.24 is used as is. Moving past 1.35 needs containerd 2.x (not in trixie).
+- Python client for `kubernetes.core` on the node: Debian `python3-kubernetes` 30.1.0-2 (pinned, held), not a pip venv: a venv needs `python3.13-venv`, whose `+deb13uN` pin changes with every Python DSA (worse for B-027), and pip would pull unpinned transitive deps. The dynamic client works against 1.35.
+- kubeadm init runs once (`creates: admin.conf`); later edits to the kubeadm config need `make vm-reset`. Audit policy and admission config changes restart the API server (handler).
+- PSA cluster defaults: enforce `baseline`, audit/warn `restricted`, only `kube-system` exempt. Platform namespaces needing host access (tigera-operator, local-path, traefik, node-exporter) are labelled by their own roles.
+- Metrics bind to the node IP (etcd 2381 also on 127.0.0.1 for its probe; controller-manager 10257, scheduler 10259, kube-proxy 10249); reachable from pods, not forwarded to the Mac. etcd metrics are plain HTTP.
+- Audit: one `Metadata` catch-all rule, `RequestReceived` stage omitted (every request still logs ResponseComplete/ResponseStarted).
+- pkgs.k8s.io signing key `DE15…6436` expires 2026-12-29; the role re-downloads it each run and checks the fingerprint, so an OBS expiry extension is picked up.
 - **Accepted risk (user, 2026-11-18, B-026):** runc stays Debian trixie's `1.1.15` (EOL upstream, no fix for the Nov-2025 container-escape CVEs 2025-31133/52565/52881; trixie has no newer build). Reason: single-user local VM running only our own workloads, which are PSA `restricted`. Revisit if trixie-security ships a fixed runc, or before any shared/production use.
 
 ## Bug details
@@ -114,7 +123,9 @@ Max 5 lines per bug (heading + up to 4 one-line bullets, ~200 chars each). Full 
 
 ### B-007: [sre] Host kubeconfig at 127.0.0.1:6443 fails TLS (no loopback SAN)
 - **Report** (sre round 1): the apiserver cert has no `127.0.0.1`/`localhost` SAN, but host kubeconfigs use the Lima forward `127.0.0.1:6443`.
-- **Direction:** add `apiServer.certSANs: [127.0.0.1, localhost]`; `check_2` proves `get --raw /readyz` works with TLS verification on.
+- **Root cause:** kubeadm puts only the node IP, service IP and cluster names in the API server cert; the Lima forward is 127.0.0.1.
+- **Fix:** `kubeadm_cert_sans: [127.0.0.1, localhost]` in the kubeadm role's `apiServer.certSANs`; `out/admin.conf` server rewritten to `https://127.0.0.1:6443`.
+- **Verification:** `make verify REQ=2 STRICT=1`: `/readyz` = ok from the Mac with TLS verification on, SANs include 127.0.0.1 and localhost; 20 PASS.
 
 ### B-008: [sec] "Allow from Traefik" NetworkPolicy cannot match a hostNetwork Traefik
 - **Report** (sre round 1): hostNetwork traffic comes from the node IP, which selectors never match and NetworkPolicy always allows; the rule is a no-op.
@@ -233,3 +244,9 @@ Max 5 lines per bug (heading + up to 4 one-line bullets, ~200 chars each). Full 
 - **Root cause:** an explicit `guestIP: 0.0.0.0` defaults to `guestIPMustBeZero: true`, so loopback binds fell through to Lima's fallback rule.
 - **Fix:** `guestIPMustBeZero: false` on the catch-all; applied with `limactl stop` + `limactl edit --set` + `make vm-up` (user's choice).
 - **Verification:** log: every guest port "Not forwarding" (incl. 127.0.0.1:34975, :9100), 0.0.0.0:6443 forwarded (200); Mac lsof: Lima internals only; security-reviewer: resolved.
+
+### B-029: [sre] kubeadm init rescue runs `kubeadm reset --force` on an existing cluster: wipes etcd
+- **Report** (sre M2 r1): init is guarded only by `creates: admin.conf`; if it is missing on a live node, preflight fails (:6443, manifests, etcd dir) and the rescue resets, deleting /var/lib/etcd and PKI.
+- **Root cause:** the only init guard was `creates: admin.conf`; a missing admin.conf on a live node sent init into the reset rescue.
+- **Fix:** stat admin.conf, the apiserver manifest and etcd member dir; fail before init if a control plane exists without admin.conf. Fixed in the M2 tree, no own branch (user's choice).
+- **Verification:** check-mode run of `init.yml` with admin.conf pointed at a missing file stops at the guard (init/reset never reached); idempotency changed=0; strict 1/2/8c 45 PASS.

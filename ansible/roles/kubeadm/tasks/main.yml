@@ -1,0 +1,13 @@
+---
+# kubeadm single node: control plane + workloads (req 2), API audit log (req 8c), PSA defaults, helm for later roles.
+- name: Install Kubernetes packages
+  ansible.builtin.import_tasks: packages.yml
+
+- name: Install helm
+  ansible.builtin.import_tasks: helm.yml
+
+- name: Initialise the cluster
+  ansible.builtin.import_tasks: init.yml
+
+- name: Export the admin kubeconfig to the host
+  ansible.builtin.import_tasks: kubeconfig.yml

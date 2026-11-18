@@ -25,12 +25,22 @@ os_base_packages:
 containerd_version: "1.7.24~ds1-6+deb13u1"  # apt-cache madison (trixie + trixie-security), 2026-11-18
 runc_version: "1.1.15+ds1-2+b4"             # apt-cache madison (trixie), 2026-11-18; known CVEs, risk accepted (TODO.md Assumptions, B-026)
 # cri-tools (crictl) comes from pkgs.k8s.io with kubeadm: M2 (cri_tools_version)
+pause_image_tag: "3.10.1"  # kubeadm config images list (v1.35.10); containerd sandbox_image, asserted in the kubeadm role, 2026-11-18
 
-# M2  kubeadm
-#   kubernetes_minor:              # e.g. "v1.xx" (pkgs.k8s.io repo path)
-#   kubernetes_version:            # kubelet/kubeadm/kubectl apt version
-#   cri_tools_version:             # pkgs.k8s.io, crictl
-#   helm_version:                  # binary release
+# M2  kubeadm (pkgs.k8s.io apt repo, held)
+# v1.35 is the last minor supporting containerd 1.x (kubernetes.io/blog/2025/12/17/kubernetes-v1-35-release), 2026-11-18.
+# Supported by Calico 3.33 (1.35-1.37), cert-manager 1.21 (1.33-1.36), kube-prometheus 0.18/0.19, Traefik chart 42 (>=1.30).
+kubernetes_minor: "v1.35"                       # pkgs.k8s.io/core:/stable:/v1.35/deb, 2026-11-18
+kubernetes_version: "1.35.10-1.1"               # pkgs.k8s.io v1.35 Packages (arm64), v1.35.10 released 2026-10-28; kubelet/kubeadm/kubectl, 2026-11-18
+cri_tools_version: "1.35.0-1.1"                 # pkgs.k8s.io v1.35 Packages (arm64), 2026-11-18
+kubernetes_cni_version: "1.8.0-1.1"             # pkgs.k8s.io v1.35 Packages (arm64), kubelet dependency, 2026-11-18
+# pkgs.k8s.io v1.35 Release.key (isv:kubernetes OBS); key expires 2026-12-29 unless OBS extends it, 2026-11-18
+kubernetes_apt_key_fingerprint: "DE15B14486CD377B9E876E1A234654DA9A296436"
+python3_kubernetes_version: "30.1.0-2"          # apt-cache madison (trixie main), client for kubernetes.core on the node, 2026-11-18
+helm_version: "v4.3.1"                          # github.com/helm/helm/releases (v4.3.2 is <2 weeks old, no security fix), 2026-11-18
+helm_checksums:                                 # get.helm.sh/helm-v4.3.1-linux-<arch>.tar.gz.sha256sum = release notes, 2026-11-18
+  arm64: "sha256:8cf8f66ecbc252ac8f7f06cca68aba88508ddfde3a6a34feb1678ad1694b4f88"
+  amd64: "sha256:0403a88ae20913d11b10a2467b50087721fea7581736da6b9d3992f5357fe54b"
 #
 # M3  cni_calico
 #   calico_version:                # tigera-operator chart
