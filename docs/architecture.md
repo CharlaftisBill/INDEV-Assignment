@@ -48,7 +48,11 @@ Filled from `ansible/group_vars/all/versions.yml` as milestones land.
 | containerd | 1.7.24~ds1-6+deb13u1 | Debian trixie, held |
 | runc | 1.1.15+ds1-2+b4 | Debian trixie, held (known CVEs accepted, B-026) |
 | Base packages (9) | see `os_base_packages` in `versions.yml` | Debian trixie, held |
-| Kubernetes (kubeadm/kubelet/kubectl) | — | M2 |
+| Kubernetes (kubeadm/kubelet/kubectl) | 1.35.10-1.1 (v1.35 is the last minor supporting containerd 1.x) | pkgs.k8s.io, held; key `DE15B144…9A296436` checked |
+| cri-tools / kubernetes-cni | 1.35.0-1.1 / 1.8.0-1.1 | pkgs.k8s.io, held |
+| pause image | 3.10.1 | `kubeadm config images list`, set in containerd |
+| python3-kubernetes | 30.1.0-2 | Debian trixie, held; `kubernetes.core` modules run on the VM (not the Mac) with the node's admin.conf |
+| Helm | v4.3.1 (sha256 pinned) | get.helm.sh, `/opt/helm/<version>` |
 | Calico | — | M3 |
 | local-path-provisioner | — | M4 |
 | cert-manager | — | M5 |
@@ -56,6 +60,13 @@ Filled from `ansible/group_vars/all/versions.yml` as milestones land.
 | kube-prometheus-stack | — | M6 |
 | llama.cpp server image | — | M9 |
 | Model | Qwen2.5-0.5B-Instruct GGUF Q4 | M9 |
+
+## Control plane notes (`kubeadm` role)
+
+- Pod CIDR 10.244.0.0/16 (Lima uses 192.168.5.0/24); systemd cgroups; API cert SANs add `127.0.0.1`, `localhost` so `out/admin.conf` verifies through the Lima forward.
+- Metrics bind to the node IP for Prometheus (M6): kube-controller-manager and kube-scheduler `bind-address`, kube-proxy `:10249`, etcd `listen-metrics-urls` `127.0.0.1:2381` (first, for the probe) plus node IP:2381. Lima forwards none of these.
+- The kubeadm config is read only by the first `kubeadm init`; later changes need `make vm-reset`. Audit policy and PSA config are re-read by an API server restart handler.
+- Pod Security defaults: [ADR 0007](decisions/0007-pod-security-restricted.md).
 
 ## Traffic allowed into application pods (`llm` namespace)
 

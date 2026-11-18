@@ -127,3 +127,8 @@ per project: the plugin stays available elsewhere.
 - `review-loop`, 2 rounds. R1 opened B-024 (handler flush), B-025 (UDP forwards), B-026 (runc CVEs), B-027 (apt pins vanish after a point release, deferred to M10). R2 opened B-028 (B-025 fix regressed loopback forwards). Targeted re-check of B-028 clean. B-023 (`ssh -F ~` not expanded, High) came from the first provision.
 - Human decisions: B-023 fixed on a branch from M1 (exception to branch-per-bug order); runc 1.1.15 CVEs accepted as a risk ([TODO.md](../TODO.md) Assumptions); B-025 needed a VM reset, B-028 a stop/edit/start (user's choice).
 - Strict verify 17/0/0 on a fresh VM and after restart.
+
+### M2 — kubeadm + audit (2026-11-18)
+- `ansible-engineer` built the `kubeadm` role (reqs 2, 8c, PSA defaults for 8b); `k8s-verifier` ran `check_2`/`check_8c`.
+- `review-loop`: `sre-reviewer` R1 (disruptive tests allowed: kubelet/containerd restart, VM reboot; all recovered) opened B-029 (init rescue could `kubeadm reset` an existing cluster). R2 clean. Lows folded in: `crictl stop --timeout 5`, check-mode skips on two asserts. B-007 (loopback SAN) solved here.
+- Human decisions: disruptive testing allowed; B-029 fixed in the M2 tree without its own branch (user's choice, exception to branch-per-bug).
