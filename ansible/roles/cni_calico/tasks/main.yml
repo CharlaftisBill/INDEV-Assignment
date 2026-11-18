@@ -1,0 +1,127 @@
+---
+# Calico CNI with NetworkPolicy enforcement (req 3a); leaves the node Ready for later roles.
+# The operator creates calico-system with only the PSA enforce label; we add audit/warn after it exists.
+- name: Create the tigera-operator namespace with privileged PSA labels
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cni_calico_kubeconfig }}"
+    state: present
+    template: namespace.yaml.j2
+
+# Debian's containerd looks for CNI plugins in /usr/lib/cni, not /opt/cni/bin: Calico must install there.
+- name: Read the CNI plugin directory from the containerd config
+  ansible.builtin.command: containerd config dump
+  register: cni_calico_containerd_config
+  changed_when: false
+  check_mode: false
+
+- name: Assert containerd reports a CNI plugin directory
+  ansible.builtin.assert:
+    that: cni_calico_bin_dirs | length > 0
+    fail_msg: "'containerd config dump' has no CNI bin_dir; check the CRI plugin config in /etc/containerd/config.toml"
+    quiet: true
+  vars:
+    cni_calico_bin_dirs: "{{ cni_calico_containerd_config.stdout | regex_findall('(?m)^\\s*bin_dir = \"([^\"]+)\"') }}"
+
+- name: Set the CNI plugin directory
+  ansible.builtin.set_fact:
+    cni_calico_bin_dir: "{{ cni_calico_containerd_config.stdout | regex_findall('(?m)^\\s*bin_dir = \"([^\"]+)\"') | first }}"
+
+# Since 3.32 the CRDs ship in their own chart (same pinned version). Some exceed the 1 MiB helm release
+# Secret and the client-side apply annotation limit, so render them and create/patch without either.
+- name: Render the Calico CRDs chart
+  kubernetes.core.helm_template:
+    chart_ref: "{{ cni_calico_crds_chart }}"
+    chart_repo_url: "{{ cni_calico_chart_repo }}"
+    chart_version: "{{ calico_chart_version }}"
+    release_name: "{{ cni_calico_crds_release }}"
+    release_namespace: "{{ cni_calico_namespace }}"
+  register: cni_calico_crds
+  changed_when: false
+
+- name: Apply the Calico CRDs
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cni_calico_kubeconfig }}"
+    state: present
+    definition: "{{ cni_calico_crds.stdout | from_yaml_all | select | list }}"
+
+- name: Wait for the Calico CRDs to be Established
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cni_calico_kubeconfig }}"
+    api_version: apiextensions.k8s.io/v1
+    kind: CustomResourceDefinition
+    name: "{{ item }}"
+    wait: true
+    wait_condition:
+      type: Established
+      status: "True"
+    wait_timeout: "{{ cni_calico_wait_timeout }}"
+  loop: "{{ cni_calico_crds.stdout | from_yaml_all | select | selectattr('kind', 'eq', 'CustomResourceDefinition')
+    | map(attribute='metadata.name') | list }}"
+  changed_when: false
+
+# The ImageSet name must equal the Calico release the operator ships; with it the operator pulls images by digest only.
+# Applied before the chart so the Installation never reconciles by tag.
+- name: Pin the Calico images by digest with an ImageSet
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cni_calico_kubeconfig }}"
+    state: present
+    template: imageset.yaml.j2
+
+- name: Install the tigera-operator chart
+  kubernetes.core.helm:
+    kubeconfig: "{{ cni_calico_kubeconfig }}"
+    name: "{{ cni_calico_release }}"
+    chart_ref: "{{ cni_calico_chart }}"
+    chart_repo_url: "{{ cni_calico_chart_repo }}"
+    chart_version: "{{ calico_chart_version }}"
+    release_namespace: "{{ cni_calico_namespace }}"
+    create_namespace: false
+    # The operator defaults fields of the Installation via server-side apply; our values win.
+    force_conflicts: true
+    values: "{{ lookup('ansible.builtin.template', 'values.yaml.j2') | from_yaml }}"
+    wait: true
+    timeout: "{{ cni_calico_wait_timeout }}s"
+
+# The operator creates each TigeraStatus only after it starts reconciling that component, so poll instead of k8s_info wait.
+- name: Wait for every Calico component to report Available
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cni_calico_kubeconfig }}"
+    api_version: operator.tigera.io/v1
+    kind: TigeraStatus
+    name: "{{ item }}"
+  loop: "{{ cni_calico_components }}"
+  register: cni_calico_status
+  until: >-
+    cni_calico_status.resources | length > 0 and
+    (cni_calico_status.resources[0].status.conditions | default([])
+    | selectattr('type', 'eq', 'Available') | selectattr('status', 'eq', 'True') | list | length > 0)
+  retries: "{{ (cni_calico_wait_timeout | int / 10) | int }}"
+  delay: 10
+  changed_when: false
+
+# Merge patch: the operator keeps its own labels and does not strip ours (checked by verify 3a).
+- name: Label calico-system with audit/warn PSA privileged
+  kubernetes.core.k8s:
+    kubeconfig: "{{ cni_calico_kubeconfig }}"
+    state: patched
+    api_version: v1
+    kind: Namespace
+    name: calico-system
+    definition:
+      metadata:
+        labels:
+          pod-security.kubernetes.io/audit: privileged
+          pod-security.kubernetes.io/warn: privileged
+
+- name: Wait for the node to be Ready
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ cni_calico_kubeconfig }}"
+    api_version: v1
+    kind: Node
+    name: "{{ node_name }}"
+    wait: true
+    wait_condition:
+      type: Ready
+      status: "True"
+    wait_timeout: "{{ cni_calico_wait_timeout }}"
+  changed_when: false

@@ -132,3 +132,8 @@ per project: the plugin stays available elsewhere.
 - `ansible-engineer` built the `kubeadm` role (reqs 2, 8c, PSA defaults for 8b); `k8s-verifier` ran `check_2`/`check_8c`.
 - `review-loop`: `sre-reviewer` R1 (disruptive tests allowed: kubelet/containerd restart, VM reboot; all recovered) opened B-029 (init rescue could `kubeadm reset` an existing cluster). R2 clean. Lows folded in: `crictl stop --timeout 5`, check-mode skips on two asserts. B-007 (loopback SAN) solved here.
 - Human decisions: disruptive testing allowed; B-029 fixed in the M2 tree without its own branch (user's choice, exception to branch-per-bug).
+
+### M3 — CNI Calico (2026-11-18)
+- `ansible-engineer` built `cni_calico` (Calico v3.33.0; CRDs chart rendered separately, `cni.binDir` read from containerd, `force_conflicts`). It ran an unprompted `make vm-reset` (process note: destructive command without asking). `k8s-verifier`: 55/55.
+- `review-loop`: R1 `sre-reviewer` clean (disruptive tests), `security-reviewer` opened B-030 (images by mutable tag); the user folded 3 Lows; B-030 fixed on its own branch (digests). R2 `security-reviewer` clean; `sre-reviewer` opened B-031 (docs-only) and ran a negative test of the digest check.
+- Human decisions: disruptive tests allowed; Lows folded in; branch per bug; permission whitelist for limactl/git/gh (separate chore branch).

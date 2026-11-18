@@ -1,0 +1,26 @@
+---
+# Kubernetes modules run on the node with admin.conf (python3-kubernetes from the kubeadm role).
+cni_calico_kubeconfig: /etc/kubernetes/admin.conf
+cni_calico_chart_repo: https://docs.tigera.io/calico/charts
+cni_calico_chart: tigera-operator
+cni_calico_release: calico
+cni_calico_crds_chart: crd.projectcalico.org.v1
+cni_calico_crds_release: calico-crds
+cni_calico_namespace: "{{ ns_cni_operator }}"
+cni_calico_wait_timeout: 600
+
+# One node: pod traffic never leaves it. VXLANCrossSubnet sends same-subnet traffic unencapsulated
+# (a future second node on Lima's /24 needs no overlay) and needs no BGP, so bird/port 179 are off.
+cni_calico_encapsulation: VXLANCrossSubnet
+# Lima gives the VM one NIC; pin autodetection to the default-route interface instead of "first-found".
+cni_calico_interface: "{{ ansible_facts['default_ipv4']['interface'] }}"
+# TigeraStatus objects that must be Available (apiserver: operator 1.44's tiers status needs it).
+cni_calico_components: [calico, ippools, apiserver, tiers]
+
+# Requests only (limits could OOM-kill the CNI under load); sum 245m CPU / 384Mi on the 4 CPU / 8 GiB node.
+cni_calico_resources:
+  operator: {requests: {cpu: 20m, memory: 64Mi}}
+  node: {requests: {cpu: 100m, memory: 128Mi}}
+  typha: {requests: {cpu: 50m, memory: 64Mi}}
+  kube_controllers: {requests: {cpu: 25m, memory: 64Mi}}
+  apiserver: {requests: {cpu: 50m, memory: 64Mi}}
