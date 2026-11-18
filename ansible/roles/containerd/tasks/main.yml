@@ -37,3 +37,7 @@
     name: containerd
     enabled: true
     state: started
+
+# Restart now, not at play end: later roles (kubeadm init) must see this config (B-024).
+- name: Apply containerd config before later roles
+  ansible.builtin.meta: flush_handlers
