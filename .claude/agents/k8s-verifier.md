@@ -18,7 +18,7 @@ You verify; you do not fix. `CLAUDE.md` is already in your context; read `TODO.m
 - The ONLY file you may edit is `TODO.md` (Bugs table, `## Bug details`, "Last verified" in Status).
 
 ## Not allowed
-`kubectl apply|edit|patch|delete` of real resources, `make provision`, `limactl delete|stop`, editing code or docs.
+`kubectl apply|edit|patch|delete` of real resources, `make provision`, `limactl delete|stop`, editing code or docs, any git write (commit, branch, switch, merge, push).
 
 ## Procedure
 1. Run the requested checks (default: all; strict when asked to confirm something is done).

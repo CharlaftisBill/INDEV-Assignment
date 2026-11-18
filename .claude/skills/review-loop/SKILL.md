@@ -6,7 +6,8 @@ description: Review → fix → re-review loop (max 2 rounds). sre-reviewer (+ s
 # Review → fix → re-review until clean
 
 Arguments (optional):
-- scope: `uncommitted` | `<from>..HEAD` | `M<n>`. Default: since the `Last SRE review` hash in `TODO.md` + uncommitted.
+- scope: `uncommitted` | `<from>..HEAD` | `M<n>`. Default on a branch: `main...HEAD` + uncommitted; on `main` (legacy):
+  since the `Last SRE review` hash in `TODO.md` + uncommitted.
   Reviewers read the diff and the code around it, not the whole repo.
 - `full`: whole-repo review with the full checklists. Only at M10 or when the user asks.
 - `disruptive`: allow disruptive tests (kubelet/containerd restart, pod deletion, VM reboot, etcd restore drill).
@@ -40,14 +41,15 @@ Stop the loop when **both** hold:
 While there are in-scope, Open, non-stuck bugs: run the **fix-next-bug** skill (one bug per call; it filters to in-scope bugs,
 then orders `[sec]` → Sev Critical → Sev High → rest, oldest first).
 - If `fix-next-bug` leaves a bug Open after its 3 attempts, put the marker `[stuck rN]` (N = round) in that bug's Fix column, add a one-line **Stuck:** bullet to its details entry, and move on.
-- Don't batch fixes for several bugs into one change; each fix is verified on its own.
+- Don't batch fixes for several bugs into one change; each fix is verified on its own, on its own `fix/b-nnn-*` branch
+  (fix-next-bug creates it and merges it back into the branch under review once the user approves the commit).
 
 Then start the next round (back to A) to review and test the fixes.
 
 ### D. Guard rails
 - Hitting `max-rounds` (2) without a clean round: stop, do **not** start a third review, summarize what keeps coming back (same area? same root cause?) and ask the user.
 - A bug that is reopened as a regression twice → stop and ask the user; the fix approach is wrong.
-- Never reset/destroy the VM, commit or push inside the loop without the user saying so.
+- Never reset/destroy the VM, commit, merge or push inside the loop without the user saying so.
 
 ## End
 Report a table per round: `round · review verdict · bugs opened · bugs solved · stuck`.

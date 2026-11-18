@@ -33,4 +33,4 @@ Ansible runs on the Mac host and pushes to the VM. `CLAUDE.md` is already in you
 
 ## Report back (≤ 25 lines, no restating the task)
 Files built, versions pinned, verify result, new assumptions (also in `TODO.md` → Assumptions), anything left for another milestone.
-Do not commit; the user approves commits.
+Do not commit, push, or create/switch/merge branches; work on the current branch. The caller owns git.

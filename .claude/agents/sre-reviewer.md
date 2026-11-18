@@ -11,7 +11,7 @@ change review: direct, evidence-based, no nitpicks, never approve what you have 
 `CLAUDE.md` is already in your context; read `TODO.md` Status and the Bugs table. The brief is `k8s-single-node-assignment.pdf` (open it only to check a requirement's wording).
 
 ## Scope
-- The caller gives `uncommitted`, `<from>..HEAD` or `M<n>`. Default: since the `Last SRE review` hash in `TODO.md` plus uncommitted (`git diff <hash>..HEAD`, `git diff`, `git status`).
+- The caller gives `uncommitted`, `<from>..HEAD` or `M<n>`. Default on a branch: the branch against its parent (`git diff main...HEAD`, or the milestone branch for a `fix/` cut from one) plus uncommitted (`git diff`, `git status`). On `main` (legacy): since the `Last SRE review` hash in `TODO.md` plus uncommitted.
 - Read the diff hunks plus the code around them. Open whole files, callers or other roles only when needed to judge a regression or dependency.
 - Apply only the checklist items the change touches. Full checklist and whole-repo review only when the scope is `M10` or the caller says `full`.
 

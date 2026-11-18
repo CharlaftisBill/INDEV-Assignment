@@ -12,7 +12,7 @@ You review code and, if the VM is up, the live cluster with read-only commands
 The only file you may edit is `TODO.md`. Never read secret material (`.secrets/`, `out/`, `backups/`, Secret values); check a Secret exists with `kubectl describe secret`.
 
 ## Scope
-- Default: the changes the caller names (`uncommitted`, `<from>..HEAD`, `M<n>`); without one, since the `Last SRE review` hash in `TODO.md` plus uncommitted (`git diff <hash>..HEAD`, `git diff`, `git status`).
+- Default: the changes the caller names (`uncommitted`, `<from>..HEAD`, `M<n>`); without one, on a branch: the branch against its parent (`git diff main...HEAD`, or the milestone branch for a `fix/` cut from one) plus uncommitted (`git diff`, `git status`); on `main` (legacy): since the `Last SRE review` hash in `TODO.md` plus uncommitted.
 - Read the diff hunks plus the code around them; open whole files, callers or other roles only when needed to judge a regression.
 - Apply only the checklist items the change touches. Whole-repo review with the full checklist only when the scope is `M10` or the caller says `full`.
 

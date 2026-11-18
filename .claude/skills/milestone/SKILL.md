@@ -11,6 +11,8 @@ Argument: a milestone ID (`M5`) or "next". If "next", take the first unchecked m
 - Read `TODO.md`: the milestone line, the Status line, and every **Open** bug for this milestone or an earlier one (in scope; later ones are deferred).
 - Read the matching rows in `docs/requirements-matrix.md`.
 - Check the VM is running: `limactl list`. If not, use the `vm-lifecycle` skill (`make vm-up`).
+- Branch: `git switch main && git pull --ff-only`, then `git switch -c feat/m<n>-<slug>` (slug from the milestone line,
+  e.g. `feat/m1-os-prep-containerd`). If the previous milestone's PR isn't merged yet, stop and ask. Resume on the branch if it exists.
 - Update the Status line in `TODO.md` to this milestone.
 
 ## 1. Implement
@@ -21,7 +23,7 @@ It returns after lint, provision and idempotency pass.
 ## 2. Verify
 Delegate to the **k8s-verifier** agent with the requirement IDs this milestone delivers (as listed on its line in `TODO.md`,
 including sub-IDs such as `8c`) in **strict** mode: `make verify REQ="<ids>" STRICT=1`. A SKIP is a failure here.
-- If it opened bugs → send them back to **ansible-engineer**, then verify again. Max 3 loops; after that stop and ask the user.
+- If it opened bugs → fix each with **fix-next-bug** (own `fix/b-nnn-*` branch, merged back into this one), then verify again. Max 3 loops; after that stop and ask the user.
 
 ## 3. Review until clean
 Run the **review-loop** skill scoped to this milestone (`M<n>`). The **sre-reviewer** agent reviews the changes and tests the
@@ -40,3 +42,5 @@ Delegate to the **docs-writer** agent: milestone ID, what was built, versions pi
 - Commit with the `split-commits` skill (focused Conventional Commits, e.g. one `feat(<role>)` per role, `fix(...)` per bug,
   `docs`, then `chore(todo)` last with the bug hashes filled in). Mention the milestone and requirement numbers in the bodies.
   Commit only when the user approves. No AI attribution trailers.
+- Push and open the PR to `main` (each asks; see `split-commits` step 5). Stop there: the next milestone starts only after
+  the user has merged it (with a merge commit).

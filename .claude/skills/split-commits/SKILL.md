@@ -15,9 +15,12 @@ Goal: a history a reviewer can read commit by commit. One commit = one concern t
 - Never `git add -A` / `git add .` / `git commit -a`. Stage explicit paths only.
 - Never rewrite published history (`--amend`, rebase, force-push) unless the user asks.
 - Don't push. Pushing is a separate, user-approved step.
+- Never commit on `main` or a detached HEAD (`.githooks/pre-commit` rejects it). If on one, stop and name the branch to create
+  (`feat/m<n>-<slug>`, `fix/b-nnn-<slug>`, `chore/<slug>`; rules in `CLAUDE.md` › Branches).
 
 ## 1. Inspect
 ```bash
+git branch --show-current   # must be a feat/, fix/ or chore/ branch, never main
 git status --porcelain=v1 --untracked-files=all
 git diff --stat            # unstaged
 git diff --cached --stat   # already staged
@@ -80,3 +83,7 @@ git log --oneline -n <k>
 git log -n <k> --format=%B | grep -i 'co-authored-by' && echo "TRAILER FOUND" || true
 ```
 Report the commit list (hash + subject) and anything you left uncommitted on purpose, and why.
+Then offer the next git step (each needs the user's yes): a `fix/` branch cut from a milestone branch → `git switch <parent>`,
+`git merge --no-ff <branch>`, `git branch -d <branch>`; any other branch → `git push -u origin <branch>` and
+`gh pr create --base main` (title = the main commit subject, body = short summary + req/bug IDs, no AI attribution).
+Remind the user to merge with **Create a merge commit** (squash/rebase changes the hashes in `TODO.md`).

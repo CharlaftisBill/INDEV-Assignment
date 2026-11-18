@@ -69,7 +69,7 @@ deps: ## Install host tools: Lima + Python 3.14 (Homebrew), pinned venv, collect
 tools: venv collections ## Pinned Python tooling (.venv) + pinned Ansible collections
 
 .PHONY: hooks
-hooks: ## Enable the repo's git hooks (.githooks/commit-msg)
+hooks: ## Enable the repo's git hooks (.githooks: commit-msg, pre-commit)
 	git config core.hooksPath .githooks
 
 .PHONY: venv
