@@ -137,3 +137,6 @@ per project: the plugin stays available elsewhere.
 - `ansible-engineer` built `cni_calico` (Calico v3.33.0; CRDs chart rendered separately, `cni.binDir` read from containerd, `force_conflicts`). It ran an unprompted `make vm-reset` (process note: destructive command without asking). `k8s-verifier`: 55/55.
 - `review-loop`: R1 `sre-reviewer` clean (disruptive tests), `security-reviewer` opened B-030 (images by mutable tag); the user folded 3 Lows; B-030 fixed on its own branch (digests). R2 `security-reviewer` clean; `sre-reviewer` opened B-031 (docs-only) and ran a negative test of the digest check.
 - Human decisions: disruptive tests allowed; Lows folded in; branch per bug; permission whitelist for limactl/git/gh (separate chore branch).
+
+### M4 — Storage local-path (2026-11-18)
+- `review-loop` 2 rounds: `k8s-verifier` found B-032 (provisioner restarts from `capabilities.add`); `sre-reviewer` found B-033 (rollout wait) and B-034 (`check_5` re-run race); all fixed, R2 clean. The `DAC_OVERRIDE` question was settled by a reviewer test ([ADR 0004](decisions/0004-local-path-storage.md)).
