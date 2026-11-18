@@ -19,12 +19,16 @@ and build them in layers that fail safe:
 1. **Instructions**: the Secrets rule in `CLAUDE.md` (never read secret material; use `kubectl describe secret`).
    This is what actually applies.
 2. **Allow-list, not block-list**: auto-approve only fixed, known-safe command shapes (listed `kubectl get <kind>`,
-   fixed `make` targets, `make ping`, read-only node commands). Anything else falls through to a prompt.
+   exact `make` commands with no `:*` wildcard (`make verify`, `make provision TAGS=<role>`, `make verify REQ=<id> STRICT=1`),
+   `make ping`, read-only node commands). Anything else falls through to a prompt.
 3. **Ask** for secret-adjacent patterns (Secrets, `--raw`, identity flags, remote shell metacharacters, node PKI,
    the CA-key directory). A human sees the command.
 4. **Deny** only for printing the secret files themselves (CA key, kubeconfigs, snapshots, node keys, `config view --raw`).
 5. **Validate inputs where commands are built**: the Makefile rejects shell characters in user-settable variables and
-   marks internal variables `override` (B-019), so pre-approved `make` targets can't be turned into arbitrary commands.
+   marks internal variables `override` (B-019), accepts only whitelisted command-line variables, and runs destructive
+   targets only as the sole goal (B-020). make expands `VAR:=$(shell …)`, `--eval` and `-f` before the Makefile is read,
+   so this layer can't stop those; that is why layer 2 pre-approves exact commands only. Allowed targets still run repo
+   code (`scripts/verify.sh`, roles, `.venv`), so edits to that code are part of what a human reviews.
 
 The real boundary for a hostile process would be OS-level: secrets not readable by the user the agent runs as
 (e.g. a separate account, a sandbox, or a secrets manager). That is out of scope for a local, single-user assignment

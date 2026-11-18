@@ -36,7 +36,7 @@ Commit or stash nothing on your own: if the working tree has unrelated uncommitt
 
 ## 2. Reproduce before touching anything
 - Re-read the bug's details entry in `TODO.md` (Report: evidence, suggested direction).
-- Reproduce the symptom with a concrete command: the failing `make verify REQ=n` check, `make lint`, `make idempotency TAGS=<role>`,
+- Reproduce the symptom with a concrete command: the failing `make verify REQ=<id> STRICT=1` check, `make lint`, `make idempotency TAGS=<role>`,
   a `kubectl`/`limactl shell` inspection, or a small test case. Record the command and its output.
 - If it no longer reproduces: don't mark it Solved on a guess. Find which change fixed it (`git log -S`, `git log -- <path>`);
   if you can name the commit, solve it with that hash and "no longer reproduces since <hash>"; otherwise update its one-line **Direction** with the finding,
@@ -62,10 +62,10 @@ respect every hard rule in `CLAUDE.md` (pinning, idempotency, PSA, no secrets).
 All of these must pass before the bug can be Solved:
 - The reproduction command from step 2 now shows the expected result.
 - `make lint`.
-- If a role changed: `make provision TAGS=<role>` and `make idempotency TAGS=<role>` (`changed=0`), then `make verify REQ="<ids>" STRICT=1`
-  with the check IDs that role delivers (Requirement column of the role table in `docs/architecture.md`), limited to IDs whose
+- If a role changed: `make provision TAGS=<role>` and `make idempotency TAGS=<role>` (`changed=0`), then `make verify REQ=<id> STRICT=1` for each ID in the IDs
+  that role delivers (Requirement column of the role table in `docs/architecture.md`), limited to IDs whose
   milestone is ticked or current; the **k8s-verifier** agent can run this.
-- If `scripts/verify.sh`, the Makefile or `.claude/` changed: `make verify REQ="<ids of ticked milestones>" STRICT=1` still passes (skip if no ticked milestone has IDs yet: an empty `REQ` means all checks)
+- If `scripts/verify.sh`, the Makefile or `.claude/` changed: `make verify REQ=<id> STRICT=1` for each ID in the ticked milestones still passes (skip if no ticked milestone has IDs yet)
   (a tooling fix must not turn a delivered check into a SKIP).
 - If the bug is `[sec]`: ask the **security-reviewer** agent to re-check that specific finding.
 - If the bug is `[sre]` and you are not running inside `review-loop` (which re-reviews every fix anyway): ask the

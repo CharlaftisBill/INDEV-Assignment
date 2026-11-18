@@ -32,33 +32,42 @@ override VENV_STAMP   := $(VENV)/.installed
 override PATH         := $(VENV)/bin:$(PATH)
 export PATH
 
-# ---------------------------------------------------------------- input validation (B-019)
+# ---------------------------------------------------------------- input validation (B-019, B-020)
 # User-settable variables end up in recipe shell lines, so they may only contain characters
 # that are inert in a shell. Checked in pure make on the raw, unexpanded text ($(value)),
-# so a `$(shell ...)` or `;` payload is rejected before any shell runs.
-empty  :=
-space  := $(empty) $(empty)
-comma  := ,
-_lower := a b c d e f g h i j k l m n o p q r s t u v w x y z
-_upper := A B C D E F G H I J K L M N O P Q R S T U V W X Y Z
-_digit := 0 1 2 3 4 5 6 7 8 9
+# so a `$(shell ...)` or `;` payload is rejected before any shell runs. Helpers are `override`
+# so the command line cannot redefine them. Not covered (make expands them before reading this
+# file): `VAR:=$(shell ...)`, `--eval`, `-f`; hence only exact `make` commands are pre-approved (ADR 0009).
+override USER_VARS := VM TAGS REQ ANSIBLE_ARGS STRICT PYTHON
+override _cmdline_vars := $(foreach v,$(.VARIABLES),$(if $(filter command line,$(origin $(v))),$(v)))
+$(if $(filter-out $(USER_VARS),$(_cmdline_vars)),$(error Only these variables can be set: $(USER_VARS); got: $(filter-out $(USER_VARS),$(_cmdline_vars))))
+# Destructive targets run alone, so they can't ride along with a harmless one (`make verify vm-destroy`).
+override DESTRUCTIVE := vm-down vm-destroy vm-reset e2e
+$(if $(and $(filter $(DESTRUCTIVE),$(MAKECMDGOALS)),$(word 2,$(MAKECMDGOALS))),$(error $(filter $(DESTRUCTIVE),$(MAKECMDGOALS)) must be the only goal))
+
+override empty  :=
+override space  := $(empty) $(empty)
+override comma  := ,
+override _lower := a b c d e f g h i j k l m n o p q r s t u v w x y z
+override _upper := A B C D E F G H I J K L M N O P Q R S T U V W X Y Z
+override _digit := 0 1 2 3 4 5 6 7 8 9
 # $(call _strip_chars,TEXT,CHARS): TEXT with every char in the CHARS list removed
-_strip_chars = $(if $(2),$(call _strip_chars,$(subst $(firstword $(2)),,$(1)),$(wordlist 2,999,$(2))),$(1))
+override _strip_chars = $(if $(2),$(call _strip_chars,$(subst $(firstword $(2)),,$(1)),$(wordlist 2,999,$(2))),$(1))
 # $(call check_chars,VAR,ALLOWED CHARS,DESCRIPTION): error unless VAR has only allowed chars and spaces
-check_chars = $(if $(subst $(space),,$(call _strip_chars,$(value $(1)),$(2))),$(error $(1) may only contain $(3); got: $(value $(1))))
-_ := $(call check_chars,REQ,$(_digit) a b c,check IDs such as 2 8c)
-_ := $(call check_chars,TAGS,$(_lower) $(_digit) _ $(comma),role names separated by commas)
-_ := $(call check_chars,STRICT,0 1,0 or 1)
-_ := $(call check_chars,VM,$(_lower) $(_digit) -,a Lima instance name)
-_ := $(call check_chars,PYTHON,$(_lower) $(_digit) . / - _,a python executable name or path)
-_ := $(call check_chars,ANSIBLE_ARGS,$(_lower) $(_upper) $(_digit) - _ = . / : $(comma) +,ansible-playbook flags without quotes or shell characters)
+override check_chars = $(if $(subst $(space),,$(call _strip_chars,$(value $(1)),$(2))),$(error $(1) may only contain $(3); got: $(value $(1))))
+$(call check_chars,REQ,$(_digit) a b c,check IDs such as 2 8c)
+$(call check_chars,TAGS,$(_lower) $(_digit) _ $(comma),role names separated by commas)
+$(call check_chars,STRICT,0 1,0 or 1)
+$(call check_chars,VM,$(_lower) $(_digit) -,a Lima instance name)
+$(call check_chars,PYTHON,$(_lower) $(_digit) . / - _,a python executable name or path)
+$(call check_chars,ANSIBLE_ARGS,$(_lower) $(_upper) $(_digit) - _ = . / : $(comma) +,ansible-playbook flags without quotes or shell characters)
 
 .PHONY: help
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z0-9_-]+:.*## / {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 # ---------------------------------------------------------------- host deps
-COLLECTIONS_STAMP := $(ANSIBLE_DIR)/collections/.installed
+override COLLECTIONS_STAMP := $(ANSIBLE_DIR)/collections/.installed
 
 .PHONY: deps
 deps: ## Install host tools: Lima + Python 3.14 (Homebrew), pinned venv, collections, git hooks
