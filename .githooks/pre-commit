@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Rejects commits on main or a detached HEAD: work lands through feat/, fix/ or chore/ branches and a PR.
+# Merges (pre-merge-commit) are unaffected. Enabled with: make hooks
+set -euo pipefail
+
+branch="$(git symbolic-ref --quiet --short HEAD || true)"
+if [[ -z "$branch" || "$branch" == "main" ]]; then
+  echo "pre-commit: no commits on ${branch:-a detached HEAD}. Create a branch first:" >&2
+  echo "            git switch -c feat/m<n>-<slug> | fix/b-nnn-<slug> | chore/<slug>" >&2
+  exit 1
+fi

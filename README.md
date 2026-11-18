@@ -78,7 +78,7 @@ Optional: `brew install shellcheck` adds shell-script linting to `make lint` (sk
 make hooks
 ```
 
-This points git at `.githooks/`, whose `commit-msg` hook enforces Conventional Commit subjects and rejects AI attribution trailers.
+This points git at `.githooks/`, whose `commit-msg` hook enforces Conventional Commit subjects and rejects AI attribution trailers, and whose `pre-commit` hook rejects commits on `main` ([git workflow](docs/ai-workflow.md#git-workflow)).
 
 **5. Map the ingress hostnames to the VM's port-forward** (one time, needs sudo):
 
@@ -111,7 +111,7 @@ docs/               architecture, requirements matrix, ADRs, runbooks, AI workfl
 backups/            etcd snapshots from the VM (gitignored)
 out/                generated kubeconfigs (gitignored)
 .claude/            agents, skills, hooks and permissions used to build this with Claude Code
-.githooks/          versioned git hooks (commit-msg)
+.githooks/          versioned git hooks (commit-msg, pre-commit)
 CLAUDE.md           project instructions for the agent
 TODO.md             milestones, bugs (Open/Solved), assumptions
 k8s-single-node-assignment.pdf   the assignment brief
