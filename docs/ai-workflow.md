@@ -121,3 +121,9 @@ per project: the plugin stays available elsewhere.
 - The user asked for a review-loop offer before every PR. First run (on B-020): round 1 opened B-021 (agent commands no
   longer matched the exact allows), round 2 opened B-022 (that fix dropped the whole-playbook idempotency gate); each fixed
   on its own branch, merged back `--no-ff`; B-022 re-check clean. PR #2.
+
+### M1 — OS prep + containerd (2026-11-18)
+- `ansible-engineer` built `os_prep` and `containerd`; `k8s-verifier` confirmed `check_1` (17 checks). Lima and ansible.cfg fixes were made in the main session (`fix-next-bug` routing).
+- `review-loop`, 2 rounds. R1 opened B-024 (handler flush), B-025 (UDP forwards), B-026 (runc CVEs), B-027 (apt pins vanish after a point release, deferred to M10). R2 opened B-028 (B-025 fix regressed loopback forwards). Targeted re-check of B-028 clean. B-023 (`ssh -F ~` not expanded, High) came from the first provision.
+- Human decisions: B-023 fixed on a branch from M1 (exception to branch-per-bug order); runc 1.1.15 CVEs accepted as a risk ([TODO.md](../TODO.md) Assumptions); B-025 needed a VM reset, B-028 a stop/edit/start (user's choice).
+- Strict verify 17/0/0 on a fresh VM and after restart.

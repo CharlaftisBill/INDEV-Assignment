@@ -35,7 +35,7 @@ The host is an Apple Silicon Mac (arm64).
 
 Steps that were run to prepare it:
 
-**1. Prerequisites already present:** Homebrew, git, python3, kubectl.
+**1. Prerequisites already present:** Homebrew, git, python3, kubectl, GitHub CLI (`gh`, used for PRs).
 
 **2. Install Lima and Python 3.14 with Homebrew** (`make deps` does steps 2–4):
 

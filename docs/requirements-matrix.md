@@ -5,7 +5,7 @@ Each requirement from the assignment, where it is implemented, and how it is ver
 
 | # | Requirement | Implementation | Verification (`scripts/verify.sh`) | Milestone | Status |
 |---|---|---|---|---|---|
-| 1 | OS prep, containerd, pinned packages | `ansible/roles/os_prep/`, `ansible/roles/containerd/` | `check_1`: containerd active, SystemdCgroup, swap off, sysctls, `apt-mark showhold` | M1 | Planned |
+| 1 | OS prep, containerd, pinned packages | `os_prep`: swap off (persisted), `overlay`/`br_netfilter`, 3 sysctls, 9 pinned+held base packages. `containerd`: Debian containerd + runc, held, config v2 with `SystemdCgroup`, restart flushed at role end. Versions in `ansible/group_vars/all/versions.yml`; runc CVE risk accepted (`TODO.md` B-026) | `make verify REQ=1 STRICT=1` (`check_1`, 17 checks: containerd active, SystemdCgroup, CRI enabled, swap + fstab, modules + persistence, sysctls + persistence, `apt-mark showhold`); `make idempotency` | M1 | Done (M1) |
 | 2 | kubeadm, single node runs control plane + workloads | `ansible/roles/kubeadm/` | `check_2`: node Ready, no NoSchedule taint, kube-system healthy | M2 | Planned |
 | 3a | CNI installed and healthy | `ansible/roles/cni_calico/` | `check_3a`: Calico ready, pods get IPs from the pod CIDR | M3 | Planned |
 | 3b | App pods accept only the traffic they need | NetworkPolicies in `ansible/roles/llm_app/` | `check_3b`: default-deny, blocked vs allowed test traffic | M9 | Planned |

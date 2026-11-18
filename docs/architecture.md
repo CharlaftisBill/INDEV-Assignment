@@ -44,8 +44,10 @@ Filled from `ansible/group_vars/all/versions.yml` as milestones land.
 
 | Component | Version | Source |
 |---|---|---|
-| Debian | 13 (trixie) genericcloud arm64 | cloud.debian.org |
-| containerd | — | M1 |
+| Debian | 13 (trixie) genericcloud arm64, build 20261103-2651 (sha512 in `lima/k8s.yaml`) | cloud.debian.org |
+| containerd | 1.7.24~ds1-6+deb13u1 | Debian trixie, held |
+| runc | 1.1.15+ds1-2+b4 | Debian trixie, held (known CVEs accepted, B-026) |
+| Base packages (9) | see `os_base_packages` in `versions.yml` | Debian trixie, held |
 | Kubernetes (kubeadm/kubelet/kubectl) | — | M2 |
 | Calico | — | M3 |
 | local-path-provisioner | — | M4 |
