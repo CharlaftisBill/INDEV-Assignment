@@ -27,7 +27,7 @@ Ansible runs on the Mac host and pushes to the VM. `CLAUDE.md` is already in you
 5. Validate, in order, and fix until clean:
    - `make lint`
    - `make provision TAGS=<role>`
-   - `make idempotency TAGS=<role>` (must be `changed=0`)
+   - `make idempotency TAGS=<role>`, then bare `make idempotency` (whole playbook; both must be `changed=0`)
    - `make verify REQ=<id> STRICT=1` for each ID in the milestone line in `TODO.md` — each must PASS with no SKIP (implement the check in `scripts/verify.sh` if it is still a stub)
 6. Update `TODO.md`: mark bugs you fixed **Solved** with the `bug` skill. Never delete rows.
 

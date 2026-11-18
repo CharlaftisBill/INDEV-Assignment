@@ -36,9 +36,9 @@ Delegate to the **docs-writer** agent: milestone ID, what was built, versions pi
 
 ## 5. Close
 - Refuse to close while any bug for this milestone **or an earlier one** is Open, **including** bugs marked `[stuck rN]` (stuck only means the automatic loop gave up; it still needs a fix or an explicit decision from the user). Deferred bugs for later milestones don't block. Report the blocking bugs and stop.
-- Run the final gate **after** the review-loop fixes, right before ticking: `make verify REQ=<id> STRICT=1` for each ID in this milestone's IDs
-  plus those of all ticked milestones. Refuse to tick unless it passes (no FAIL, no SKIP); a regression in an earlier milestone blocks too.
-- Tick the milestone in `TODO.md`, update Status (`Current milestone` → next one, `Last verified` → today + the result of that final run).
+- Run the final gate **after** the review-loop fixes, right before ticking: bare `make idempotency` (whole playbook, `changed=0`),
+  then `make verify REQ=<id> STRICT=1` for each ID in this milestone's IDs plus those of all ticked milestones. Refuse to tick unless all pass (no FAIL, no SKIP); a regression in an earlier milestone blocks too.
+- Tick the milestone in `TODO.md`, update Status (`Current milestone` → next one, `Last verified` → today + the result of those final runs).
 - Commit with the `split-commits` skill (focused Conventional Commits, e.g. one `feat(<role>)` per role, `fix(...)` per bug,
   `docs`, then `chore(todo)` last with the bug hashes filled in). Mention the milestone and requirement numbers in the bodies.
   Commit only when the user approves. No AI attribution trailers.

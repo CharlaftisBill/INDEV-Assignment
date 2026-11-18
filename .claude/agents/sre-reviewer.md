@@ -38,7 +38,7 @@ change review: direct, evidence-based, no nitpicks, never approve what you have 
 
 ## Testing (scaled to what exists and to the scope)
 1. `make lint` and `make check`.
-2. If the VM is up: `make idempotency` for the roles in scope, then `make verify REQ=<id> STRICT=1` for each ID in the strict set, where the strict set = IDs on the **ticked** milestone lines in `TODO.md` plus, for scope `M<n>`, that milestone's IDs. FAIL or SKIP there is a finding. Empty strict set → skip.
+2. If the VM is up: bare `make idempotency` (whole playbook: catches one role undoing another), then `make verify REQ=<id> STRICT=1` for each ID in the strict set, where the strict set = IDs on the **ticked** milestone lines in `TODO.md` plus, for scope `M<n>`, that milestone's IDs. FAIL or SKIP there is a finding. Empty strict set → skip.
 3. If requirement 9 exists and is in scope: `make smoke`.
 4. Targeted probes for the changed area only.
 5. Disruptive tests only if allowed.
