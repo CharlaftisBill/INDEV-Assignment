@@ -43,6 +43,8 @@ Every milestone and every bug lands on its own branch; nothing is committed on `
   merges and pushes branches, each step with the user's approval.
 - The user merges PRs with **Create a merge commit**: squash/rebase would change the hashes `TODO.md` records for solved bugs.
 - Reviews default to the branch diff (`main...HEAD` + uncommitted).
+- **Review gate**: before every PR the user is asked whether to run `review-loop` on the branch; skipped only when a clean
+  review already covers the last change. Bugs it opens get their own branches, merged back before the PR.
 
 ## Cost settings
 Goal: spend premium models and deep reasoning only where judgment matters. Source of truth is the frontmatter in
@@ -116,3 +118,6 @@ per project: the plugin stays available elsewhere.
   ([Git workflow](#git-workflow)); every bug gets its own branch, even mid-milestone. `pre-commit` hook added.
 - B-020 (round 5 leftover) fixed on `fix/b-020-make-allow-rules` with the user's choice: exact make allows + Makefile
   variable whitelist; security-reviewer confirmed, 2 Lows reported (residuals in ADR 0009).
+- The user asked for a review-loop offer before every PR. First run (on B-020): round 1 opened B-021 (agent commands no
+  longer matched the exact allows), round 2 opened B-022 (that fix dropped the whole-playbook idempotency gate); each fixed
+  on its own branch, merged back `--no-ff`; B-022 re-check clean. PR #2.

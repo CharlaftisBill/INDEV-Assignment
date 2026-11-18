@@ -42,5 +42,5 @@ Delegate to the **docs-writer** agent: milestone ID, what was built, versions pi
 - Commit with the `split-commits` skill (focused Conventional Commits, e.g. one `feat(<role>)` per role, `fix(...)` per bug,
   `docs`, then `chore(todo)` last with the bug hashes filled in). Mention the milestone and requirement numbers in the bodies.
   Commit only when the user approves. No AI attribution trailers.
-- Push and open the PR to `main` (each asks; see `split-commits` step 5). Stop there: the next milestone starts only after
+- Push and open the PR to `main` (review gate, push and PR each ask; see `split-commits` step 5; step 3's clean loop usually covers it). Stop there: the next milestone starts only after
   the user has merged it (with a merge commit).
