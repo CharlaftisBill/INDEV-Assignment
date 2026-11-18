@@ -3,7 +3,7 @@
 Live project state and bug tracker. Agents read this first and update it last (protocol in `CLAUDE.md`).
 
 ## Status
-Current milestone: **M3 — cni_calico** · Last verified: 2026-11-18 final gate M2 (`make idempotency` changed=0; 1: 17, 2: 20, 8c: 8 PASS · 0 FAIL · 0 SKIP, strict) · Last SRE review: working tree 2026-11-18 — clean (M2 r2)
+Current milestone: **M3 — cni_calico** (branch `feat/m3-cni-calico`) · Last verified: 2026-11-18 (1: 17, 2: 20, 3a: 10, 8c: 8 PASS · 0 FAIL · 0 SKIP, strict; M3 gate on rebuilt VM; review-loop pending) · Last SRE review: working tree 2026-11-18 — clean (M3 r1)
 
 ## Milestones
 - [x] M0 Scaffolding: repo layout, agentic layer (`.claude/`), Makefile, lint configs, Lima config, docs skeleton, commit tooling (`split-commits` skill, `.githooks/commit-msg`)
@@ -63,6 +63,7 @@ for each bug are in [Bug details](#bug-details) below.
 | B-027 | [sre] Exact Debian apt pins vanish after the next DSA/point release: clean rebuild fails | Medium | Open | M10 | 2026-11-18 |  |  |
 | B-028 | [sec] regression of B-025: catch-all ignore no longer matches 127.0.0.1; loopback ports forwarded | Medium | Solved | M1 | 2026-11-18 | 2026-11-18 | 6ea9ce9 |
 | B-029 | [sre] kubeadm init rescue runs `kubeadm reset --force` on an existing cluster: wipes etcd | Medium | Solved | M2 | 2026-11-18 | 2026-11-18 | 9236ac4 |
+| B-030 | [sec] Calico images (privileged, hostNetwork) pulled by mutable tag only, no digest pins | Medium | Open | M3 | 2026-11-18 |  |  |
 
 ## Assumptions / open questions
 - Host is an Apple Silicon Mac → VM is Debian 13 **arm64** under Lima (vz). amd64 image is listed in `lima/k8s.yaml` for Intel hosts but untested. Linux hosts are planned (Backlog), Windows is out of scope (Ansible needs WSL2).
@@ -76,6 +77,8 @@ for each bug are in [Bug details](#bug-details) below.
 - Python client for `kubernetes.core` on the node: Debian `python3-kubernetes` 30.1.0-2 (pinned, held), not a pip venv: a venv needs `python3.13-venv`, whose `+deb13uN` pin changes with every Python DSA (worse for B-027), and pip would pull unpinned transitive deps. The dynamic client works against 1.35.
 - kubeadm init runs once (`creates: admin.conf`); later edits to the kubeadm config need `make vm-reset`. Audit policy and admission config changes restart the API server (handler).
 - PSA cluster defaults: enforce `baseline`, audit/warn `restricted`, only `kube-system` exempt. Platform namespaces needing host access (tigera-operator, local-path, traefik, node-exporter) are labelled by their own roles.
+- Calico platform namespaces `tigera-operator` (labelled by `cni_calico`) and `calico-system` (labelled by the operator) are PSA `privileged`: the CNI needs host networking, hostPath and NET_ADMIN. Not app namespaces, so exempt from `restricted` (CLAUDE.md).
+- Calico v3.33.0 (chart + CRDs chart, operator v1.44.0): newest release ≥ 2 weeks old (v3.33.1 is from 2026-11-16). VXLANCrossSubnet, BGP off, Goldmane/Whisker off; the Calico API server stays on because the `tiers` TigeraStatus is Degraded without it. Debian's containerd CNI dir is `/usr/lib/cni`: read from containerd, passed as `cni.binDir` (ADR 0002).
 - Metrics bind to the node IP (etcd 2381 also on 127.0.0.1 for its probe; controller-manager 10257, scheduler 10259, kube-proxy 10249); reachable from pods, not forwarded to the Mac. etcd metrics are plain HTTP.
 - Audit: one `Metadata` catch-all rule, `RequestReceived` stage omitted (every request still logs ResponseComplete/ResponseStarted).
 - pkgs.k8s.io signing key `DE15…6436` expires 2026-12-29; the role re-downloads it each run and checks the fingerprint, so an OBS expiry extension is picked up.
@@ -250,3 +253,7 @@ Max 5 lines per bug (heading + up to 4 one-line bullets, ~200 chars each). Full 
 - **Root cause:** the only init guard was `creates: admin.conf`; a missing admin.conf on a live node sent init into the reset rescue.
 - **Fix:** stat admin.conf, the apiserver manifest and etcd member dir; fail before init if a control plane exists without admin.conf. Fixed in the M2 tree, no own branch (user's choice).
 - **Verification:** check-mode run of `init.yml` with admin.conf pointed at a missing file stops at the guard (init/reset never reached); idempotency changed=0; strict 1/2/8c 45 PASS.
+
+### B-030: [sec] Calico images (privileged, hostNetwork) pulled by mutable tag only, no digest pins
+- **Report** (sec M3 r1): only the chart version is pinned; live pods run `quay.io/tigera/operator:v1.44.0`, `quay.io/calico/{node,calico,third-party-cni-plugins}:v3.33.0` by tag; a re-pushed tag runs as host root.
+- **Direction:** pin the operator image digest via chart values and add an `operator.tigera.io/v1` ImageSet `calico-v3.33.0` with multi-arch index digests; keep the digests in `versions.yml`; verify checks `imageID`.
