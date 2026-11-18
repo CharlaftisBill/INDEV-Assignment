@@ -3,14 +3,14 @@
 Live project state and bug tracker. Agents read this first and update it last (protocol in `CLAUDE.md`).
 
 ## Status
-Current milestone: **M3 — cni_calico** (branch `feat/m3-cni-calico`) · Last verified: 2026-11-18 (1: 17, 2: 20, 3a: 10, 8c: 8 PASS · 0 FAIL · 0 SKIP, strict; M3 gate on rebuilt VM; review-loop pending) · Last SRE review: working tree 2026-11-18 — clean (M3 r1)
+Current milestone: **M4 — storage** · Last verified: 2026-11-18 final gate M3 (`make idempotency` changed=0; 1: 17, 2: 20, 3a: 15, 8c: 8 PASS · 0 FAIL · 0 SKIP, strict) · Last SRE review: 9ededee 2026-11-18 — M3 r2: B-031 (docs) fixed; code clean
 
 ## Milestones
 - [x] M0 Scaffolding: repo layout, agentic layer (`.claude/`), Makefile, lint configs, Lima config, docs skeleton, commit tooling (`split-commits` skill, `.githooks/commit-msg`)
 - [x] M1 VM up + `os_prep` + `containerd` (req 1)
 - [x] M2 `kubeadm`: init, untaint, audit policy, PSA admission config, metrics binds, `out/admin.conf` (req 2, 8c)
   - Cross-role: `containerd` template sets `sandbox_image` to kubeadm's pause (`pause_image_tag`), else kubeadm preflight warns and two pause images are used.
-- [ ] M3 `cni_calico` (req 3a)
+- [x] M3 `cni_calico` (req 3a)
 - [ ] M4 `storage`: local-path-provisioner as default StorageClass (req 5)
 - [ ] M5 `pki` + cert-manager + `ingress_traefik` (req 4)
 - [ ] M6 `monitoring`: kube-prometheus-stack, node + etcd alerts, Grafana ingress (req 6)
@@ -63,7 +63,8 @@ for each bug are in [Bug details](#bug-details) below.
 | B-027 | [sre] Exact Debian apt pins vanish after the next DSA/point release: clean rebuild fails | Medium | Open | M10 | 2026-11-18 |  |  |
 | B-028 | [sec] regression of B-025: catch-all ignore no longer matches 127.0.0.1; loopback ports forwarded | Medium | Solved | M1 | 2026-11-18 | 2026-11-18 | 6ea9ce9 |
 | B-029 | [sre] kubeadm init rescue runs `kubeadm reset --force` on an existing cluster: wipes etcd | Medium | Solved | M2 | 2026-11-18 | 2026-11-18 | 9236ac4 |
-| B-030 | [sec] Calico images (privileged, hostNetwork) pulled by mutable tag only, no digest pins | Medium | Open | M3 | 2026-11-18 |  |  |
+| B-030 | [sec] Calico images (privileged, hostNetwork) pulled by mutable tag only, no digest pins | Medium | Solved | M3 | 2026-11-18 | 2026-11-18 | 7e58592 |
+| B-031 | [sre] Matrix/ADR 0002 omit B-030 digest pinning and the new 3a checks (says 10, runs 15) | Medium | Solved | M3 | 2026-11-18 | 2026-11-18 | 9ededee |
 
 ## Assumptions / open questions
 - Host is an Apple Silicon Mac → VM is Debian 13 **arm64** under Lima (vz). amd64 image is listed in `lima/k8s.yaml` for Intel hosts but untested. Linux hosts are planned (Backlog), Windows is out of scope (Ansible needs WSL2).
@@ -256,4 +257,12 @@ Max 5 lines per bug (heading + up to 4 one-line bullets, ~200 chars each). Full 
 
 ### B-030: [sec] Calico images (privileged, hostNetwork) pulled by mutable tag only, no digest pins
 - **Report** (sec M3 r1): only the chart version is pinned; live pods run `quay.io/tigera/operator:v1.44.0`, `quay.io/calico/{node,calico,third-party-cni-plugins}:v3.33.0` by tag; a re-pushed tag runs as host root.
-- **Direction:** pin the operator image digest via chart values and add an `operator.tigera.io/v1` ImageSet `calico-v3.33.0` with multi-arch index digests; keep the digests in `versions.yml`; verify checks `imageID`.
+- **Root cause:** the chart and operator default to `image:tag`; no `ImageSet` or digest existed, so the privileged images were mutable.
+- **Fix:** `tigeraOperator.version` is `tag@digest` in `values.yaml.j2`; `imageset.yaml.j2` (`calico-v3.33.0`: calico, node, third-party-cni-plugins) applied before the chart; digests in `versions.yml`.
+- **Verification:** `make verify REQ=3a STRICT=1` (new digest + ImageSet checks) 15 PASS; pod specs run `@sha256:`; idempotency changed=0; REQ 1, 2, 8c PASS.
+
+### B-031: [sre] Matrix/ADR 0002 omit B-030 digest pinning and the new 3a checks (says 10, runs 15)
+- **Report** (sre M3 r2): `docs/requirements-matrix.md` 3a lists "10 checks" and no ImageSet/digest, requests or audit/warn label checks; ADR 0002 says only "chart (pinned)"; `check_3a` runs 15.
+- **Root cause:** B-030 added the ImageSet/digest, requests and audit/warn checks without updating the matrix row or ADR 0002.
+- **Fix:** matrix row 3a lists the 15 checks and pinning, status Done (M3); ADR 0002 documents digest pinning, bump procedure and accepted Lows; architecture Calico row notes digests.
+- **Verification:** `check_3a` pass/fail calls counted in `scripts/verify.sh` = 15; docs read against `cni_calico` and `versions.yml`.
