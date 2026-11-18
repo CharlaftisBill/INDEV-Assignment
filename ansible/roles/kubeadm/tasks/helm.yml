@@ -1,0 +1,32 @@
+---
+- name: Create the helm directory
+  ansible.builtin.file:
+    path: "{{ kubeadm_helm_dir }}"
+    state: directory
+    mode: "0755"
+    owner: root
+    group: root
+
+- name: Download helm
+  ansible.builtin.get_url:
+    url: "https://get.helm.sh/helm-{{ helm_version }}-linux-{{ kubeadm_arch }}.tar.gz"
+    dest: "{{ kubeadm_helm_dir }}/helm-{{ helm_version }}-linux-{{ kubeadm_arch }}.tar.gz"
+    checksum: "{{ helm_checksums[kubeadm_arch] }}"
+    mode: "0644"
+    owner: root
+    group: root
+
+- name: Unpack helm
+  ansible.builtin.unarchive:
+    src: "{{ kubeadm_helm_dir }}/helm-{{ helm_version }}-linux-{{ kubeadm_arch }}.tar.gz"
+    dest: "{{ kubeadm_helm_dir }}"
+    remote_src: true
+    creates: "{{ kubeadm_helm_dir }}/linux-{{ kubeadm_arch }}/helm"
+
+- name: Link helm into the PATH
+  ansible.builtin.file:
+    src: "{{ kubeadm_helm_dir }}/linux-{{ kubeadm_arch }}/helm"
+    dest: /usr/local/bin/helm
+    state: link
+    owner: root
+    group: root

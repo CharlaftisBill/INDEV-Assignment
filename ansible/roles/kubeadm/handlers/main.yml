@@ -1,0 +1,17 @@
+---
+# Skipped on the run that does kubeadm init: the API server starts with the new files anyway.
+- name: Find the kube-apiserver container
+  ansible.builtin.command: crictl ps --name kube-apiserver --quiet
+  register: kubeadm_apiserver_container
+  changed_when: false
+  when: kubeadm_init is not changed
+  listen: Restart kube-apiserver
+
+# kubelet restarts the static pod; the new process re-reads the audit policy and admission config.
+- name: Stop the kube-apiserver container
+  ansible.builtin.command: crictl stop --timeout 5 {{ kubeadm_apiserver_container.stdout_lines | join(' ') }}
+  changed_when: true
+  when:
+    - kubeadm_init is not changed
+    - kubeadm_apiserver_container.stdout_lines | length > 0
+  listen: Restart kube-apiserver

@@ -1,0 +1,21 @@
+---
+# Managed by Ansible. Cluster-wide Pod Security Admission defaults (req 8b; app namespaces get "restricted" labels in M9).
+# Platform namespaces that need host access are labelled per namespace by their own roles.
+apiVersion: apiserver.config.k8s.io/v1
+kind: AdmissionConfiguration
+plugins:
+  - name: PodSecurity
+    configuration:
+      apiVersion: pod-security.admission.config.k8s.io/v1
+      kind: PodSecurityConfiguration
+      defaults:
+        enforce: baseline
+        enforce-version: latest
+        audit: restricted
+        audit-version: latest
+        warn: restricted
+        warn-version: latest
+      exemptions:
+        usernames: []
+        runtimeClasses: []
+        namespaces: [kube-system]

@@ -1,0 +1,10 @@
+---
+# Managed by Ansible. Req 8c: every API request is recorded.
+# No "level: None" rules; Metadata never logs bodies, so Secret/ConfigMap/token contents stay out of the log.
+apiVersion: audit.k8s.io/v1
+kind: Policy
+# Every request still gets its ResponseStarted/ResponseComplete event; RequestReceived only doubles the volume.
+omitStages:
+  - RequestReceived
+rules:
+  - level: Metadata

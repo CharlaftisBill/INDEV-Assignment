@@ -1,0 +1,10 @@
+---
+galaxy_info:
+  author: indev
+  description: kubeadm single-node control plane (audit, PSA admission, metrics binds), helm, host admin kubeconfig
+  license: MIT
+  min_ansible_version: "2.17"
+  platforms:
+    - name: Debian
+      versions: [trixie]
+dependencies: []
