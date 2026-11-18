@@ -43,9 +43,12 @@ portForwards:
   - guestPort: 6443
     hostPort: 6443
   # Ignore everything else, TCP and UDP, on any guest address (NodePorts, kubelet,
-  # metrics, DNS). guestIP 0.0.0.0 matches every bind; proto any covers UDP, which
-  # Lima's built-in fallback rule would otherwise forward (B-025).
+  # etcd, metrics, DNS). proto any covers UDP, which Lima's built-in fallback rule
+  # would otherwise forward (B-025). An explicit guestIP 0.0.0.0 defaults to
+  # guestIPMustBeZero: true (matches only 0.0.0.0/:: binds); false makes it match
+  # every bind, 127.0.0.1 included (B-028).
   - guestIP: 0.0.0.0
+    guestIPMustBeZero: false
     guestPortRange: [1, 65535]
     proto: any
     ignore: true
