@@ -31,14 +31,14 @@ The assignment is `k8s-single-node-assignment.pdf`. Project state and bugs: **`T
 - **Ansible style**: FQCN modules (`ansible.builtin.*`, `kubernetes.core.*`); prefer modules over `command`/`shell`; when unavoidable, set `creates:`/`removes:` or `changed_when:`. Templates in `roles/<r>/templates/`, defaults in `defaults/main.yml`. Each role has a tag equal to its name in `site.yml`.
 - **Idempotency**: a second `make provision` must report `changed=0`. Not optional.
 - **Kubernetes objects** are applied with `kubernetes.core.k8s` / `kubernetes.core.helm` from Ansible, never by hand. Manual `kubectl` is for inspection only.
-- **Secrets**: CA key in `.secrets/`, kubeconfigs in `out/`, etcd snapshots (which contain every Secret) in `backups/`; all gitignored, only `certs/ca.crt` is committed. Never read secret material. How `.claude/settings.json` enforces it (precedence deny > ask > allow):
-  - **allow-list**: `kubectl --kubeconfig out/admin.conf get <kind>` runs without a prompt only for listed kinds (pods, nodes, events, certificates, networkpolicies, …; Secrets are not listed). **Put the kind right after `get`** (`get pods -n llm`, not `get -n llm pods`), otherwise it prompts. Node-side `kubectl get` is allowed for nodes and pods only. The operator kubeconfig is auto-allowed for `auth can-i` only (check 8a in `verify.sh` covers the rest).
-  - **ask** (you approve each time): unlisted kinds (Secrets in any case), comma-separated kinds, `--raw`, a second `--kubeconfig` / `--kubeconfig=` / `KUBECONFIG=` / `--context` / `--user` / `--token` (kubectl uses the last one given), shell metacharacters (`;` `&` `|` `$(` backtick `>`) on a `limactl shell` line (they run in the VM's shell even when quoted locally), anything touching `/etc/kubernetes/pki/` or the CA-key directory (e.g. `openssl x509 -enddate` on a cert, `etcdctl endpoint health`, file-mode checks).
-  - **deny** (cannot be approved): reading the secret files themselves: Read tool on `.secrets/`, `out/`, `backups/`; `cat`/`head`/`tail`/`less`/`more`/`base64`/`xxd` of the CA-key directory, `cat` of `out/`/`backups/`; `cat` of node `*.conf` and `pki/*.key`; `kubectl config view --raw`.
-  - **Best effort** (ADR 0009: a guardrail against accidents, not a security boundary): these are pattern rules (e.g. `get pod -o yaml` can show env values; `python3 -c` reading a file isn't matched), so this rule is what actually applies. To check that a Secret exists, use `kubectl describe secret` (key names and sizes, not values).
+- **Secrets**: CA key in `.secrets/`, kubeconfigs in `out/`, etcd snapshots (which contain every Secret) in `backups/`; all gitignored, only `certs/ca.crt` is committed. **Never read secret material**; to check a Secret exists use `kubectl describe secret`. `.claude/settings.json` backs this up (deny > ask > allow; a guardrail, not a boundary: [ADR 0009](docs/decisions/0009-agent-permissions-guardrail.md)):
+  - **allow**: `kubectl --kubeconfig out/admin.conf get <kind>` for listed kinds only (no Secrets). **Put the kind right after `get`** (`get pods -n llm`), else it prompts. Operator kubeconfig: `auth can-i` only.
+  - **ask**: unlisted/comma-separated kinds, `--raw`, extra `--kubeconfig`/`--context`/`--user`/`--token`/`KUBECONFIG=`, shell metacharacters on a `limactl shell` line, anything under `/etc/kubernetes/pki/` or `.secrets/`.
+  - **deny**: reading `.secrets/`, `out/`, `backups/`, node `*.conf`/`pki/*.key`, `kubectl config view --raw`.
 - **Workload security**: everything in `app_namespaces` must pass PSA `restricted`: `runAsNonRoot`, `allowPrivilegeEscalation: false`, drop ALL caps, `seccompProfile: RuntimeDefault`, prefer `readOnlyRootFilesystem`. Every app namespace starts with default-deny ingress+egress NetworkPolicies.
 - **Commits**: only through the `split-commits` skill, which groups changes into focused Conventional Commits (`feat(kubeadm): ...`). **Never add `Co-Authored-By: Claude`, "Generated with Claude Code" or any AI attribution** to commits or PRs; `.githooks/commit-msg` rejects them (enable with `make hooks`). Never `git add -A`, never push without asking.
 - **Scope**: one role/milestone at a time. Don't touch roles outside the current milestone without logging why in `TODO.md`.
+- **Concise output**: commit messages, docs, comments and agent reports use the fewest words that stay clear. No restating the task, no repeating what another doc says (link it), comments only for a non-obvious why.
 
 ## TODO.md protocol
 - Read `TODO.md` before starting; update the Status line, milestone checkboxes and Bugs table before finishing.
@@ -54,8 +54,9 @@ The assignment is `k8s-single-node-assignment.pdf`. Project state and bugs: **`T
 `review-loop` clean (SRE review + tests, plus security review for reqs 3, 4, 8, 9, fixes re-reviewed until no new bugs) → docs/ADR + requirements matrix updated → `TODO.md` updated → commits via `split-commits` (user approves commits).
 
 ## Agents and skills
-- Agents (`.claude/agents/`): `ansible-engineer` (implements), `k8s-verifier` (checks live cluster), `sre-reviewer` (senior SRE/DevOps: reviews changes and tests the infrastructure), `security-reviewer` (security deep-dive), `docs-writer` (docs).
-- Skills (`.claude/skills/`): `milestone` (orchestrates a milestone end to end), `vm-lifecycle`, `provision`, `verify-requirement`, `pin-version`, `new-role`, `bug`, `fix-next-bug` (picks the next Open bug, reproduces, fixes, verifies, marks Solved), `review-loop` (sre-reviewer → fix-next-bug → re-review until a round finds nothing new; **max 2 rounds**, then ask the user), `split-commits` (turns uncommitted work into focused commits).
+- Agents in `.claude/agents/`, skills in `.claude/skills/` (overview, models and effort: [docs/ai-workflow.md](docs/ai-workflow.md)). `review-loop` runs **max 2 rounds**, then asks the user.
+- Reviews are diff-scoped by default; a whole-repo review only at M10 or when the user asks (`full`).
+- Model per agent is set in its frontmatter; override with the Agent tool's `model` only when a task clearly needs it (e.g. opus for a hard role).
 - A PostToolUse hook lints every YAML file the agent edits (`.claude/hooks/lint-changed.sh`); fix what it reports before moving on.
 
 ## Known gotchas

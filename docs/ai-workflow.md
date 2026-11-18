@@ -12,7 +12,7 @@ The detailed evidence trail of what was found and fixed is the bug table in [TOD
 | Agent: `ansible-engineer` | `.claude/agents/` | Implements/fixes one role; runs lint, provision, idempotency |
 | Agent: `k8s-verifier` | `.claude/agents/` | Checks the live cluster, opens bugs; cannot change code or cluster |
 | Agent: `security-reviewer` | `.claude/agents/` | Reviews RBAC, PSA, NetworkPolicy, audit, TLS, secrets; opens `[sec]` bugs |
-| Agent: `sre-reviewer` | `.claude/agents/` | Senior SRE/DevOps persona (Opus): reviews changes for correctness, reliability, security and operability, tests the infrastructure (lint, idempotency, verify, smoke, targeted probes, disruptive tests when allowed), logs Critical/High/Medium findings as `[sre]` bugs |
+| Agent: `sre-reviewer` | `.claude/agents/` | Senior SRE/DevOps reviewer: reviews the diff, tests the infrastructure (lint, idempotency, verify, smoke, targeted probes, disruptive tests when allowed), logs Critical/High/Medium findings as `[sre]` bugs |
 | Agent: `docs-writer` | `.claude/agents/` | Keeps README, ADRs, matrix, runbooks in sync with the code |
 | Skill: `review-loop` | `.claude/skills/` | sre-reviewer (+ security-reviewer for reqs 3/4/8/9) → `fix-next-bug` per bug → re-review and re-test the fixes, until a round opens no new in-scope bugs and none are left open (deferred and `[stuck rN]` bugs are reported; max 2 rounds, stuck bugs reported) |
 | Skill: `milestone` | `.claude/skills/` | Orchestrates implement → provision → verify → review → document → close |
@@ -27,6 +27,45 @@ The detailed evidence trail of what was found and fixed is the bug table in [TOD
 - **Separation of duties**: the agent that writes the code is not the one that declares it working. The verifier and reviewer can only open bugs; the engineer solves them.
 - **Small context per task**: each agent gets one role or one requirement, not the whole project.
 - **Guardrails over trust**: pinning and idempotency are rules in `CLAUDE.md` *and* checked (`make idempotency`, the pin-version skill); destructive commands need a human yes.
+
+## Cost settings
+Goal: spend premium models and deep reasoning only where judgment matters. Source of truth is the frontmatter in
+`.claude/agents/*.md` and `.claude/skills/*/SKILL.md`; keep this table in sync.
+
+| Agent | Model | Effort | Why |
+|---|---|---|---|
+| `ansible-engineer` | sonnet | high | Writes the code; gated by lint, idempotency, strict verify and Opus review. Caller may pass `model: opus` for a hard role |
+| `k8s-verifier` | haiku | low | Runs `verify.sh` and collects evidence; deterministic |
+| `docs-writer` | sonnet | low | Copies facts from code into docs |
+| `sre-reviewer` | opus | high | Judgment-heavy; finds what checks miss |
+| `security-reviewer` | opus | high | Security; pinned so it no longer depends on the session model |
+
+| Skill | Effort |
+|---|---|
+| `provision`, `vm-lifecycle`, `verify-requirement`, `bug`, `new-role` | low |
+| `pin-version`, `split-commits` | medium |
+| `milestone`, `review-loop`, `fix-next-bug` | session default (orchestration) |
+
+Skills set no `model`: they run in the main session.
+
+**Review scope.** `sre-reviewer` and `security-reviewer` review the diff (since the `Last SRE review` hash + uncommitted, or the
+scope given) plus the code around it, and apply only the checklist items it touches. A whole-repo review runs only at M10 or with
+`full`. The extra lenient `make verify` in SRE testing was dropped; the strict set still runs.
+
+**Context.**
+- Disabled for this project in `.claude/settings.json`: the `engineering@inline` plugin (`enabledPlugins`: 10 generic skills and
+  8 unauthenticated MCP servers that overlap the project agents) and the user-level `mastic-reviewer` agent (`Agent(...)` deny; another project).
+- `attribution` set to empty, so the harness no longer asks for AI trailers that `.githooks/commit-msg` rejects.
+- Agents no longer re-read `CLAUDE.md` (it is already in their context) and read only the `TODO.md` parts they need.
+  The bug format lives only in the `bug` skill; agents point to it. Agent/skill descriptions shortened (they load every session).
+  Every agent report has a line cap. `CLAUDE.md` permission details condensed (full rules: settings + ADR 0009).
+
+**Kept on purpose.** Each agent's explicit `tools:` list (already minimal; reviewers need Edit for `TODO.md` only). No project MCP
+servers or LSP (nothing for Ansible YAML that `make lint` doesn't cover). The YAML lint hook (silent on success). Max 2 review rounds.
+
+**Trade-offs.** Haiku may gather thinner evidence; strict verify still decides PASS/FAIL. Sonnet writes the first draft; Opus
+reviewers and the gates catch defects. Diff scope can miss an old bug outside the change; M10 runs `full`. Plugin settings are
+per project: the plugin stays available elsewhere.
 
 ## Log
 
@@ -55,3 +94,5 @@ The detailed evidence trail of what was found and fixed is the bug table in [TOD
   rules. Each fix closed the listed gaps and the next round found new ones, because text-matching rules don't converge.
   That pattern led to ADR 0009. Human decisions were needed three times (tighten permissions, choose the model, how to finish).
   The user also asked mid-loop to fix the unreadable bug table, which became the compact table + `## Bug details` format.
+- **Cost pass (2026-11-18)**: the user asked for a leaner agent setup. Per-agent model/effort, diff-scoped reviews, disabled
+  unrelated extensions, de-duplicated prompts; details in [Cost settings](#cost-settings). The user chose Sonnet for `ansible-engineer`.

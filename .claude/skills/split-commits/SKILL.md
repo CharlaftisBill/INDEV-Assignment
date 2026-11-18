@@ -1,6 +1,7 @@
 ---
 name: split-commits
-description: Inspect all uncommitted changes (staged, unstaged, untracked), group them into separate commits by concern and relevance, show the plan, then commit each group in a sensible order with Conventional Commit messages. Use when the user says "commit", "commit the changes", "split into commits", or at the end of a milestone. Never adds Co-Authored-By or any AI attribution trailer.
+description: Group all uncommitted changes into focused Conventional Commits, show the plan, commit in order. Use for "commit", "split into commits", or at the end of a milestone. Never adds AI attribution trailers.
+effort: medium
 ---
 
 # Split uncommitted changes into focused commits

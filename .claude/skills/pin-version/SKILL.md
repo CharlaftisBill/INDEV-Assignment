@@ -1,6 +1,7 @@
 ---
 name: pin-version
-description: Find, verify and record an exact version for an apt package, Helm chart, container image (tag + digest, arm64), binary release, Ansible collection or base image, in ansible/group_vars/all/versions.yml. Use whenever a role needs a new dependency or a version must be bumped. Requirement 1 says "pin package versions" - this is how.
+description: Find, verify and record an exact version (apt package, Helm chart, image tag+digest with arm64, binary, collection, base image) in ansible/group_vars/all/versions.yml. Use when a role needs a new dependency or a version bump.
+effort: medium
 ---
 
 # Pin a version

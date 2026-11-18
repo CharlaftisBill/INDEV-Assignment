@@ -1,12 +1,14 @@
 ---
 name: review-loop
-description: Review-fix-retest loop until clean. The sre-reviewer agent (senior SRE/DevOps) reviews the changes and tests the infrastructure, logging bugs in TODO.md; then fix-next-bug fixes the Open bugs one at a time; then the fixes are reviewed and tested again, repeating until a review round finds no new bugs, at most 2 rounds. Use after a milestone, before committing a batch of work, or when the user says "review and fix until clean".
+description: Review → fix → re-review loop (max 2 rounds). sre-reviewer (+ security-reviewer for reqs 3/4/8/9) reviews the diff and tests, fix-next-bug fixes each bug, then the fixes are re-reviewed. Use after a milestone or for "review and fix until clean".
 ---
 
 # Review → fix → re-review until clean
 
 Arguments (optional):
 - scope: `uncommitted` | `<from>..HEAD` | `M<n>`. Default: since the `Last SRE review` hash in `TODO.md` + uncommitted.
+  Reviewers read the diff and the code around it, not the whole repo.
+- `full`: whole-repo review with the full checklists. Only at M10 or when the user asks.
 - `disruptive`: allow disruptive tests (kubelet/containerd restart, pod deletion, VM reboot, etcd restore drill).
   Never assume this; if not given and the scope touches req 2, 6, 7 or 9, ask the user once at the start.
 - `max-rounds=<n>`: **at most 2** (the user's limit; default 2). A lower value is allowed, never a higher one.
@@ -21,8 +23,8 @@ Arguments (optional):
 Delegate to the **sre-reviewer** agent with:
 - the scope (round 1: the argument/default; later rounds: `git diff` of everything changed since the previous round started,
   plus the bugs fixed in the previous round, so it re-tests those fixes and looks for regressions),
-- whether disruptive tests are allowed,
-- for milestones touching req 3, 4, 8, 9: also delegate to **security-reviewer** on the same scope, in parallel.
+- whether disruptive tests are allowed, and `full` if given,
+- for milestones touching req 3, 4, 8, 9: also delegate to **security-reviewer** with the same scope (and `full` if given), in parallel.
 
 It returns a verdict and the IDs of the bugs it opened.
 

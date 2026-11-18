@@ -1,12 +1,12 @@
 ---
 name: fix-next-bug
-description: Pick the next Open bug from the TODO.md bug table (or a given B-NNN), reproduce it, find the root cause, fix it with the right agent, verify the fix, and mark it Solved. One bug per run. Use when the user says "fix the next bug", "work the bug list", "fix B-004", or after a verify/review run opened bugs.
+description: Fix one Open bug from TODO.md (next in scope, or a given B-NNN) - reproduce, root cause, fix via the right agent, verify, mark Solved. Use for "fix the next bug", "fix B-004", or after a verify/review run opened bugs.
 ---
 
 # Fix the next open bug
 
 Argument (optional): a bug ID (`B-004`). Without it, select the next bug as below.
-Works on **one** bug per run. Read `CLAUDE.md` and `TODO.md` first.
+Works on **one** bug per run. Read `TODO.md` first.
 
 ## 1. Select
 If a bug ID was given as argument, take it (if it is not Open, say so and stop) and skip the rest of this step.

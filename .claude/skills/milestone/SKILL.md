@@ -1,6 +1,6 @@
 ---
 name: milestone
-description: Run one milestone of the INDEV Kubernetes assignment end to end (M1-M10 in TODO.md) - implement with ansible-engineer, provision, verify with k8s-verifier, security review where relevant, docs with docs-writer, update TODO.md, propose a commit. Use when the user says "do M3", "next milestone", "implement the monitoring requirement", or similar.
+description: Run one milestone (M1-M10 in TODO.md) end to end - implement, provision, verify, review-loop, docs, close, propose commits. Use for "do M3", "next milestone", "implement the monitoring requirement".
 ---
 
 # Milestone workflow
@@ -27,7 +27,7 @@ including sub-IDs such as `8c`) in **strict** mode: `make verify REQ="<ids>" STR
 Run the **review-loop** skill scoped to this milestone (`M<n>`). The **sre-reviewer** agent reviews the changes and tests the
 infrastructure; for milestones touching req 3, 4, 8, 9 (M3, M5, M8, M9, M10) the **security-reviewer** runs alongside it.
 Their findings are fixed one by one with **fix-next-bug** and re-reviewed until a round finds nothing new, **at most 2 review rounds**; then stop and ask the user.
-At M10 run it with `disruptive` (ask the user first): reboot, kubelet restart, etcd restore drill, `make e2e`.
+Reviews are diff-scoped (this milestone's changes). At M10 run it with `full` (whole-repo review) and `disruptive` (ask the user first): reboot, kubelet restart, etcd restore drill, `make e2e`.
 
 ## 4. Document
 Delegate to the **docs-writer** agent: milestone ID, what was built, versions pinned, bug IDs found and solved.

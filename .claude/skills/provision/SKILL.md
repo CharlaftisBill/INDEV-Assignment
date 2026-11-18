@@ -1,6 +1,7 @@
 ---
 name: provision
-description: Run the Ansible playbook against the Lima VM (all roles or selected tags), then prove idempotency with a second run that must report changed=0, and summarize failures. Use after changing any role, or when the user asks to "apply", "provision", "run ansible" or "rerun the playbook".
+description: Run the playbook against the Lima VM (all or selected tags), prove idempotency (second run changed=0), summarize failures. Use after changing a role, or for "apply", "provision", "run ansible".
+effort: low
 ---
 
 # Provision + idempotency

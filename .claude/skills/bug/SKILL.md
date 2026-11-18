@@ -1,6 +1,7 @@
 ---
 name: bug
-description: Open, solve or list bugs in TODO.md with a consistent format - a compact index table plus a details entry per bug (states are only Open or Solved, sequential B-NNN IDs). Use whenever a check fails, a review finds an issue, a defect is fixed, or the user asks "what's broken / what's open". This skill is the single definition of the bug format; every agent and skill that writes bugs follows it.
+description: Open, solve or list bugs in TODO.md (index table + ≤5-line details entry, Open/Solved, B-NNN). The single definition of the bug format. Use when a check fails, a review finds an issue, a fix lands, or the user asks "what's open".
+effort: low
 ---
 
 # Bug tracker in TODO.md

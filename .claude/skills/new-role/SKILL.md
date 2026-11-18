@@ -1,6 +1,7 @@
 ---
 name: new-role
-description: Scaffold a new Ansible role in ansible/roles/ following this project's conventions, wire it into site.yml with its tag, add a verify.sh check stub and a requirements-matrix row. Use when a milestone needs a role that doesn't exist yet.
+description: Scaffold a new Ansible role with project conventions, wire it into site.yml with its tag, add a verify.sh check stub and a requirements-matrix row. Use when a milestone needs a role that doesn't exist yet.
+effort: low
 ---
 
 # Scaffold a role

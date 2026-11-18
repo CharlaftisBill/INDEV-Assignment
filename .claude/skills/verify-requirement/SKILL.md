@@ -1,6 +1,7 @@
 ---
 name: verify-requirement
-description: Check one or all of the 9 assignment requirements against the live cluster with scripts/verify.sh, and on failure gather evidence (events, logs, describe) before anyone proposes a fix. Use when asked "is requirement N done?", "verify", "run the checks", or before closing a milestone.
+description: Check one or all requirements against the live cluster with scripts/verify.sh; on failure gather evidence before any fix. Use for "is requirement N done?", "verify", "run the checks", or before closing a milestone.
+effort: low
 ---
 
 # Verify a requirement

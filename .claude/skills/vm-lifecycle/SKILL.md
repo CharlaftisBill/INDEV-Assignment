@@ -1,6 +1,7 @@
 ---
 name: vm-lifecycle
-description: Create, start, stop, reset or destroy the Lima VM "k8s" (Debian 13, 4 CPU, 8 GiB, 40 GiB) used by this project, and check that Ansible can reach it. Use when the VM is not running, when a "clean VM" run is needed, or when SSH/Ansible connectivity fails.
+description: Create, start, stop, reset or destroy the Lima VM "k8s" and check Ansible reaches it. Use when the VM is down, a clean VM is needed, or SSH/Ansible connectivity fails.
+effort: low
 ---
 
 # Lima VM lifecycle
