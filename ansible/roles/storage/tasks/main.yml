@@ -20,7 +20,8 @@
     - deployment.yaml.j2
     - storageclass.yaml.j2
 
-- name: Wait for the provisioner Deployment to be Available
+# No wait_condition: a custom condition bypasses the Deployment rollout check (observedGeneration, updatedReplicas).
+- name: Wait for the provisioner Deployment rollout to complete
   kubernetes.core.k8s_info:
     kubeconfig: "{{ storage_kubeconfig }}"
     api_version: apps/v1
@@ -28,9 +29,6 @@
     name: local-path-provisioner
     namespace: "{{ storage_namespace }}"
     wait: true
-    wait_condition:
-      type: Available
-      status: "True"
     wait_timeout: "{{ storage_wait_timeout }}"
   changed_when: false
 
