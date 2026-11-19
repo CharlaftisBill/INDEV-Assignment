@@ -34,5 +34,4 @@
     - { role: monitoring, tags: [monitoring] }
     - { role: etcd_backup, tags: [etcd_backup] }
     - { role: hardening, tags: [hardening] }
-  # Planned order (uncommented as each milestone lands):
-  #   - { role: llm_app,         tags: [llm_app] }
+    - { role: llm_app, tags: [llm_app] }

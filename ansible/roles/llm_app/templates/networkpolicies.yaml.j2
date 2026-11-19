@@ -1,0 +1,49 @@
+{# Default deny both ways, then one allow per flow. The server pod gets no egress at all; DNS and HTTPS are for the model-fetch Job only (B-044). Traefik is hostNetwork: it reaches pods from the node IP, which selectors
+   cannot match, so the ingress rule is an ipBlock /32 (ADR 0003). #}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: default-deny, namespace: {{ llm_app_namespace }}}
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: allow-dns, namespace: {{ llm_app_namespace }}}
+spec:
+  podSelector: {matchLabels: {app.kubernetes.io/component: {{ llm_app_fetch_name }}}}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: kube-system}}
+          podSelector: {matchLabels: {k8s-app: kube-dns}}
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: allow-traefik-ingress, namespace: {{ llm_app_namespace }}}
+spec:
+  podSelector: {matchLabels: {app.kubernetes.io/name: {{ llm_app_name }}}}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - ipBlock: {cidr: {{ llm_app_node_ip }}/32}
+      ports:
+        - {protocol: TCP, port: {{ llm_app_port }}}
+---
+# Model download by the model-fetch Job only: HTTPS to public addresses (see defaults).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: allow-model-download, namespace: {{ llm_app_namespace }}}
+spec:
+  podSelector: {matchLabels: {app.kubernetes.io/component: {{ llm_app_fetch_name }}}}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: {{ llm_app_egress_except | to_json }}
+      ports:
+        - {protocol: TCP, port: 443}

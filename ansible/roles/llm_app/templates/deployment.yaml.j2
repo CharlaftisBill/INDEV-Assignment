@@ -1,0 +1,102 @@
+{% set image = llama_cpp_image ~ ':' ~ llama_cpp_tag ~ '@' ~ llama_cpp_digest %}
+{% set model = llm_app_model_dir ~ '/' ~ llm_model_file %}
+{% set sec %}
+allowPrivilegeEscalation: false
+readOnlyRootFilesystem: true
+runAsNonRoot: true
+runAsUser: {{ llm_app_uid }}
+runAsGroup: {{ llm_app_uid }}
+capabilities: {drop: [ALL]}
+seccompProfile: {type: RuntimeDefault}
+{% endset %}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ llm_app_name }}
+  namespace: {{ llm_app_namespace }}
+spec:
+  selector: {app.kubernetes.io/name: {{ llm_app_name }}}
+  ports:
+    - {name: http, port: {{ llm_app_port }}, targetPort: http}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ llm_app_name }}
+  namespace: {{ llm_app_namespace }}
+spec:
+  replicas: 1
+  # One RWO volume and a tight memory budget: never run old and new pod side by side.
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app.kubernetes.io/name: {{ llm_app_name }}}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: {{ llm_app_name }}}
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: {{ llm_app_uid }}
+        runAsGroup: {{ llm_app_uid }}
+        fsGroup: {{ llm_app_uid }}
+        seccompProfile: {type: RuntimeDefault}
+      initContainers:
+        # Verify only, fail closed: the model is fetched by the model-fetch Job (this pod has no egress). Hashes on every start.
+        - name: verify-model
+          image: {{ image }}
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              if [ -f "$MODEL_PATH" ] && echo "$MODEL_SHA256  $MODEL_PATH" | sha256sum -c - >/dev/null 2>&1; then
+                echo "model verified: $MODEL_PATH (sha256 ok), no download"; exit 0
+              fi
+              echo "model missing or sha256 mismatch: $MODEL_PATH; run the llm_app role to fetch it" >&2; exit 1
+          env:
+            - {name: MODEL_SHA256, value: "{{ llm_model_sha256 }}"}
+            - {name: MODEL_PATH, value: "{{ model }}"}
+          resources: {{ llm_app_init_resources | to_json }}
+          securityContext: {{ sec | from_yaml | to_json }}
+          volumeMounts:
+            - {name: model, mountPath: {{ llm_app_model_dir }}, readOnly: true}
+      containers:
+        - name: llama-server
+          image: {{ image }}
+          args:
+            - --model
+            - {{ model }}
+            - --alias
+            - {{ llm_app_model_alias }}
+            - --host
+            - 0.0.0.0
+            - --port
+            - "{{ llm_app_port }}"
+            - --ctx-size
+            - "{{ llm_app_ctx_size }}"
+            - --parallel
+            - "{{ llm_app_parallel }}"
+            - --threads
+            - "{{ llm_app_threads }}"
+            - --no-webui
+            - --no-slots
+          env:
+            - {name: LLAMA_CACHE, value: /tmp}
+            - {name: HOME, value: /tmp}
+          ports:
+            - {name: http, containerPort: {{ llm_app_port }}}
+          # Loading the model takes seconds; the startup probe holds liveness off for up to 5 min.
+          startupProbe: {httpGet: {path: /health, port: http}, periodSeconds: 5, failureThreshold: 60}
+          readinessProbe: {httpGet: {path: /health, port: http}, periodSeconds: 10, timeoutSeconds: 3}
+          livenessProbe: {httpGet: {path: /health, port: http}, periodSeconds: 20, timeoutSeconds: 5, failureThreshold: 3}
+          resources: {{ llm_app_resources | to_json }}
+          securityContext: {{ sec | from_yaml | to_json }}
+          volumeMounts:
+            - {name: model, mountPath: {{ llm_app_model_dir }}, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: model
+          persistentVolumeClaim: {claimName: {{ llm_app_model_pvc }}}
+        - name: tmp
+          emptyDir: {sizeLimit: 128Mi}

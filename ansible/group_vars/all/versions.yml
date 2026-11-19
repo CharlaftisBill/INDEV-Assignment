@@ -104,7 +104,15 @@ etcdctl_checksums:         # SHA256SUMS of the v3.6.6 release, matches shasum of
   arm64: "sha256:8a15f5427c111ff4692753682374970fb68878401d946c2c28bdad6857db652f"
   amd64: "sha256:887afaa4a99f22d802ccdfbe65730a5e79aa5c9ce2c8799c67e9d804c50ecedb"
 #
-# M9  llm_app
-#   llama_cpp_image:               # ghcr.io/ggml-org/llama.cpp:server-<build>@sha256:...
-#   model_url:
-#   model_sha256:
+# M9  llm_app (llama.cpp server; the model-fetch Job reuses the same image for curl + sha256sum, no second image)
+# Newest build >= 2 weeks old: b12110 (2026-11-04); ghcr only has `server-b<N>` tags for some builds (b12116/b12119 are absent).
+llama_cpp_image: "ghcr.io/ggml-org/llama.cpp"
+llama_cpp_tag: "server-b12110"  # gh release list ggml-org/llama.cpp + imagetools inspect (tag exists), 2026-11-19
+llama_cpp_digest: "sha256:1145e8de3111dc9358c6d8daffb755c4cf8a862d93391c26ba521b9a810bbe3e"
+# Qwen2.5-0.5B-Instruct Q4_K_M (469 MiB), official Qwen repo at an exact commit; the model-fetch Job and the verify-model init container check the sha256.
+llm_model_file: "qwen2.5-0.5b-instruct-q4_k_m.gguf"
+llm_model_url: "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/9217f5db79a29953eb74d5343926648285ec7e67/qwen2.5-0.5b-instruct-q4_k_m.gguf"
+llm_model_sha256: "74a4da8c9fdbcd15bd1f6d01d621410d31c6fc00986f5eb687824e7b93d7a9db"  # HF x-linked-etag (LFS oid) at that commit, 2026-11-19
+llm_model_size_bytes: 491400032  # HF x-linked-size, 2026-11-19
+# Pod Security Standards version the app namespace is pinned to (matches the cluster minor), kubernetes_version above.
+pod_security_version: "v1.35"  # kubernetes_version 1.35.10, 2026-11-19

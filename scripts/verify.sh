@@ -212,9 +212,157 @@ check_3a() { # CNI installed and healthy (M3): Calico via tigera-operator, node 
   if [[ "$is" == imageset* ]]; then pass "ImageSet $is exists"; else fail "ImageSet missing: $is"; fi
 }
 
+
+# llm_app values from the role defaults / group_vars (single source of truth): sets the LLM_* globals used by checks 3b, 8b and 9.
+llm_vars() {
+  local d="$ROOT/ansible/roles/llm_app/defaults/main.yml" main="$ROOT/ansible/group_vars/all/main.yml" vy="$ROOT/ansible/group_vars/all/versions.yml"
+  local dv; dv() { sed -n "s/^llm_app_$1:[[:space:]]*\\([^ #]*\\).*/\\1/p" "$d"; }
+  LLM_NS="$(sed -n 's/^ns_llm:[[:space:]]*\([a-z-]*\).*/\1/p' "$main")"
+  LLM_NAME="$(dv name)"; LLM_PORT="$(dv port)"; LLM_UID="$(dv uid)"; LLM_MODEL_DIR="$(dv model_dir)"
+  LLM_MODEL_PVC="$(dv model_pvc)"; LLM_TLS_SECRET="$(dv tls_secret)"; LLM_MODEL_ALIAS="$(dv model_alias)"
+  LLM_FETCH="$(dv fetch_name)"
+  LLM_ISSUER="$(sed -n 's/^pki_cluster_issuer:[[:space:]]*\([a-z-]*\).*/\1/p' "$main")"
+  LLM_DURATION="$(sed -n 's/^pki_cert_duration:[[:space:]]*\([0-9a-z]*\).*/\1/p' "$main")"
+  LLM_RENEW="$(sed -n 's/^pki_cert_renew_before:[[:space:]]*\([0-9a-z]*\).*/\1/p' "$main")"
+  LLM_IMAGE="$(pinned llama_cpp_image):$(pinned llama_cpp_tag)@$(pinned llama_cpp_digest)"
+  LLM_DIGEST="$(pinned llama_cpp_digest)"
+  LLM_MODEL_FILE="$(pinned llm_model_file)"
+  LLM_MODEL_SHA="$(pinned llm_model_sha256)"
+  LLM_MODEL_SIZE="$(sed -n 's/^llm_model_size_bytes:[[:space:]]*\([0-9]*\).*/\1/p' "$vy")"
+  LLM_PSA_VERSION="$(pinned pod_security_version)"
+  [[ -n "$LLM_NS" && -n "$LLM_NAME" && -n "$LLM_PORT" && -n "$LLM_UID" && -n "$LLM_MODEL_DIR" && -n "$LLM_MODEL_PVC" && -n "$LLM_TLS_SECRET" \
+    && -n "$LLM_MODEL_ALIAS" && -n "$LLM_ISSUER" && -n "$LLM_DURATION" && -n "$LLM_RENEW" && -n "$LLM_DIGEST" && -n "$LLM_MODEL_FILE" \
+    && -n "$LLM_MODEL_SHA" && -n "$LLM_MODEL_SIZE" && -n "$LLM_PSA_VERSION" && -n "$LLM_FETCH" ]]
+}
+# llm_pod: name of the current (non-terminating) llama.cpp pod
+llm_pod() { k get pods -n "$LLM_NS" -l "app.kubernetes.io/name=$LLM_NAME" -o json 2>/dev/null | jq -r '[.items[] | select(.metadata.deletionTimestamp == null) | .metadata.name][0] // empty'; }
+# llm_https <curl args...>: HTTPS to the ingress through Lima :443, trusting only certs/ca.crt (no /etc/hosts entry needed)
+llm_https() { curl -sS --max-time 60 --resolve "$LLM_HOST:443:127.0.0.1" --cacert "$CA_CERT" "$@"; }
+
+CHECK3B_CREATED=0
+cleanup_3b() {
+  k delete pod -n "$LLM_NS" -l verify=check-3b --ignore-not-found --wait=false >/dev/null 2>&1
+  k delete pod -n "$VERIFY_NS" -l verify=check-3b --ignore-not-found --wait=false >/dev/null 2>&1
+  if [[ "$CHECK3B_CREATED" == 1 ]]; then k delete namespace "$VERIFY_NS" --ignore-not-found --wait=false >/dev/null 2>&1; fi
+  CHECK3B_CREATED=0
+}
+
 check_3b() { # app pods accept only the traffic they need: NetworkPolicies in app namespaces (M9)
   need_cluster || return 0
-  skip "not implemented (M9)"
+  if ! llm_vars; then fail "llm_app defaults / versions not found"; return 0; fi
+  local ns="$LLM_NS" out i
+
+  # --- the policy set: default-deny both ways, DNS, ingress from the node IP only, HTTPS-only egress for the downloader
+  local names; names="$(k get networkpolicies -n "$ns" -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>&1 | sort | tr '\n' ' ')"
+  if [[ "$names" == "allow-dns allow-model-download allow-traefik-ingress default-deny " ]]; then pass "$ns has exactly default-deny, allow-dns, allow-traefik-ingress, allow-model-download"; else fail "$ns NetworkPolicies: $names"; fi
+  out="$(k get networkpolicies default-deny -n "$ns" -o jsonpath='{.spec.podSelector} {.spec.policyTypes} {.spec.ingress} {.spec.egress}' 2>&1)"
+  if [[ "$out" == '{} ["Ingress","Egress"]  ' ]]; then pass "default-deny selects every pod and denies Ingress + Egress (no rules)"; else fail "default-deny: $out"; fi
+  local node_ip; node_ip="$(k get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}' 2>&1)"
+  out="$(k get networkpolicies allow-traefik-ingress -n "$ns" -o jsonpath='{.spec.policyTypes} {.spec.ingress[*].from[*].ipBlock.cidr} {.spec.ingress[*].from[*].podSelector} {.spec.ingress[*].ports[*].port} {.spec.ingress[*].ports[*].protocol}' 2>&1)"
+  if [[ "$out" == "[\"Ingress\"] $node_ip/32  $LLM_PORT TCP" ]]; then pass "allow-traefik-ingress: only node IP $node_ip/32 (hostNetwork Traefik, ADR 0003) on TCP $LLM_PORT"; else fail "allow-traefik-ingress: $out"; fi
+  out="$(k get networkpolicies allow-model-download -n "$ns" -o jsonpath='{.spec.podSelector.matchLabels} {.spec.policyTypes} {.spec.egress[*].to[*].ipBlock.cidr} {.spec.egress[*].ports[*].port} {.spec.egress[*].ports[*].protocol} {.spec.egress[*].to[*].ipBlock.except}' 2>&1)"
+  if [[ "$out" == "{\"app.kubernetes.io/component\":\"$LLM_FETCH\"} [\"Egress\"] 0.0.0.0/0 443 TCP "*10.0.0.0/8*100.64.0.0/10*172.16.0.0/12*192.168.0.0/16*169.254.0.0/16* ]]; then pass "allow-model-download: only $LLM_FETCH Job pods, TCP 443 to public addresses (private, CGNAT, link-local excluded); the server pod is not selected"; else fail "allow-model-download: $out"; fi
+  out="$(k get networkpolicies allow-dns -n "$ns" -o jsonpath='{.spec.podSelector.matchLabels} {.spec.egress[*].to[*].namespaceSelector.matchLabels} {.spec.egress[*].to[*].podSelector.matchLabels} {.spec.egress[*].ports[*].port}' 2>&1)"
+  if [[ "$out" == "{\"app.kubernetes.io/component\":\"$LLM_FETCH\"} "'{"kubernetes.io/metadata.name":"kube-system"} {"k8s-app":"kube-dns"} 53 53' ]]; then pass "allow-dns: only $LLM_FETCH Job pods, CoreDNS in kube-system on port 53 only (server pod gets no egress)"; else fail "allow-dns: $out"; fi
+
+  # --- enforcement, from probe pods (pinned busybox, PSA restricted): one in another namespace, one in llm without the app label
+  local llm_ip dns_ip busy ext=1.1.1.1
+  llm_ip="$(k get pod "$(llm_pod)" -n "$ns" -o jsonpath='{.status.podIP}' 2>&1)"
+  if [[ ! "$llm_ip" =~ ^[0-9.]+$ ]]; then fail "llama.cpp pod IP not found: $llm_ip"; return 0; fi
+  dns_ip="$(k get pods -n kube-system -l k8s-app=kube-dns -o jsonpath='{.items[0].status.podIP}' 2>&1)"
+  busy="docker.io/library/busybox:$(pinned local_path_helper_version)@$(pinned local_path_helper_digest)"
+  wait_verify_ns_gone
+  CHECK3B_CREATED=0
+  if ! k get namespaces "$VERIFY_NS" >/dev/null 2>&1; then CHECK3B_CREATED=1; fi
+  trap cleanup_3b EXIT
+  out="$(k apply -f - 2>&1 <<MANIFEST
+apiVersion: v1
+kind: Namespace
+metadata: {name: $VERIFY_NS}
+---
+apiVersion: v1
+kind: Pod
+metadata: {name: verify-3b-out, namespace: $VERIFY_NS, labels: {verify: check-3b}}
+spec:
+  restartPolicy: Never
+  automountServiceAccountToken: false
+  securityContext: {runAsNonRoot: true, runAsUser: 1000, runAsGroup: 1000, seccompProfile: {type: RuntimeDefault}}
+  containers:
+    - name: probe
+      image: $busy
+      command:
+        - sh
+        - -c
+        - "nc -w 3 $dns_ip 9153 </dev/null && echo CTRL_DNS_OPEN; nc -w 3 $ext 80 </dev/null && echo CTRL_EXT_OPEN; nc -w 3 $llm_ip $LLM_PORT </dev/null && echo POD_OPEN || echo POD_BLOCKED; nc -w 3 $LLM_NAME.$ns.svc $LLM_PORT </dev/null && echo SVC_OPEN || echo SVC_BLOCKED"
+      resources: {requests: {cpu: 10m, memory: 8Mi}}
+      securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+---
+apiVersion: v1
+kind: Pod
+metadata: {name: verify-3b-in, namespace: $ns, labels: {verify: check-3b}}
+spec:
+  restartPolicy: Never
+  automountServiceAccountToken: false
+  securityContext: {runAsNonRoot: true, runAsUser: 1000, runAsGroup: 1000, seccompProfile: {type: RuntimeDefault}}
+  containers:
+    - name: probe
+      image: $busy
+      command:
+        - sh
+        - -c
+        - "nc -w 3 $llm_ip $LLM_PORT </dev/null && echo SAMENS_OPEN || echo SAMENS_BLOCKED; nc -w 3 $dns_ip 9153 </dev/null && echo DNSMETRICS_OPEN || echo DNSMETRICS_BLOCKED; nc -w 3 $ext 80 </dev/null && echo EXT_OPEN || echo EXT_BLOCKED; nslookup -timeout=3 kubernetes.default.svc.cluster.local >/dev/null 2>&1 && echo DNS_OK || echo DNS_FAIL"
+      resources: {requests: {cpu: 10m, memory: 8Mi}}
+      securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+---
+apiVersion: v1
+kind: Pod
+metadata: {name: verify-3b-fetch, namespace: $ns, labels: {verify: check-3b, app.kubernetes.io/component: $LLM_FETCH}}
+spec:
+  restartPolicy: Never
+  automountServiceAccountToken: false
+  securityContext: {runAsNonRoot: true, runAsUser: 1000, runAsGroup: 1000, seccompProfile: {type: RuntimeDefault}}
+  containers:
+    - name: probe
+      image: $busy
+      command:
+        - sh
+        - -c
+        - "nc -w 3 $ext 443 </dev/null && echo FETCH_HTTPS_OPEN || echo FETCH_HTTPS_BLOCKED; nslookup -timeout=3 huggingface.co >/dev/null 2>&1 && echo FETCH_DNS_OK || echo FETCH_DNS_FAIL; nc -w 3 $ext 80 </dev/null && echo FETCH_80_OPEN || echo FETCH_80_BLOCKED; nc -w 3 $node_ip 6443 </dev/null && echo FETCH_NODE_OPEN || echo FETCH_NODE_BLOCKED; nc -w 3 $dns_ip 9153 </dev/null && echo FETCH_POD_OPEN || echo FETCH_POD_BLOCKED; nc -w 3 $llm_ip $LLM_PORT </dev/null && echo FETCH_LLM_OPEN || echo FETCH_LLM_BLOCKED"
+      resources: {requests: {cpu: 10m, memory: 8Mi}}
+      securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+MANIFEST
+)"
+  if [[ $? -ne 0 ]]; then fail "could not create the NetworkPolicy probe pods: ${out:0:300}"; cleanup_3b; trap - EXIT; return 0; fi
+  local phase_out phase_in phase_fetch
+  for i in $(seq 1 60); do
+    phase_out="$(k get pod verify-3b-out -n "$VERIFY_NS" -o jsonpath='{.status.phase}' 2>&1)"
+    phase_in="$(k get pod verify-3b-in -n "$ns" -o jsonpath='{.status.phase}' 2>&1)"
+    phase_fetch="$(k get pod verify-3b-fetch -n "$ns" -o jsonpath='{.status.phase}' 2>&1)"
+    [[ "$phase_out" =~ ^(Succeeded|Failed)$ && "$phase_in" =~ ^(Succeeded|Failed)$ && "$phase_fetch" =~ ^(Succeeded|Failed)$ ]] && break; sleep 2
+  done
+  local lo li lf
+  lf="$(k logs verify-3b-fetch -n "$ns" 2>&1 | tr '\n' ' ')"
+  lo="$(k logs verify-3b-out -n "$VERIFY_NS" 2>&1 | tr '\n' ' ')"
+  li="$(k logs verify-3b-in -n "$ns" 2>&1 | tr '\n' ' ')"
+  if [[ "$lo" == *CTRL_DNS_OPEN* && "$lo" == *CTRL_EXT_OPEN* ]]; then pass "probe control: a pod outside $ns reaches CoreDNS:9153 and $ext:80 (the probes can connect)"; else fail "probe control ($phase_out): ${lo:0:200}"; fi
+  if [[ "$lo" == *POD_BLOCKED* && "$lo" != *POD_OPEN* ]]; then pass "ingress denied: a pod in $VERIFY_NS cannot reach llama.cpp $llm_ip:$LLM_PORT"; else fail "pod-IP probe from another namespace ($phase_out): ${lo:0:200}"; fi
+  if [[ "$lo" == *SVC_BLOCKED* && "$lo" != *SVC_OPEN* ]]; then pass "ingress denied: a pod in $VERIFY_NS cannot reach the Service $LLM_NAME.$ns:$LLM_PORT"; else fail "Service probe from another namespace ($phase_out): ${lo:0:200}"; fi
+  if [[ "$li" == *SAMENS_BLOCKED* && "$li" != *SAMENS_OPEN* ]]; then pass "default-deny: an unlabelled pod in $ns cannot reach llama.cpp either"; else fail "same-namespace probe ($phase_in): ${li:0:200}"; fi
+  if [[ "$li" == *DNSMETRICS_BLOCKED* && "$li" == *EXT_BLOCKED* && "$li" == *DNS_FAIL* && "$li" != *_OPEN* && "$li" != *DNS_OK* ]]; then pass "egress denied: an unlabelled pod in $ns has no egress at all (not CoreDNS:53/9153, not $ext:80)"; else fail "egress probe from $ns ($phase_in): ${li:0:200}"; fi
+  if [[ "$lf" == *FETCH_HTTPS_OPEN* && "$lf" == *FETCH_DNS_OK* ]]; then pass "positive control: a pod with the $LLM_FETCH Job label reaches $ext:443 and resolves names (probe method works)"; else fail "Job-labelled probe ($phase_fetch): ${lf:0:250}"; fi
+  if [[ "$lf" == *FETCH_80_BLOCKED* && "$lf" == *FETCH_NODE_BLOCKED* && "$lf" == *FETCH_POD_BLOCKED* && "$lf" == *FETCH_LLM_BLOCKED* ]]; then pass "the Job's egress is HTTPS only: $ext:80, node IP:6443, a pod IP and llama.cpp are blocked from the Job label too"; else fail "Job-labelled probe beyond 443 ($phase_fetch): ${lf:0:250}"; fi
+  cleanup_3b; trap - EXIT
+
+  # --- from the llama.cpp pod itself (image ships curl): no egress at all, not even HTTPS or DNS (B-044)
+  local pod rc; pod="$(llm_pod)"
+  for dest in "http://$ext:80" "https://$ext:443" "https://huggingface.co/" "https://$node_ip:6443" "http://$dns_ip:9153"; do
+    k exec -n "$ns" "$pod" -c llama-server -- curl -sS -m 5 -o /dev/null "$dest" >/dev/null 2>&1; rc=$?
+    if [[ $rc -eq 28 ]]; then pass "llama.cpp pod egress to $dest times out (blocked)"; else fail "llama.cpp pod egress to $dest: curl rc=$rc (want 28, timeout)"; fi
+  done
+
+  # --- the allowed path: Mac -> Lima :443 -> Traefik (node IP) -> llama.cpp
+  out="$(llm_https -o /dev/null -w '%{http_code}' "https://$LLM_HOST/health" 2>&1)"
+  if [[ "$out" == 200 ]]; then pass "allowed path: https://$LLM_HOST/health via Traefik returns 200"; else fail "https://$LLM_HOST/health via Traefik: $out"; fi
 }
 
 # images_unpinned <namespace> <digests, one per line>: prints "<containers checked> <bad pod/container ...>".
@@ -1228,7 +1376,80 @@ YAML
 
 check_8b() { # app workloads cannot run as root / privileged: PSA restricted on app namespaces (M9)
   need_cluster || return 0
-  skip "not implemented (M9)"
+  if ! llm_vars; then fail "llm_app defaults / versions not found"; return 0; fi
+  local ns="$LLM_NS" mode label out
+
+  for mode in enforce audit warn; do
+    label="$(k get namespaces "$ns" -o jsonpath="{.metadata.labels.pod-security\\.kubernetes\\.io/$mode}" 2>&1)"
+    if [[ "$label" == "restricted" ]]; then pass "$ns PSA $mode=restricted"; else fail "$ns PSA $mode='$label'"; fi
+    label="$(k get namespaces "$ns" -o jsonpath="{.metadata.labels.pod-security\\.kubernetes\\.io/$mode-version}" 2>&1)"
+    if [[ "$label" == "$LLM_PSA_VERSION" ]]; then pass "$ns PSA $mode-version pinned to $LLM_PSA_VERSION"; else fail "$ns PSA $mode-version='$label' (want $LLM_PSA_VERSION)"; fi
+  done
+
+  # --- the API server rejects root / privileged / host pods in the namespace (server-side dry run: nothing is created)
+  local pod_yaml
+  pod_yaml() { # <name> <extra pod-spec line, may be empty> <container securityContext>
+    cat <<MANIFEST
+apiVersion: v1
+kind: Pod
+metadata: {name: $1, namespace: $ns}
+spec:
+  automountServiceAccountToken: false
+  $2
+  containers:
+    - name: c
+      image: $LLM_IMAGE
+      command: [sleep, "1"]
+      securityContext: $3
+MANIFEST
+  }
+  local good='{allowPrivilegeEscalation: false, runAsNonRoot: true, runAsUser: 10001, capabilities: {drop: [ALL]}, seccompProfile: {type: RuntimeDefault}}'
+  out="$(pod_yaml verify-8b-ok '' "$good" | k apply --dry-run=server -f - 2>&1)"
+  if [[ "$out" == *"created (server dry run)"* ]]; then pass "control: a compliant pod is accepted in $ns (dry-run)"; else fail "control pod rejected in $ns: ${out:0:300}"; fi
+  local label_case label spec sc want
+  for label_case in \
+    "root user||{allowPrivilegeEscalation: false, runAsUser: 0, capabilities: {drop: [ALL]}, seccompProfile: {type: RuntimeDefault}}|runAsNonRoot" \
+    "no securityContext||{}|allowPrivilegeEscalation" \
+    "privileged||{privileged: true, allowPrivilegeEscalation: true, runAsNonRoot: true, runAsUser: 10001, capabilities: {drop: [ALL]}, seccompProfile: {type: RuntimeDefault}}|privileged" \
+    "added capability||{allowPrivilegeEscalation: false, runAsNonRoot: true, runAsUser: 10001, capabilities: {drop: [ALL], add: [SYS_ADMIN]}, seccompProfile: {type: RuntimeDefault}}|capabilities" \
+    "hostNetwork|hostNetwork: true|$good|hostNetwork" \
+    "hostPath volume|volumes: [{name: h, hostPath: {path: /}}]|$good|hostPath"; do
+    IFS='|' read -r label spec sc want <<<"$label_case"
+    out="$(pod_yaml verify-8b-bad "$spec" "$sc" | k apply --dry-run=server -f - 2>&1)"
+    if [[ "$out" == *"violates PodSecurity \"restricted:$LLM_PSA_VERSION\""* && "$out" == *"$want"* ]]; then pass "$label pod rejected in $ns by PSA restricted:$LLM_PSA_VERSION ($want)"
+    else fail "$label pod not rejected as expected in $ns: ${out:0:300}"; fi
+  done
+
+  # --- every running container (init included) complies; effective UID proven inside the container
+  local pods; pods="$(k get pods -n "$ns" -o json 2>&1)"
+  if ! jq -e '.items | length > 0' >/dev/null 2>&1 <<<"$pods"; then fail "no pods in $ns: ${pods:0:200}"; return 0; fi
+  local bad
+  bad="$(jq -r '.items[] | . as $p | ($p.spec.securityContext // {}) as $ps
+    | (($p.spec.containers // []) + ($p.spec.initContainers // []))[] | (.securityContext // {}) as $cs
+    | select(
+        ($cs.privileged == true) or ($p.spec.hostNetwork == true) or ($p.spec.hostPID == true) or ($p.spec.hostIPC == true)
+        or (($cs.runAsNonRoot // $ps.runAsNonRoot) != true)
+        or (($cs.runAsUser // $ps.runAsUser // 0) == 0)
+        or ($cs.allowPrivilegeEscalation != false)
+        or (($cs.capabilities.drop // []) != ["ALL"]) or (($cs.capabilities.add // []) != [])
+        or ((($cs.seccompProfile // $ps.seccompProfile // {}).type) != "RuntimeDefault")
+        or ($cs.readOnlyRootFilesystem != true)
+      ) | "\($p.metadata.name)/\(.name)"' <<<"$pods" | tr '\n' ' ')"
+  local n; n="$(jq -r '[.items[] | (.spec.containers + (.spec.initContainers // []))[]] | length' <<<"$pods")"
+  if [[ -z "$bad" ]]; then pass "all $n containers in $ns: non-root, no privilege escalation, drop ALL, seccomp RuntimeDefault, read-only root, no host namespaces"; else fail "non-compliant containers: $bad"; fi
+  bad="$(jq -r '.items[] | select(.spec.volumes[]? | .hostPath != null) | .metadata.name' <<<"$pods" | tr '\n' ' ')"
+  if [[ -z "$bad" ]]; then pass "no pod in $ns mounts a hostPath"; else fail "hostPath volumes in: $bad"; fi
+  bad="$(jq -r '.items[] | select((.status.qosClass == "BestEffort") or (.spec.automountServiceAccountToken != false)) | .metadata.name' <<<"$pods" | tr '\n' ' ')"
+  if [[ -z "$bad" ]]; then pass "pods in $ns have resource requests and no ServiceAccount token mounted"; else fail "BestEffort or token-mounting pods: $bad"; fi
+  local pod uid; pod="$(llm_pod)"
+  uid="$(k exec -n "$ns" "$pod" -c llama-server -- id -u 2>&1)"
+  if [[ "$uid" == "$LLM_UID" ]]; then pass "llama-server runs as UID $uid inside the container (not root)"; else fail "id -u in $pod: $uid"; fi
+  out="$(k exec -n "$ns" "$pod" -c llama-server -- sh -c 'touch /app/x 2>&1; grep -i "^NoNewPrivs\|^Seccomp:" /proc/1/status' 2>&1 | tr '\n' ' ')"
+  if [[ "$out" == *"Read-only file system"* && "$out" == *"NoNewPrivs:"*1* && "$out" == *"Seccomp:"*2* ]]; then pass "root filesystem is read-only; process has NoNewPrivs=1 and a seccomp filter"; else fail "runtime hardening: ${out:0:200}"; fi
+
+  # --- images by digest: spec image and running imageID
+  local res; res="$(images_unpinned "$ns" "$LLM_DIGEST")"
+  if [[ "${res%% *}" -gt 0 && "$res" == "${res%% *} " ]]; then pass "all ${res%% *} containers in $ns run $LLM_IMAGE by digest (spec image and imageID)"; else fail "not digest-pinned: $res"; fi
 }
 
 # Audit policy checker, run on the node (python3-yaml is installed there). Prints "ok" or the problem.
@@ -1284,7 +1505,75 @@ check_8c() { # every API request recorded: audit policy + log (M2)
 
 check_9() { # llama.cpp over TLS, model cached across restarts
   need_cluster || return 0
-  skip "not implemented (M9)"
+  if ! llm_vars; then fail "llm_app defaults / versions not found"; return 0; fi
+  local ns="$LLM_NS" out pod mf="$LLM_MODEL_DIR/$LLM_MODEL_FILE"
+
+  out="$(k get deployments "$LLM_NAME" -n "$ns" -o jsonpath='{.spec.replicas} {.status.readyReplicas} {.spec.template.spec.containers[0].image}' 2>&1)"
+  if [[ "$out" == "1 1 $LLM_IMAGE" ]]; then pass "Deployment $LLM_NAME: 1/1 ready, image $LLM_IMAGE"; else fail "Deployment: $out"; fi
+  pod="$(llm_pod)"
+  out="$(k get pod "$pod" -n "$ns" -o jsonpath='{.status.phase} {.status.containerStatuses[0].ready} {.status.containerStatuses[0].restartCount} {.spec.containers[0].startupProbe.httpGet.path} {.spec.containers[0].readinessProbe.httpGet.path} {.spec.containers[0].livenessProbe.httpGet.path} {.spec.containers[0].resources.requests.memory} {.spec.containers[0].resources.limits.memory} {.spec.containers[0].resources.requests.cpu} {.spec.containers[0].resources.limits.cpu}' 2>&1)"
+  if [[ "$out" =~ ^Running\ true\ 0\ /health\ /health\ /health\ [0-9]+Mi\ [0-9]+Mi\ [0-9]+\ [0-9]+$ ]]; then pass "pod $pod Running, 0 restarts, /health startup+readiness+liveness probes, CPU and memory requests+limits ($out)"; else fail "pod state: $out"; fi
+  out="$(k get pvc "$LLM_MODEL_PVC" -n "$ns" -o jsonpath='{.status.phase} {.spec.storageClassName}' 2>&1)"
+  if [[ "$out" == "Bound local-path" ]]; then pass "model PVC $LLM_MODEL_PVC is Bound on the default StorageClass ($out)"; else fail "model PVC: $out"; fi
+
+  # --- TLS: certificate from the internal CA with the shared duration/renewBefore, Ingress through Traefik
+  out="$(k get certificates "$LLM_TLS_SECRET" -n "$ns" -o jsonpath='{.spec.issuerRef.name} {.spec.duration} {.spec.renewBefore} {.spec.dnsNames[*]} {.status.conditions[?(@.type=="Ready")].status}' 2>&1)"
+  if [[ "$out" == "$LLM_ISSUER $LLM_DURATION $LLM_RENEW $LLM_HOST True" ]]; then pass "Certificate $LLM_TLS_SECRET: $LLM_ISSUER, duration $LLM_DURATION, renewBefore $LLM_RENEW, $LLM_HOST, Ready"; else fail "Certificate: $out"; fi
+  out="$(k get ingress "$LLM_NAME" -n "$ns" -o jsonpath='{.spec.rules[0].host} {.spec.tls[0].secretName} {.spec.rules[0].http.paths[0].backend.service.name}' 2>&1)"
+  if [[ "$out" == "$LLM_HOST $LLM_TLS_SECRET $LLM_NAME" ]]; then pass "Ingress $LLM_NAME: $LLM_HOST -> Service $LLM_NAME, TLS secret $LLM_TLS_SECRET"; else fail "Ingress: $out"; fi
+
+  # --- completion over TLS from the Mac, trusting only certs/ca.crt
+  local body resp code content
+  body='{"model":"'"$LLM_MODEL_ALIAS"'","messages":[{"role":"user","content":"Reply with one short greeting."}],"max_tokens":24,"temperature":0}'
+  resp="$(llm_https -H 'Content-Type: application/json' -d "$body" -w '\n%{http_code}' "https://$LLM_HOST/v1/chat/completions" 2>&1)"
+  code="${resp##*$'\n'}"
+  content="$(jq -r '.choices[0].message.content // empty' <<<"${resp%$'\n'*}" 2>/dev/null)"
+  if [[ "$code" == 200 && -n "$content" ]]; then pass "POST https://$LLM_HOST/v1/chat/completions (CA-verified TLS) returned a completion: ${content:0:60}"; else fail "chat completion (HTTP $code): ${resp:0:300}"; fi
+  out="$(llm_https "https://$LLM_HOST/v1/models" 2>&1 | jq -r '.data[0].id // empty' 2>/dev/null)"
+  if [[ "$out" == "$LLM_MODEL_ALIAS" ]]; then pass "/v1/models lists $out"; else fail "/v1/models: '$out'"; fi
+
+  # --- the model file on the PVC: exact size and sha256
+  local size sha inode0 mtime0
+  size="$(k exec -n "$ns" "$pod" -c llama-server -- stat -c '%s' "$mf" 2>&1)"
+  if [[ "$size" == "$LLM_MODEL_SIZE" ]]; then pass "model file $mf on the PVC is $size bytes (pinned size)"; else fail "model file size: $size (want $LLM_MODEL_SIZE)"; fi
+  sha="$(k exec -n "$ns" "$pod" -c llama-server -- sha256sum "$mf" 2>&1 | awk '{print $1}')"
+  if [[ "$sha" == "$LLM_MODEL_SHA" ]]; then pass "model file sha256 matches the pinned value"; else fail "model sha256: $sha"; fi
+  out="$(k get pod "$pod" -n "$ns" -o jsonpath='{.spec.volumes[?(@.name=="model")].persistentVolumeClaim.claimName} {.spec.containers[0].volumeMounts[?(@.name=="model")].readOnly} {.spec.initContainers[0].name} {.spec.initContainers[0].volumeMounts[?(@.name=="model")].readOnly}' 2>&1)"
+  if [[ "$out" == "$LLM_MODEL_PVC true verify-model true" ]]; then pass "the server pod mounts the model PVC read-only in both containers (the init container only verifies)"; else fail "model mount: $out"; fi
+  out="$(k get jobs,pods -n "$ns" -l "app.kubernetes.io/component=$LLM_FETCH" -o name 2>&1)"
+  if [[ -z "$out" ]]; then pass "no $LLM_FETCH Job or pod is left behind (Ansible deletes it after completion)"; else fail "leftover model-fetch objects: $out"; fi
+  read -r inode0 mtime0 < <(k exec -n "$ns" "$pod" -c llama-server -- stat -c '%i %Y' "$mf" 2>&1)
+
+  # --- restart: a new pod reuses the cached file, no download
+  local uid0 newpod="" i ready
+  uid0="$(k get pod "$pod" -n "$ns" -o jsonpath='{.metadata.uid}' 2>&1)"
+  k delete pod "$pod" -n "$ns" --wait=true --timeout=120s >/dev/null 2>&1
+  for i in $(seq 1 90); do
+    newpod="$(llm_pod)"
+    if [[ -n "$newpod" ]]; then
+      ready="$(k get pod "$newpod" -n "$ns" -o jsonpath='{.metadata.uid} {.status.containerStatuses[0].ready}' 2>/dev/null)"
+      [[ "$ready" == *" true" && "${ready%% *}" != "$uid0" ]] && break
+    fi
+    sleep 3
+  done
+  if [[ "$ready" == *" true" && "${ready%% *}" != "$uid0" ]]; then pass "pod deleted; replacement $newpod is Ready"; else fail "no Ready replacement pod after delete (last: $newpod '$ready')"; return 0; fi
+  out="$(k logs "$newpod" -n "$ns" -c verify-model 2>&1)"
+  if [[ "$out" == *"model verified"* && "$out" != *downloading* && "$out" != *"model downloaded"* ]]; then pass "init container after restart: model verified from the PVC, no download (${out:0:60})"; else fail "init container log: ${out:0:200}"; fi
+  out="$(k get jobs,pods -n "$ns" -l "app.kubernetes.io/component=$LLM_FETCH" -o name 2>&1)"
+  if [[ -z "$out" ]]; then pass "the restart started no $LLM_FETCH Job or pod (the server pod cannot download: no egress)"; else fail "restart created model-fetch objects: $out"; fi
+  local ts; ts="$(k get pod "$newpod" -n "$ns" -o jsonpath='{.status.initContainerStatuses[0].state.terminated.reason} {.status.initContainerStatuses[0].state.terminated.startedAt} {.status.initContainerStatuses[0].state.terminated.finishedAt}' 2>&1)"
+  local s e; read -r _ s e <<<"$ts"
+  local dur=$(( $(date -j -u -f '%Y-%m-%dT%H:%M:%SZ' "$e" +%s 2>/dev/null || date -u -d "$e" +%s) - $(date -j -u -f '%Y-%m-%dT%H:%M:%SZ' "$s" +%s 2>/dev/null || date -u -d "$s" +%s) ))
+  if [[ "$ts" == Completed* && $dur -lt 30 ]]; then pass "init container Completed in ${dur}s (checksum only)"; else fail "init container: $ts (${dur}s)"; fi
+  local inode1 mtime1
+  read -r inode1 mtime1 < <(k exec -n "$ns" "$newpod" -c llama-server -- stat -c '%i %Y' "$mf" 2>&1)
+  if [[ "$inode1" == "$inode0" && "$mtime1" == "$mtime0" ]]; then pass "model file untouched across the restart (inode $inode1, mtime $mtime1)"; else fail "model file changed: inode $inode0 -> $inode1, mtime $mtime0 -> $mtime1"; fi
+  for i in $(seq 1 20); do
+    resp="$(llm_https -H 'Content-Type: application/json' -d "$body" -w '\n%{http_code}' "https://$LLM_HOST/v1/chat/completions" 2>&1)"; code="${resp##*$'\n'}"
+    [[ "$code" == 200 ]] && break; sleep 3
+  done
+  content="$(jq -r '.choices[0].message.content // empty' <<<"${resp%$'\n'*}" 2>/dev/null)"
+  if [[ "$code" == 200 && -n "$content" ]]; then pass "completion over TLS works again after the restart"; else fail "completion after restart (HTTP $code): ${resp:0:300}"; fi
 }
 
 # ------------------------------------------------------------------ main

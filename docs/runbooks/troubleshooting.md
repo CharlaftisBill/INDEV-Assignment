@@ -25,6 +25,31 @@ make verify REQ=4 STRICT=1
 
 A new Ingress namespace must be added to `ingress_traefik_watched_namespaces` first ([ADR 0003](../decisions/0003-traefik-ingress.md)).
 
+## Model missing or corrupt, llm pod Pending or Init:Error
+
+Symptom: pod in `Init:Error` (`verify-model` sha256 mismatch), or `Pending` after the PVC was deleted. The model is re-fetched only when the file hash on the node is wrong or absent; re-provisioning does that ([ADR 0008](../decisions/0008-model-caching.md)):
+
+```bash
+kubectl --kubeconfig out/admin.conf get pods -n llm
+make provision TAGS=llm_app
+make verify REQ=9 STRICT=1
+```
+
+If the fetch Job fails, the play fails. Read its logs within 1h (the failed Job is then removed):
+
+```bash
+kubectl --kubeconfig out/admin.conf logs -n llm -l component=model-fetch
+```
+
+## make smoke: Could not resolve host llm.local
+
+The Mac has no `/etc/hosts` entry (`.local` goes to mDNS first). Add it, then retry:
+
+```bash
+scripts/hosts-entry.sh --apply
+make smoke
+```
+
 ## Fresh clone fails in pki: cert without key
 
 Symptom: `make provision` fails with "`certs/ca.crt` exists but `.secrets/ca.key` does not" (B-037). `ca.key` is never committed. Either restore the original key to `.secrets/ca.key` (mode 0600), or delete `certs/ca.crt` to create a new CA, then recommit `certs/ca.crt` ([rotation](ca-rotation.md)).
