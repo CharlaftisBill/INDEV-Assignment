@@ -59,6 +59,7 @@ Filled from `ansible/group_vars/all/versions.yml` as milestones land.
 | cert-manager | chart v1.21.3; controller, webhook, cainjector by digest (`versions.yml`) | charts.jetstack.io, 2026-11-18; internal CA ([ADR 0005](decisions/0005-internal-ca-and-renewal.md)) |
 | Traefik | chart 42.3.0, image v3.7.17 (`sha256:f4bb143d…86f5a`) | traefik.github.io/charts, 2026-11-18; Ports 8443 (HTTPS) and 8000 (redirect) on the node, Lima maps Mac 443/80 ([ADR 0003](decisions/0003-traefik-ingress.md)) |
 | kube-prometheus-stack | chart 92.18.0; operator and config-reloader v0.94.2, Prometheus v3.15.1-distroless, Alertmanager v0.34.2, Grafana 13.3.0-distroless, k8s-sidecar 2.14.3, kube-state-metrics v2.20.0, node-exporter v1.12.1 (all by digest, `versions.yml`) | prometheus-community.github.io/helm-charts, 2026-11-19 ([ADR 0010](decisions/0010-monitoring-stack.md)) |
+| etcdctl / etcdutl | v3.6.6 (tarball sha256 pinned per arch) | github.com/etcd-io/etcd/releases, 2026-11-19; matches kubeadm's etcd `3.6.6-0`; `/opt/etcd`, linked in `/usr/local/bin` ([ADR 0006](decisions/0006-etcd-backups-outside-cluster.md), [restore](runbooks/etcd-restore.md)) |
 | llama.cpp server image | — | M9 |
 | Model | Qwen2.5-0.5B-Instruct GGUF Q4 | M9 |
 
