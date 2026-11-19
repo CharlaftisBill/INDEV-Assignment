@@ -3,7 +3,7 @@
 Live project state and bug tracker. Agents read this first and update it last (protocol in `CLAUDE.md`).
 
 ## Status
-Current milestone: **M9 — llm_app** · Last verified: 2026-11-19 final gate M8 (`make idempotency` changed=0; 1: 17, 2: 20, 3a: 15, 4: 48, 5: 15, 6: 73, 7: 23, 8a: 35, 8c: 8 PASS · 0 FAIL · 0 SKIP, strict) · Last SRE review: working tree 2026-11-19 — M8 r1: clean (SRE + security, 0 bugs)
+Current milestone: **M10 — Final** · Last verified: 2026-11-20 final gate M9 (`make idempotency` changed=0; 1: 17, 2: 20, 3a: 15, 3b: 18, 4: 48, 5: 15, 6: 73, 7: 23, 8a: 35, 8b: 19, 8c: 8, 9: 17 PASS · 0 FAIL · 0 SKIP, strict) · Last SRE review: working tree 2026-11-20 — M9 r1 B-044, r2 B-045, targeted re-check (user-approved): clean
 
 ## Milestones
 - [x] M0 Scaffolding: repo layout, agentic layer (`.claude/`), Makefile, lint configs, Lima config, docs skeleton, commit tooling (`split-commits` skill, `.githooks/commit-msg`)
@@ -17,7 +17,7 @@ Current milestone: **M9 — llm_app** · Last verified: 2026-11-19 final gate M8
 - [x] M6 `monitoring`: kube-prometheus-stack, node + etcd alerts, Grafana ingress (req 6)
 - [x] M7 `etcd_backup`: systemd timer → host `./backups`, staleness alert (req 7)
 - [x] M8 `hardening`: operator read-only role + kubeconfig (req 8a)
-- [ ] M9 `llm_app`: llama.cpp + model cache + NetworkPolicies + PSA-restricted namespace + TLS ingress (req 9, 3b, 8b)
+- [x] M9 `llm_app`: llama.cpp + model cache + NetworkPolicies + PSA-restricted namespace + TLS ingress (req 9, 3b, 8b)
 - [ ] M10 Final (all IDs: 1 2 3a 3b 4 5 6 7 8a 8b 8c 9): `make e2e` from a destroyed VM, full security review, docs pass (Backlog items marked "before M10" must be done first)
 
 ## Backlog
@@ -78,6 +78,8 @@ for each bug are in [Bug details](#bug-details) below.
 | B-041 | [sre] Grafana undersized: 299Mi RSS at idle vs 384Mi limit, 128Mi request (OOMKill/eviction risk) | Medium | Solved | M6 | 2026-11-19 | 2026-11-19 | 83e1d34 |
 | B-042 | [sre] Concurrent heavy PromQL queries OOMKill Prometheus (no query sample or concurrency caps) | Medium | Solved | M6 | 2026-11-19 | 2026-11-19 | 83e1d34 |
 | B-043 | [sre] Parallel `/api/v1/series` over all series OOMKills Prometheus (bypasses the query caps) | Medium | Open | M10 | 2026-11-19 | | |
+| B-044 | [sec] Running llama-server keeps HTTPS egress to any public IP (model-download allow is pod-wide) | Medium | Solved | M9 | 2026-11-19 | 2026-11-19 | 7a4808b |
+| B-045 | [sre] Model-fetch gate trusts the PVC annotation, not the file: a lost model is never re-fetched | Medium | Solved | M9 | 2026-11-19 | 2026-11-19 | 7a4808b |
 
 ## Assumptions / open questions
 - Host is an Apple Silicon Mac → VM is Debian 13 **arm64** under Lima (vz). amd64 image is listed in `lima/k8s.yaml` for Intel hosts but untested. Linux hosts are planned (Backlog), Windows is out of scope (Ansible needs WSL2).
@@ -114,6 +116,9 @@ for each bug are in [Bug details](#bug-details) below.
 - hardening (M8, req 8a): ClusterRole `operator-readonly` (explicit get/list/watch lists, no wildcards, no secrets/exec/proxy/token/impersonate/escalate/bind/CSR approval) bound to group `indev:operators`; the cert is CN=`operator`, O=that group. `pods/log` is readable (standard `view` behaviour; logs may hold app data). Reads also cover RBAC objects, CRDs, webhook configs, CSRs, cert-manager and Prometheus-operator kinds.
 - Operator cert: EC key generated on the Mac (`.secrets/operator.key`), signed via the CSR API (`kubernetes.io/kube-apiserver-client`, 180d), cert in `.secrets/operator.crt`, kubeconfig `out/operator.conf` (server 127.0.0.1:6443, 0600). Reissued when missing, wrong subject/key, not signed by the current cluster CA (VM rebuild) or within 30d of expiry.
 - Calico's `calico-tiered-policy-passthrough` binds create/update/delete on `projectcalico.org` policies to `system:authenticated`, so `can-i` says yes for the operator; the Calico API server still denies writes ("cannot get tier"), which `check_8a` probes with a real dry-run create. The operator role therefore must never get `tiers` read access; `check_8a` also allows only those Calico resources and the self-review APIs as write rows in `can-i --list`.
+- llm_app (M9, reqs 9/3b/8b): llama.cpp `ghcr.io/ggml-org/llama.cpp:server-b12110` (2026-11-04, newest >= 2 weeks old with an image tag; by index digest) and Qwen2.5-0.5B-Instruct `q4_k_m` from the official Qwen HF repo at commit `9217f5db` (sha256 + size pinned). One Deployment (Recreate, 1 replica, 1/3 CPU request/limit, 768Mi/1536Mi, 2 slots x 2048 ctx, `--no-webui`, no metrics endpoint so no Prometheus scrape policy). The model lives on a 2Gi local-path PVC, mounted read-only by the server; the fetch Job and init container reuse the llama.cpp image (curl + sha256sum, no second image).
+- llm NetworkPolicies: default-deny + node-IP /32 ingress on 8080 (ADR 0003); DNS and egress TCP 443 to public IPs (0.0.0.0/0 minus 10/8, 100.64/10, 172.16/12, 192.168/16, 169.254/16) are allowed for the `model-fetch` Job's pods only (label `app.kubernetes.io/component=model-fetch`, B-044), so the running server pod has no egress at all. Hugging Face's CDN hostnames change (no FQDN match in NetworkPolicy), hence the any-public-IP:443 scope for the short-lived Job. `llm` is labelled PSA restricted with `*-version: v1.35` (`pod_security_version`; bump with the cluster minor).
+- Model fetch (B-044/B-045, ADR 0008): the role finds the model file on the node through the bound PV (`spec.hostPath.path`), hashes it with `ansible.builtin.stat` (sha256) and runs a one-shot Job (same pinned image) only when the file is missing or differs from the pinned sha256; no PV yet (fresh VM) counts as missing. After a fetch the Job is deleted (it fails the play at once with its condition message if it fails) and the llama.cpp pods are restarted, so a pod stuck in `Init:Error` recovers. A healthy rerun hashes the file (~2 s) and reports no change. The server's `verify-model` init container only checks the sha256 on every start and fails closed; recovery from a lost or damaged file is simply re-running `make provision TAGS=llm_app`. A deleted PVC leaves the pod Pending until the next provision. Server runs with `--no-slots`.
 - **Accepted risk (user, 2026-11-19, B-043, deferred to M10):** heavy parallel `/api/v1/series` calls over all series can OOMKill Prometheus (query caps don't cover that path). Reason: only an admin with a port-forward or the API proxy can send them, Prometheus restarts in seconds with its TSDB intact; PromQL load is bounded (B-042). Fix at M10.
 - **Accepted risk (user, 2026-11-18, B-026):** runc stays Debian trixie's `1.1.15` (EOL upstream, no fix for the Nov-2025 container-escape CVEs 2025-31133/52565/52881; trixie has no newer build). Reason: single-user local VM running only our own workloads, which are PSA `restricted`. Revisit if trixie-security ships a fixed runc, or before any shared/production use.
 
@@ -375,3 +380,15 @@ Max 5 lines per bug (heading + up to 4 one-line bullets, ~200 chars each). Full 
 - **Report** (sre M6 B-042 r3): 16 parallel `series?match[]={__name__=~".+"}` (3d, 147k series, 47MB each) OOMKilled Prometheus twice; 8 peaked 1255/1280Mi. `--query.*` caps skip this path.
 - **Deferred to M10** (user, 2026-11-19): accepted risk until then, see Assumptions.
 - **Direction:** bound the series/labels path (Grafana datasource `seriesLimit`, document admin-only `limit=`) and size the limit/headroom for it; add the shape to the B-042 load test.
+
+### B-044: [sec] Running llama-server keeps HTTPS egress to any public IP (model-download allow is pod-wide)
+- **Report** (sec M9 r1): `allow-model-download` selects the server pod: the unauthenticated, Mac-facing server (image ships curl) reaches any public IP:443 for life (check_3b curls huggingface.co). Req 3b.
+- **Root cause:** the model was fetched by the server's own init container, so the egress allow had to select the server pod; policies cannot target init containers. Contradicted ADR 0008.
+- **Fix:** Ansible-run one-shot `model-fetch` Job (own label; only its pods get DNS + 443, excludes 100.64/10), skipped while the file is valid (B-045); init container only verifies (fails closed); `--no-slots`.
+- **Verification:** before: llama-server curl to huggingface.co = 200; after: times out; `make verify REQ=3b/8b/9 STRICT=1` 18/19/18 PASS; idempotency changed=0 (role and bare).
+
+### B-045: [sre] Model-fetch gate trusts the PVC annotation, not the file: a lost model is never re-fetched
+- **Report** (sre M9 r2): PV is hostPath `DirectoryOrCreate`; etcd restore on a rebuilt VM (runbook) or a damaged file leaves the annotation matching: Init:Error, Job skipped, rollout wait fails after 900s.
+- **Root cause:** the Job gate was a PVC annotation, which survives an etcd restore or a lost/damaged file; the Job was skipped and the pod sat in `Init:Error`. Job failures were also only caught by the 900 s wait.
+- **Fix:** gate on the file (PV `hostPath.path` + sha256 `stat` on the node, annotation dropped); Job polled for Complete/Failed, fails with its message; llama.cpp pods restarted after a fetch.
+- **Verification:** model file renamed on the node (annotation matched, Init:Error): old gate skips; new role refetched, pod Ready; verify 3b/8b/9 PASS; idempotency changed=0 (role, bare).
