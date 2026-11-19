@@ -140,3 +140,6 @@ per project: the plugin stays available elsewhere.
 
 ### M4 — Storage local-path (2026-11-18)
 - `review-loop` 2 rounds: `k8s-verifier` found B-032 (provisioner restarts from `capabilities.add`); `sre-reviewer` found B-033 (rollout wait) and B-034 (`check_5` re-run race); all fixed, R2 clean. The `DAC_OVERRIDE` question was settled by a reviewer test ([ADR 0004](decisions/0004-local-path-storage.md)).
+
+### M5 — PKI + Traefik (2026-11-19)
+- `review-loop` 2 rounds + one targeted re-check: opened B-035..B-038 (`security-reviewer` 2, `sre-reviewer` 2). It caught Traefik being able to read the CA key (chart ClusterRole) and a fresh clone minting a CA that mismatches the committed `ca.crt`. B-008/B-009 closed by decisions ([ADR 0003](decisions/0003-traefik-ingress.md)).

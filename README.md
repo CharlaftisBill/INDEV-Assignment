@@ -18,7 +18,7 @@ curl --cacert certs/ca.crt https://llm.local/v1/chat/completions \
 | VM | Lima (Apple Virtualization, arm64), Debian 13 | [0001](docs/decisions/0001-lima-vm.md) |
 | Runtime / installer | containerd + kubeadm | assignment |
 | CNI | Calico | [0002](docs/decisions/0002-calico-cni.md) |
-| Ingress | Traefik (hostNetwork on 80/443) | [0003](docs/decisions/0003-traefik-ingress.md) |
+| Ingress | Traefik (hostNetwork on 8443/8000; Lima maps Mac 443/80; trust anchor `certs/ca.crt`) | [0003](docs/decisions/0003-traefik-ingress.md) |
 | Storage | local-path-provisioner (default StorageClass) | [0004](docs/decisions/0004-local-path-storage.md) |
 | TLS | internal root CA (host-generated) + cert-manager CA issuer | [0005](docs/decisions/0005-internal-ca-and-renewal.md) |
 | Backups | etcd snapshots → `./backups` on the host via Lima mount | [0006](docs/decisions/0006-etcd-backups-outside-cluster.md) |

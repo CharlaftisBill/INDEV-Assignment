@@ -13,7 +13,7 @@
  │  │ containerd · kubelet · kubeadm control plane (etcd, apiserver+audit) │ │
  │  │ etcd-backup.timer ──► /mnt/host-backups ─────────────────┘     │     │ │
  │  │                                                                ▼     │ │
- │  │ Traefik (hostNetwork :80/:443) ──► Service llm ──► llama.cpp pod     │ │
+ │  │ Traefik (hostNetwork :8443/:8000) ──► Service llm ──► llama.cpp pod  │ │
  │  │      ▲ TLS cert from cert-manager CA issuer (internal root CA)  │      │ │
  │  │      │                                       PVC (local-path) ◄┘      │ │
  │  │ Calico (NetworkPolicy) · kube-prometheus-stack (Prometheus,          │ │
@@ -31,8 +31,8 @@
 | 3 | `kubeadm` | kube-system | 2, 8c |
 | 4 | `cni_calico` | tigera-operator, calico-system | 3a |
 | 5 | `storage` | local-path-storage | 5 |
-| 6 | `pki` | cert-manager | 4 |
-| 7 | `ingress_traefik` | traefik | 4 |
+| 6 | `pki` | cert-manager (+ root CA on the host) | 4 |
+| 7 | `ingress_traefik` | traefik; creates `llm`, `monitoring`, `ingress-check` | 4 |
 | 8 | `monitoring` | monitoring | 6 |
 | 9 | `etcd_backup` | — (systemd on the node) | 7 |
 | 10 | `hardening` | — (cluster RBAC) | 8a |
@@ -56,8 +56,8 @@ Filled from `ansible/group_vars/all/versions.yml` as milestones land.
 | Calico (tigera-operator + CRDs charts) | v3.33.0 (operator v1.44.0) | docs.tigera.io/calico/charts; supports Kubernetes 1.35-1.37; all images pinned by index digest in `versions.yml` ([ADR 0002](decisions/0002-calico-cni.md)) |
 | local-path-provisioner | v0.0.37 (`sha256:e757967a…0a86f`) | own templates mirroring upstream `deploy/local-path-storage.yaml` ([ADR 0004](decisions/0004-local-path-storage.md)); image pinned tag@digest |
 | busybox | 1.38.0 (`sha256:a46257e0…e5fa4`) | helper pod and `check_5` test pod; arm64 digest pinned |
-| cert-manager | — | M5 |
-| Traefik | — | M5 |
+| cert-manager | chart v1.21.3; controller, webhook, cainjector by digest (`versions.yml`) | charts.jetstack.io, 2026-11-18; internal CA ([ADR 0005](decisions/0005-internal-ca-and-renewal.md)) |
+| Traefik | chart 42.3.0, image v3.7.17 (`sha256:f4bb143d…86f5a`) | traefik.github.io/charts, 2026-11-18; Ports 8443 (HTTPS) and 8000 (redirect) on the node, Lima maps Mac 443/80 ([ADR 0003](decisions/0003-traefik-ingress.md)) |
 | kube-prometheus-stack | — | M6 |
 | llama.cpp server image | — | M9 |
 | Model | Qwen2.5-0.5B-Instruct GGUF Q4 | M9 |
