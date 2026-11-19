@@ -60,8 +60,8 @@ Filled from `ansible/group_vars/all/versions.yml` as milestones land.
 | Traefik | chart 42.3.0, image v3.7.17 (`sha256:f4bb143d…86f5a`) | traefik.github.io/charts, 2026-11-18; Ports 8443 (HTTPS) and 8000 (redirect) on the node, Lima maps Mac 443/80 ([ADR 0003](decisions/0003-traefik-ingress.md)) |
 | kube-prometheus-stack | chart 92.18.0; operator and config-reloader v0.94.2, Prometheus v3.15.1-distroless, Alertmanager v0.34.2, Grafana 13.3.0-distroless, k8s-sidecar 2.14.3, kube-state-metrics v2.20.0, node-exporter v1.12.1 (all by digest, `versions.yml`) | prometheus-community.github.io/helm-charts, 2026-11-19 ([ADR 0010](decisions/0010-monitoring-stack.md)) |
 | etcdctl / etcdutl | v3.6.6 (tarball sha256 pinned per arch) | github.com/etcd-io/etcd/releases, 2026-11-19; matches kubeadm's etcd `3.6.6-0`; `/opt/etcd`, linked in `/usr/local/bin` ([ADR 0006](decisions/0006-etcd-backups-outside-cluster.md), [restore](runbooks/etcd-restore.md)) |
-| llama.cpp server image | — | M9 |
-| Model | Qwen2.5-0.5B-Instruct GGUF Q4 | M9 |
+| llama.cpp server image | `ghcr.io/ggml-org/llama.cpp:server-b12110` (`sha256:1145e8de…10bbe3e`) | github.com/ggml-org/llama.cpp releases, 2026-11-19; also used by the model-fetch Job (curl + sha256sum) |
+| Model | Qwen2.5-0.5B-Instruct Q4_K_M, 491400032 bytes (`sha256:74a4da8c…d7a9db`) | Hugging Face `Qwen/Qwen2.5-0.5B-Instruct-GGUF` at commit `9217f5db…`, 2026-11-19 ([ADR 0008](decisions/0008-model-caching.md)) |
 
 ## Control plane notes (`kubeadm` role)
 
@@ -78,8 +78,7 @@ Prometheus scrapes the node IP: apiserver 6443, kubelet 10250, etcd 2381 (HTTP),
 
 | From | To | Port | Why |
 |---|---|---|---|
-| Traefik pods (`traefik` ns) | llama.cpp | 8080/TCP | ingress |
-| Prometheus (`monitoring` ns) | llama.cpp | 8080/TCP `/metrics` | monitoring |
+| Node IP /32 (Traefik is hostNetwork) | llama.cpp | 8080/TCP | ingress ([ADR 0003](decisions/0003-traefik-ingress.md)) |
 | everything else | — | — | denied (default-deny ingress + egress) |
 
-Only the model-fetch Job gets egress (DNS + 443) to download the model once.
+The llama.cpp pod has no egress. Only pods labelled `component=model-fetch` get DNS + TCP 443 to public IPs (RFC1918, 169.254/16, 100.64/10 excluded), and only while the fetch Job runs ([ADR 0008](decisions/0008-model-caching.md)).

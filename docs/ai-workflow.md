@@ -150,6 +150,9 @@ per project: the plugin stays available elsewhere.
 ### M8 — Operator role (2026-11-19)
 - `review-loop` 1 round (`sre-reviewer` + `security-reviewer`), 0 bugs opened. Lows noted: namespaced broad-group grants not checked, no CSR cleanup on failure, key not rotated, `can-i --list` fails open ([ADR 0011](decisions/0011-operator-identity.md)).
 
+### M9 — llm_app (2026-11-20)
+- `review-loop` 2 rounds + one targeted re-check. R1: `security-reviewer` and `sre-reviewer` opened B-044 (pod-wide egress, now Job-only). R2: `sre-reviewer` opened B-045 (annotation fetch gate, now file hash). The user approved a targeted re-check instead of round 3; clean. Lows accepted ([ADR 0008](decisions/0008-model-caching.md)).
+
 ### M6 — Monitoring (2026-11-19)
 - `review-loop` 2 rounds + one targeted re-check. R1: `security-reviewer` opened B-039 (Grafana credentials/RBAC) and B-040 (node-exporter hardening); `sre-reviewer` opened B-041 (memory budget). R2: `sre-reviewer` opened B-042 (Prometheus OOM under wide queries); targeted re-checks reopened it twice (5M, then 4 × 1.5M with a 60 B/sample model), fixed on attempt 3 (2 × 1.2M, 1280Mi limit, `GOGC=50`). The third re-check opened B-043 (`/api/v1/series` bypasses the query caps).
 - Human decisions: targeted re-checks beyond the 2-round cap and attempt 3's plan were user-approved; B-043 deferred to M10 as an accepted risk; the SRE reviewer's real alert demo (etcd and node) became a runbook ([ADR 0010](decisions/0010-monitoring-stack.md)).
