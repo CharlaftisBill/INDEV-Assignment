@@ -1,0 +1,123 @@
+---
+# promtool unit tests for the node-health, etcd-health and Traefik alerts. check_6 runs them inside the Prometheus pod against the
+# rule files the operator actually loaded (not copies), because a real node or etcd failure cannot be provoked without disrupting
+# the cluster. Alert annotations are templates of the chart's rules: a chart bump that rewords them needs this file updated.
+rule_files:
+  - /etc/prometheus/rules/prometheus-kps-prometheus-rulefiles-0/*.yaml
+evaluation_interval: 1m
+tests:
+  # Node health: the node stops being Ready (and is schedulable): pending for 15m, then firing.
+  - interval: 1m
+    input_series:
+      - series: 'kube_node_status_condition{condition="Ready",status="true",node="k8s-node",job="kube-state-metrics"}'
+        values: '0x30'
+      - series: 'kube_node_spec_unschedulable{node="k8s-node",job="kube-state-metrics"}'
+        values: '0x30'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: KubeNodeNotReady
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: KubeNodeNotReady
+        exp_alerts:
+          - exp_labels: {severity: warning, condition: Ready, status: "true", node: k8s-node, job: kube-state-metrics}
+            exp_annotations:
+              description: "k8s-node has been unready for more than 15 minutes on cluster ."
+              runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubenodenotready
+              summary: Node is not ready.
+  # Node health: the root filesystem is almost full (2% left) while writable: warning and critical both fire after 30m.
+  - interval: 1m
+    input_series:
+      - series: 'node_filesystem_avail_bytes{device="/dev/vda1",fstype="ext4",mountpoint="/",instance="k8s-node",job="node-exporter"}'
+        values: '2000000x60'
+      - series: 'node_filesystem_size_bytes{device="/dev/vda1",fstype="ext4",mountpoint="/",instance="k8s-node",job="node-exporter"}'
+        values: '100000000x60'
+      - series: 'node_filesystem_readonly{device="/dev/vda1",fstype="ext4",mountpoint="/",instance="k8s-node",job="node-exporter"}'
+        values: '0x60'
+    alert_rule_test:
+      - eval_time: 35m
+        alertname: NodeFilesystemAlmostOutOfSpace
+        exp_alerts:
+          - exp_labels: {severity: warning, device: /dev/vda1, fstype: ext4, mountpoint: /, instance: k8s-node, job: node-exporter}
+            exp_annotations:
+              description: "Filesystem on /dev/vda1, mounted on /, at k8s-node has only 2.00% available space left."
+              runbook_url: https://runbooks.prometheus-operator.dev/runbooks/node/nodefilesystemalmostoutofspace
+              summary: Filesystem has less than 5% space left.
+          - exp_labels: {severity: critical, device: /dev/vda1, fstype: ext4, mountpoint: /, instance: k8s-node, job: node-exporter}
+            exp_annotations:
+              description: "Filesystem on /dev/vda1, mounted on /, at k8s-node has only 2.00% available space left."
+              runbook_url: https://runbooks.prometheus-operator.dev/runbooks/node/nodefilesystemalmostoutofspace
+              summary: Filesystem has less than 3% space left.
+  # etcd health: the only member is down, then reports no leader.
+  - interval: 1m
+    input_series:
+      - series: 'up{job="kube-etcd",instance="192.168.5.15:2381"}'
+        values: '0x30'
+      - series: 'etcd_server_has_leader{job="kube-etcd",instance="192.168.5.15:2381"}'
+        values: '0x30'
+    alert_rule_test:
+      - eval_time: 30s
+        alertname: etcdNoLeader
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: etcdNoLeader
+        exp_alerts:
+          - exp_labels: {severity: critical, job: kube-etcd, instance: "192.168.5.15:2381"}
+            exp_annotations:
+              description: 'etcd cluster "kube-etcd": member 192.168.5.15:2381 has no leader.'
+              runbook_url: https://runbooks.prometheus-operator.dev/runbooks/etcd/etcdnoleader
+              summary: etcd cluster has no leader.
+      - eval_time: 5m
+        alertname: etcdInsufficientMembers
+        exp_alerts:
+          - exp_labels: {severity: critical, job: kube-etcd}
+            exp_annotations:
+              description: 'etcd cluster "kube-etcd": insufficient members (0).'
+              runbook_url: https://runbooks.prometheus-operator.dev/runbooks/etcd/etcdinsufficientmembers
+              summary: etcd cluster has insufficient number of members.
+      - eval_time: 25m
+        alertname: etcdMembersDown
+        exp_alerts:
+          - exp_labels: {severity: warning, job: kube-etcd}
+            exp_annotations:
+              description: 'etcd cluster "kube-etcd": members are down (1).'
+              runbook_url: https://runbooks.prometheus-operator.dev/runbooks/etcd/etcdmembersdown
+              summary: etcd cluster members are down.
+  # B-038: Traefik is up and an Ingress has TLS, but Traefik holds no certificate (Ingress provider not synced).
+  - interval: 1m
+    input_series:
+      - series: 'up{job="traefik",instance="192.168.5.15:9101"}'
+        values: '1x10'
+      - series: 'kube_ingress_tls{namespace="monitoring",ingress="grafana",tls_host="grafana.local",secret="grafana-tls"}'
+        values: '1x10'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: TraefikIngressNotSynced
+        exp_alerts:
+          - exp_labels: {severity: critical}
+            exp_annotations:
+              summary: Traefik is up but serves no TLS certificate for the cluster's Ingresses (provider not synced, e.g. a missing Role).
+  # Control: a synced Traefik (certificate loaded) does not alert; a Traefik that is not scraped fires TraefikDown instead.
+  - interval: 1m
+    input_series:
+      - series: 'up{job="traefik",instance="192.168.5.15:9101"}'
+        values: '1x10'
+      - series: 'kube_ingress_tls{namespace="monitoring",ingress="grafana",tls_host="grafana.local",secret="grafana-tls"}'
+        values: '1x10'
+      - series: 'traefik_tls_certs_not_after{cn="grafana.local",serial="1"}'
+        values: '1795000000x10'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: TraefikIngressNotSynced
+        exp_alerts: []
+  - interval: 1m
+    input_series:
+      - series: 'up{job="traefik",instance="192.168.5.15:9101"}'
+        values: '0x10'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: TraefikDown
+        exp_alerts:
+          - exp_labels: {severity: critical}
+            exp_annotations:
+              summary: Traefik is not being scraped or is down; no Ingress is served.

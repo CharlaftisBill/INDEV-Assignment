@@ -1,0 +1,19 @@
+# Grafana's sidecars only watch ConfigMaps in this namespace (B-039): the Mac-facing Grafana cannot read Secrets such as the CA key.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ monitoring_release }}-grafana-sidecar
+  namespace: {{ monitoring_namespace }}
+rules:
+  - apiGroups: [""]
+    resources: [configmaps]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ monitoring_release }}-grafana-sidecar
+  namespace: {{ monitoring_namespace }}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: {{ monitoring_release }}-grafana-sidecar}
+subjects:
+  - {kind: ServiceAccount, name: {{ monitoring_release }}-grafana, namespace: {{ monitoring_namespace }}}

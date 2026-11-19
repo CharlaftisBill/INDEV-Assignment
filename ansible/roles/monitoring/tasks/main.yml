@@ -1,0 +1,114 @@
+---
+# Prometheus + Alertmanager + Grafana via kube-prometheus-stack (req 6): node and etcd alerts from the chart's default rules,
+# control-plane targets on the node IP, Grafana at https://{{ grafana_hostname }} through Traefik.
+- name: Label the monitoring namespaces (PSA) and create node-exporter's
+  kubernetes.core.k8s:
+    kubeconfig: "{{ monitoring_kubeconfig }}"
+    state: present
+    template: namespaces.yaml.j2
+
+# Generated once on the host (mode 0600 by the lookup, gitignored) and reused on every run and VM rebuild; never printed.
+- name: Read or generate the Grafana admin password on the host
+  ansible.builtin.set_fact:
+    monitoring_grafana_password: "{{ lookup('ansible.builtin.password', monitoring_grafana_password_file, length=32, chars=['ascii_letters', 'digits']) }}"
+  delegate_to: localhost
+  no_log: true
+
+- name: Store the Grafana admin credentials in a Secret
+  kubernetes.core.k8s:
+    kubeconfig: "{{ monitoring_kubeconfig }}"
+    state: present
+    template: grafana-secret.yaml.j2
+  no_log: true
+
+- name: Grant Grafana's sidecars read access to ConfigMaps in the namespace only
+  kubernetes.core.k8s:
+    kubeconfig: "{{ monitoring_kubeconfig }}"
+    state: present
+    template: grafana-rbac.yaml.j2
+
+- name: Apply the default-deny and per-component NetworkPolicies
+  kubernetes.core.k8s:
+    kubeconfig: "{{ monitoring_kubeconfig }}"
+    state: present
+    template: networkpolicies.yaml.j2
+
+# Images are pinned by digest through the values; the CRDs ship with the chart.
+- name: Install the kube-prometheus-stack chart
+  kubernetes.core.helm:
+    kubeconfig: "{{ monitoring_kubeconfig }}"
+    name: "{{ monitoring_release }}"
+    chart_ref: "{{ monitoring_chart }}"
+    chart_repo_url: "{{ monitoring_chart_repo }}"
+    chart_version: "{{ kube_prometheus_stack_chart_version }}"
+    release_namespace: "{{ monitoring_namespace }}"
+    create_namespace: false
+    values: "{{ lookup('ansible.builtin.template', 'values.yaml.j2') | from_yaml }}"
+    wait: true
+    timeout: "{{ monitoring_wait_timeout }}s"
+
+# No wait_condition on workloads: a custom condition bypasses the rollout check (B-033).
+- name: Wait for the Deployment rollouts to complete
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ monitoring_kubeconfig }}"
+    api_version: apps/v1
+    kind: Deployment
+    name: "{{ monitoring_release }}-{{ item }}"
+    namespace: "{{ monitoring_namespace }}"
+    wait: true
+    wait_timeout: "{{ monitoring_wait_timeout }}"
+  loop: [operator, grafana, kube-state-metrics]
+  changed_when: false
+
+- name: Wait for the node-exporter DaemonSet rollout to complete
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ monitoring_kubeconfig }}"
+    api_version: apps/v1
+    kind: DaemonSet
+    name: "{{ monitoring_release }}-prometheus-node-exporter"
+    namespace: "{{ monitoring_node_exporter_namespace }}"
+    wait: true
+    wait_timeout: "{{ monitoring_wait_timeout }}"
+  changed_when: false
+
+# The operator builds the StatefulSets from these resources.
+- name: Wait for the Prometheus and Alertmanager resources to be Available
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ monitoring_kubeconfig }}"
+    api_version: monitoring.coreos.com/v1
+    kind: "{{ item.kind }}"
+    name: "{{ monitoring_release }}-{{ item.name }}"
+    namespace: "{{ monitoring_namespace }}"
+    wait: true
+    wait_condition: {type: Available, status: "True"}
+    wait_timeout: "{{ monitoring_wait_timeout }}"
+  loop:
+    - {kind: Prometheus, name: prometheus}
+    - {kind: Alertmanager, name: alertmanager}
+  loop_control:
+    label: "{{ item.kind }}"
+  changed_when: false
+
+- name: Scrape Traefik and alert when it stops serving or syncing Ingresses
+  kubernetes.core.k8s:
+    kubeconfig: "{{ monitoring_kubeconfig }}"
+    state: present
+    template: traefik-monitoring.yaml.j2
+
+- name: Create the Grafana Certificate and Ingress
+  kubernetes.core.k8s:
+    kubeconfig: "{{ monitoring_kubeconfig }}"
+    state: present
+    template: grafana-ingress.yaml.j2
+
+- name: Wait for the Grafana Certificate to be Ready
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ monitoring_kubeconfig }}"
+    api_version: cert-manager.io/v1
+    kind: Certificate
+    name: "{{ monitoring_grafana_tls_secret }}"
+    namespace: "{{ monitoring_namespace }}"
+    wait: true
+    wait_condition: {type: Ready, status: "True"}
+    wait_timeout: "{{ monitoring_wait_timeout }}"
+  changed_when: false

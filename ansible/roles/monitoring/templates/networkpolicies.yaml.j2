@@ -1,0 +1,143 @@
+{# Default deny, then one policy per component. The API server and every kubeadm metrics port are on the node IP (hostNetwork),
+   which pod selectors cannot match: those rules are ipBlock /32 (same pattern as ADR 0003). #}
+{% set node = monitoring_node_ip ~ '/32' %}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: default-deny, namespace: {{ monitoring_namespace }}}
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: allow-dns, namespace: {{ monitoring_namespace }}}
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: kube-system}}
+          podSelector: {matchLabels: {k8s-app: kube-dns}}
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+---
+# Webhook calls come from the API server (node IP); Prometheus scrapes the operator's own metrics.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: operator, namespace: {{ monitoring_namespace }}}
+spec:
+  podSelector: {matchLabels: {app: kube-prometheus-stack-operator}}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - ipBlock: {cidr: {{ node }}}
+        - podSelector: {matchLabels: {app.kubernetes.io/name: prometheus}}
+      ports:
+        - {protocol: TCP, port: 10250}
+  egress:
+    - to: [{ipBlock: {cidr: {{ node }}}}]
+      ports:
+        - {protocol: TCP, port: {{ monitoring_apiserver_port }}}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: prometheus, namespace: {{ monitoring_namespace }}}
+spec:
+  podSelector: {matchLabels: {app.kubernetes.io/name: prometheus}}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    # Grafana queries it; the node IP covers the API-server service proxy used by check_6.
+    - from:
+        - podSelector: {matchLabels: {app.kubernetes.io/name: grafana}}
+        - ipBlock: {cidr: {{ node }}}
+      ports:
+        - {protocol: TCP, port: 9090}
+  egress:
+    # Kubernetes service discovery, kubelet/cAdvisor, etcd, controller-manager, scheduler, kube-proxy, node-exporter, Traefik.
+    - to: [{ipBlock: {cidr: {{ node }}}}]
+      ports:
+{% for p in [monitoring_apiserver_port, monitoring_kubelet_port, monitoring_etcd_metrics_port, monitoring_controller_manager_port, monitoring_scheduler_port, monitoring_kube_proxy_port, monitoring_node_exporter_port, monitoring_traefik_metrics_port] %}
+        - {protocol: TCP, port: {{ p }}}
+{% endfor %}
+    - to:
+        - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: kube-system}}
+          podSelector: {matchLabels: {k8s-app: kube-dns}}
+      ports:
+        - {protocol: TCP, port: 9153}
+    - to:
+        - podSelector: {matchLabels: {app.kubernetes.io/name: alertmanager}}
+      ports:
+        - {protocol: TCP, port: 9093}
+        - {protocol: TCP, port: 8080}
+    - to:
+        - podSelector: {matchLabels: {app.kubernetes.io/name: grafana}}
+      ports:
+        - {protocol: TCP, port: 3000}
+    - to:
+        - podSelector: {matchLabels: {app.kubernetes.io/name: kube-state-metrics}}
+      ports:
+        - {protocol: TCP, port: 8080}
+        - {protocol: TCP, port: 8081}
+    - to:
+        - podSelector: {matchLabels: {app: kube-prometheus-stack-operator}}
+      ports:
+        - {protocol: TCP, port: 10250}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: alertmanager, namespace: {{ monitoring_namespace }}}
+spec:
+  podSelector: {matchLabels: {app.kubernetes.io/name: alertmanager}}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: {matchLabels: {app.kubernetes.io/name: prometheus}}
+        - podSelector: {matchLabels: {app.kubernetes.io/name: grafana}}
+        - ipBlock: {cidr: {{ node }}}
+      ports:
+        - {protocol: TCP, port: 9093}
+        - {protocol: TCP, port: 8080}
+---
+# Traefik (hostNetwork, node IP) and the API-server proxy reach it on 3000; the sidecars watch ConfigMaps through the API server.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: grafana, namespace: {{ monitoring_namespace }}}
+spec:
+  podSelector: {matchLabels: {app.kubernetes.io/name: grafana}}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - ipBlock: {cidr: {{ node }}}
+        - podSelector: {matchLabels: {app.kubernetes.io/name: prometheus}}
+      ports:
+        - {protocol: TCP, port: 3000}
+  egress:
+    - to: [{ipBlock: {cidr: {{ node }}}}]
+      ports:
+        - {protocol: TCP, port: {{ monitoring_apiserver_port }}}
+    - to:
+        - podSelector: {matchLabels: {app.kubernetes.io/name: prometheus}}
+      ports:
+        - {protocol: TCP, port: 9090}
+    - to:
+        - podSelector: {matchLabels: {app.kubernetes.io/name: alertmanager}}
+      ports:
+        - {protocol: TCP, port: 9093}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: {name: kube-state-metrics, namespace: {{ monitoring_namespace }}}
+spec:
+  podSelector: {matchLabels: {app.kubernetes.io/name: kube-state-metrics}}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector: {matchLabels: {app.kubernetes.io/name: prometheus}}
+      ports:
+        - {protocol: TCP, port: 8080}
+        - {protocol: TCP, port: 8081}
+  egress:
+    - to: [{ipBlock: {cidr: {{ node }}}}]
+      ports:
+        - {protocol: TCP, port: {{ monitoring_apiserver_port }}}
