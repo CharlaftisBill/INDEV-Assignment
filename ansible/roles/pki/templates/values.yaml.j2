@@ -1,0 +1,24 @@
+# Chart {{ cert_manager_chart_version }}: the image tag equals the chart version (appVersion); the digest is what the node pulls.
+crds:
+  enabled: true
+# The chart's post-install API check Job is replaced by the role's Deployment waits and ClusterIssuer retries.
+startupapicheck:
+  enabled: false
+image:
+  tag: {{ cert_manager_chart_version }}
+  digest: {{ cert_manager_image_digests.controller }}
+resources: {{ pki_resources.controller | to_json }}
+webhook:
+  image:
+    tag: {{ cert_manager_chart_version }}
+    digest: {{ cert_manager_image_digests.webhook }}
+  resources: {{ pki_resources.webhook | to_json }}
+cainjector:
+  image:
+    tag: {{ cert_manager_chart_version }}
+    digest: {{ cert_manager_image_digests.cainjector }}
+  resources: {{ pki_resources.cainjector | to_json }}
+acmesolver:
+  image:
+    tag: {{ cert_manager_chart_version }}
+    digest: {{ cert_manager_image_digests.acmesolver }}

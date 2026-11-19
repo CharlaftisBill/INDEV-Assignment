@@ -1,0 +1,10 @@
+---
+galaxy_info:
+  author: indev
+  description: Traefik ingress controller on the host network, non-root on 8443/8000 (Lima maps 443/80)
+  license: MIT
+  min_ansible_version: "2.17"
+  platforms:
+    - name: Debian
+      versions: [trixie]
+dependencies: []

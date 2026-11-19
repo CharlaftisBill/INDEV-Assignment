@@ -1,0 +1,10 @@
+---
+galaxy_info:
+  author: indev
+  description: Internal root CA (created once on the host), cert-manager and the internal-ca ClusterIssuer
+  license: MIT
+  min_ansible_version: "2.17"
+  platforms:
+    - name: Debian
+      versions: [trixie]
+dependencies: []

@@ -1,0 +1,66 @@
+# Chart {{ traefik_chart_version }} (Traefik {{ traefik_image_version }}); the digest is what the node pulls.
+image:
+  digest: {{ traefik_image_digest }}
+# The chart cannot derive the version from a digest.
+versionOverride: {{ traefik_image_version }}
+# Lima only forwards ports it sees listening in the guest: bind them in the node's network namespace.
+hostNetwork: true
+deployment:
+  replicas: 1
+  dnsPolicy: ClusterFirstWithHostNet
+# One node, one host port set: the old pod must stop before the new one can bind.
+updateStrategy:
+  rollingUpdate:
+    maxSurge: 0
+    maxUnavailable: 1
+resources: {{ ingress_traefik_resources | to_json }}
+# Entry traffic arrives on the node, not through a Service.
+service:
+  enabled: false
+ingressClass:
+  enabled: true
+  isDefaultClass: true
+  name: {{ ingress_traefik_class }}
+# No outbound calls to Traefik's version/usage services.
+global:
+  checkNewVersion: false
+  sendAnonymousUsage: false
+api:
+  dashboard: false
+# The chart's RBAC is replaced by rbac.yaml.j2 (B-036): rbac.namespaced would also stop Traefik reading IngressClass,
+# so Ingresses with spec.ingressClassName (every defaulted one) would be ignored.
+rbac:
+  enabled: false
+# Only the Ingress provider is used; the IngressRoute CRDs are not installed (skip_crds).
+providers:
+  kubernetesCRD:
+    enabled: false
+  kubernetesIngress:
+    namespaces: {{ ingress_traefik_watched_namespaces | to_json }}
+ports:
+  traefik:
+    port: {{ ingress_traefik_ports.health }}
+  metrics:
+    port: {{ ingress_traefik_ports.metrics }}
+  web:
+    port: {{ ingress_traefik_ports.web }}
+    http:
+      redirections:
+        entryPoint:
+          to: websecure
+          scheme: https
+          permanent: true
+  websecure:
+    port: {{ ingress_traefik_ports.websecure }}
+# Chart defaults, kept explicit: UID 65532, no capabilities, read-only root filesystem.
+podSecurityContext:
+  runAsUser: 65532
+  runAsGroup: 65532
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: [ALL]

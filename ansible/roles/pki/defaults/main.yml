@@ -1,0 +1,27 @@
+---
+# Kubernetes modules run on the node with admin.conf (python3-kubernetes from the kubeadm role).
+# Cluster-wide issuer name and certificate lifetimes (pki_cluster_issuer, pki_cert_*) are in group_vars/all/main.yml.
+pki_kubeconfig: /etc/kubernetes/admin.conf
+pki_namespace: "{{ ns_cert_manager }}"
+pki_chart_repo: https://charts.jetstack.io
+pki_chart: cert-manager
+pki_release: cert-manager
+pki_wait_timeout: 300
+pki_deployments: [cert-manager, cert-manager-webhook, cert-manager-cainjector]
+
+# Root CA (host side, created once and then reused: the committed certs/ca.crt must stay valid across VM rebuilds).
+pki_ca_key: "{{ host_secrets_dir }}/ca.key"
+pki_ca_cert: "{{ host_ca_cert }}"
+pki_ca_common_name: INDEV internal CA
+pki_ca_validity: +3650d
+pki_ca_secret: internal-ca-key-pair
+# Name constraints (B-035): a leaked CA key can only mint *.local names, never public domains or IPs.
+# Changing them only affects a newly created CA; an existing certs/ca.crt is kept (delete the cert and key to re-issue).
+pki_ca_permitted_names: ["DNS:local"]
+pki_ca_excluded_names: ["IP:0.0.0.0/0", "IP:::/0"]
+
+# Requests only: limits could OOM-kill the controllers mid-issuance.
+pki_resources:
+  controller: {requests: {cpu: 10m, memory: 64Mi}}
+  webhook: {requests: {cpu: 10m, memory: 32Mi}}
+  cainjector: {requests: {cpu: 10m, memory: 64Mi}}

@@ -33,12 +33,14 @@ ssh:
   loadDotSSHPubKeys: false
 
 # Lima forwards ports by watching *listening sockets* in the guest.
-# Traefik must therefore bind 80/443 itself (hostNetwork), not via CNI hostPort
-# (iptables DNAT, no socket -> Lima never sees it). macOS lets non-root bind 443.
+# Traefik must therefore listen itself (hostNetwork), not via CNI hostPort
+# (iptables DNAT, no socket -> Lima never sees it). Traefik runs non-root without
+# capabilities, so it listens on 8443/8000 and Lima maps them to the Mac's 443/80
+# (B-009; macOS lets non-root bind 443).
 portForwards:
-  - guestPort: 443
+  - guestPort: 8443
     hostPort: 443
-  - guestPort: 80
+  - guestPort: 8000
     hostPort: 80
   - guestPort: 6443
     hostPort: 6443

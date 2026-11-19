@@ -1,0 +1,7 @@
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: {{ pki_cluster_issuer }}
+spec:
+  ca:
+    secretName: {{ pki_ca_secret }}

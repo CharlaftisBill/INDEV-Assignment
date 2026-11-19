@@ -32,6 +32,11 @@ host_out_dir: "{{ repo_root }}/out"
 host_secrets_dir: "{{ repo_root }}/.secrets"
 host_ca_cert: "{{ repo_root }}/certs/ca.crt"
 
+# Certificates issued by the internal CA (pki role) for every Ingress host: renewal starts 30 days before expiry.
+pki_cluster_issuer: internal-ca
+pki_cert_duration: 2160h
+pki_cert_renew_before: 720h
+
 # Node-side paths
 node_backup_dir: /mnt/host-backups      # Lima mount of ./backups on the Mac
 etcd_backup_schedule: "*-*-* *:00/30:00"  # systemd OnCalendar: every 30 min

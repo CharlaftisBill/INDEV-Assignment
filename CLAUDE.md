@@ -19,7 +19,7 @@ The assignment is `k8s-single-node-assignment.pdf`. Project state and bugs: **`T
 - Host: Apple Silicon Mac. VM: Lima instance `k8s` (`lima/k8s.yaml`, vz, arm64, Debian 13, 4 CPU / 8 GiB / 40 GiB).
 - Ansible runs **on the Mac** and pushes over SSH (`ansible/ansible.cfg` uses `~/.lima/k8s/ssh.config`, host alias `lima-k8s`).
 - Shell in VM: `limactl shell k8s`. Admin kubeconfig (after M2): `out/admin.conf` → `kubectl --kubeconfig out/admin.conf ...`.
-- Host-forwarded ports: 443, 80, 6443 only. `/etc/hosts` on the Mac maps `llm.local grafana.local` to 127.0.0.1 (`scripts/hosts-entry.sh`).
+- Host-forwarded ports: Mac 443, 80, 6443 only (443/80 map to Traefik's 8443/8000 in the VM). `/etc/hosts` on the Mac maps `llm.local grafana.local` to 127.0.0.1 (`scripts/hosts-entry.sh`).
 
 ## Commands
 - `make help` · `make deps` · `make tools` (pinned `.venv` on Python 3.14 + collections; all make targets use it — run ansible/ansible-lint outside make via `source .venv/bin/activate`, never Homebrew's copies) · `make vm-up` / `vm-down` / `vm-reset` (destructive) / `vm-shell`
@@ -62,7 +62,7 @@ The assignment is `k8s-single-node-assignment.pdf`. Project state and bugs: **`T
 - A PostToolUse hook lints every YAML file the agent edits (`.claude/hooks/lint-changed.sh`); fix what it reports before moving on.
 
 ## Known gotchas
-- Lima forwards ports by watching listening sockets: Traefik must use `hostNetwork` to bind 443; CNI `hostPort` (iptables DNAT) is invisible to Lima.
+- Lima forwards ports by watching listening sockets: Traefik listens on 8443/8000 via `hostNetwork`; Lima maps Mac 443/80; CNI `hostPort` (iptables DNAT) is invisible to Lima.
 - Lima's user network is 192.168.5.0/24 → pod CIDR is 10.244.0.0/16, not Calico's default.
 - kubeadm binds etcd/scheduler/controller-manager metrics to 127.0.0.1; Prometheus needs `listen-metrics-urls`/`bind-address` changed.
 - Audit "every request": the policy must not contain `level: None` rules; rotate the log (`audit-log-maxage/maxbackup/maxsize`).
