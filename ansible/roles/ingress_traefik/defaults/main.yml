@@ -1,0 +1,36 @@
+---
+# Kubernetes modules run on the node with admin.conf (python3-kubernetes from the kubeadm role).
+ingress_traefik_kubeconfig: /etc/kubernetes/admin.conf
+ingress_traefik_namespace: "{{ ns_ingress }}"
+ingress_traefik_chart_repo: https://traefik.github.io/charts
+ingress_traefik_chart: traefik
+ingress_traefik_release: traefik
+ingress_traefik_class: traefik
+ingress_traefik_wait_timeout: 300
+
+# Non-root cannot bind 443/80 (B-009): Traefik listens on 8443/8000 and Lima forwards the Mac's 443/80 to them.
+# Host-network ports must not collide with the node: kube components use 2379-2381, 6443, 10249-10259;
+# 9100 is node-exporter's (M6) and 8080 is a common clash, so the health port is 9102 and metrics 9101.
+ingress_traefik_ports:
+  web: 8000
+  websecure: 8443
+  metrics: 9101
+  health: 9102
+
+# Requests only: limits could throttle or OOM-kill the only entry point.
+ingress_traefik_resources:
+  requests: {cpu: 25m, memory: 64Mi}
+
+# Namespaces whose Ingresses and TLS Secrets Traefik may read (B-036): Roles there, and only a ClusterRole for IngressClass and Nodes,
+# so the CA key in cert-manager and kube-system Secrets are out of reach. Traefik needs every listed namespace to exist (informers
+# would not sync, B-038), so list only namespaces a role owns and nothing deletes. The role creates them bare; the owning roles
+# (monitoring M6, llm_app M9) add PSA labels and NetworkPolicies on top.
+ingress_traefik_watched_namespaces: "{{ app_namespaces + [ns_monitoring, ingress_traefik_check_namespace] }}"
+ingress_traefik_rbac_name: "{{ ingress_traefik_release }}-ingress"
+
+# check_4's own namespace (owned here, never deleted by a check): PSA restricted, default-deny, node-IP allow on the backend port.
+ingress_traefik_check_namespace: ingress-check
+ingress_traefik_check_backend_port: 8080
+ingress_traefik_node_ip: "{{ ansible_facts['default_ipv4']['address'] }}"
+# Former watched namespaces: their Role/RoleBinding are removed (a scratch namespace must not be watched).
+ingress_traefik_stale_namespaces: [verify-tmp]

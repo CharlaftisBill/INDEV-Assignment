@@ -1,0 +1,7 @@
+{% for ns in ingress_traefik_watched_namespaces | difference([ingress_traefik_check_namespace]) %}
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ ns }}
+{% endfor %}

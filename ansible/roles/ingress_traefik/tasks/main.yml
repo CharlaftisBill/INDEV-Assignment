@@ -1,0 +1,97 @@
+---
+# Traefik ingress controller (req 4, ingress part): HTTPS on node:8443, HTTP redirect on node:8000; Lima forwards 443/80.
+- name: Create the Traefik namespace with privileged PSA labels
+  kubernetes.core.k8s:
+    kubeconfig: "{{ ingress_traefik_kubeconfig }}"
+    state: present
+    template: namespace.yaml.j2
+
+# Created bare: k8s merges, so labels added later by the owning roles are kept and this task stays idempotent.
+- name: Create the watched namespaces that Traefik gets Roles in
+  kubernetes.core.k8s:
+    kubeconfig: "{{ ingress_traefik_kubeconfig }}"
+    state: present
+    template: watched-namespaces.yaml.j2
+
+- name: Create the check namespace (PSA restricted, default-deny, node-IP allow)
+  kubernetes.core.k8s:
+    kubeconfig: "{{ ingress_traefik_kubeconfig }}"
+    state: present
+    template: check-namespace.yaml.j2
+
+- name: Grant Traefik read access to Ingresses and Secrets in the watched namespaces only
+  kubernetes.core.k8s:
+    kubeconfig: "{{ ingress_traefik_kubeconfig }}"
+    state: present
+    template: rbac.yaml.j2
+
+- name: Remove the Role and RoleBinding from namespaces that are no longer watched
+  kubernetes.core.k8s:
+    kubeconfig: "{{ ingress_traefik_kubeconfig }}"
+    state: absent
+    api_version: rbac.authorization.k8s.io/v1
+    kind: "{{ item.1 }}"
+    name: "{{ ingress_traefik_rbac_name }}"
+    namespace: "{{ item.0 }}"
+  loop: "{{ ingress_traefik_stale_namespaces | product(['RoleBinding', 'Role']) | list }}"
+  loop_control:
+    label: "{{ item.1 }} in {{ item.0 }}"
+
+# A missing Role leaves the Ingress provider unsynced and every route 404 while the pod stays Ready (B-038).
+- name: Read the Traefik Roles and RoleBindings in the watched namespaces
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ ingress_traefik_kubeconfig }}"
+    api_version: rbac.authorization.k8s.io/v1
+    kind: "{{ item.1 }}"
+    name: "{{ ingress_traefik_rbac_name }}"
+    namespace: "{{ item.0 }}"
+  loop: "{{ ingress_traefik_watched_namespaces | product(['Role', 'RoleBinding']) | list }}"
+  loop_control:
+    label: "{{ item.1 }} in {{ item.0 }}"
+  register: ingress_traefik_rbac_found
+  changed_when: false
+
+- name: Assert every watched namespace has the Traefik Role and RoleBinding
+  ansible.builtin.assert:
+    that: item.resources | length == 1
+    fail_msg: "{{ item.item.1 }} {{ ingress_traefik_rbac_name }} is missing in watched namespace {{ item.item.0 }}; Traefik would not sync its Ingress provider"
+    quiet: true
+  loop: "{{ ingress_traefik_rbac_found.results }}"
+  loop_control:
+    label: "{{ item.item.1 }} in {{ item.item.0 }}"
+
+- name: Install the Traefik chart
+  kubernetes.core.helm:
+    kubeconfig: "{{ ingress_traefik_kubeconfig }}"
+    name: "{{ ingress_traefik_release }}"
+    chart_ref: "{{ ingress_traefik_chart }}"
+    chart_repo_url: "{{ ingress_traefik_chart_repo }}"
+    chart_version: "{{ traefik_chart_version }}"
+    release_namespace: "{{ ingress_traefik_namespace }}"
+    create_namespace: false
+    skip_crds: true
+    values: "{{ lookup('ansible.builtin.template', 'values.yaml.j2') | from_yaml }}"
+    wait: true
+    timeout: "{{ ingress_traefik_wait_timeout }}s"
+
+# No wait_condition: a custom condition bypasses the Deployment rollout check (B-033).
+- name: Wait for the Traefik Deployment rollout to complete
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ ingress_traefik_kubeconfig }}"
+    api_version: apps/v1
+    kind: Deployment
+    name: "{{ ingress_traefik_release }}"
+    namespace: "{{ ingress_traefik_namespace }}"
+    wait: true
+    wait_timeout: "{{ ingress_traefik_wait_timeout }}"
+  changed_when: false
+
+# Lima only forwards sockets it sees listening on the node.
+- name: Wait for Traefik to listen on the node
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: "{{ item }}"
+    timeout: 60
+  loop:
+    - "{{ ingress_traefik_ports.websecure }}"
+    - "{{ ingress_traefik_ports.web }}"

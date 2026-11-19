@@ -30,8 +30,8 @@
     - { role: cni_calico, tags: [cni_calico] }
     - { role: storage, tags: [storage] }
     - { role: pki, tags: [pki] }
+    - { role: ingress_traefik, tags: [ingress_traefik] }
   # Planned order (uncommented as each milestone lands):
-  #   - { role: ingress_traefik, tags: [ingress_traefik] }
   #   - { role: monitoring,      tags: [monitoring] }
   #   - { role: etcd_backup,     tags: [etcd_backup] }
   #   - { role: hardening,       tags: [hardening] }
