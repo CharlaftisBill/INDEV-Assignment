@@ -6,7 +6,7 @@
 # Prints a PASS/FAIL/SKIP line per check and a summary; exits 1 if anything FAILed
 # (or, with --strict / VERIFY_STRICT=1, if anything was SKIPped: a check that didn't run proves nothing).
 # Each check_N is implemented in the milestone that delivers requirement N (see TODO.md).
-# Checks must be read-only, or create test objects only in the "verify-tmp" namespace and clean them up.
+# Checks must be read-only, or create test objects only in "verify-tmp" (check_5) or their role-owned namespace (check_4: ingress-check) and clean them up.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -215,9 +215,286 @@ check_3b() { # app pods accept only the traffic they need: NetworkPolicies in ap
   skip "not implemented (M9)"
 }
 
-check_4() { # Ingress + internal CA TLS + auto renewal
+# images_unpinned <namespace> <digests, one per line>: prints "<containers checked> <bad pod/container ...>".
+# A container is bad unless its spec image is @sha256:<digest> from the list and the running imageID has the same digest.
+images_unpinned() {
+  local ns="$1" digests="$2" pod cname img id d n=0 bad=""
+  for pod in $(k get pods -n "$ns" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null); do
+    while read -r cname img id; do
+      [[ -z "$cname" ]] && continue
+      n=$((n + 1))
+      d="${img##*@}"
+      if [[ "$img" != *@sha256:* ]] || ! grep -qx "$d" <<<"$digests" || [[ "${id##*@}" != "$d" ]]; then bad+="$pod/$cname "; fi
+    done < <(k get pods "$pod" -n "$ns" -o jsonpath='{range .spec.containers[*]}S {.name} {.image}{"\n"}{end}{range .spec.initContainers[*]}S {.name} {.image}{"\n"}{end}{range .status.containerStatuses[*]}I {.name} {.imageID}{"\n"}{end}{range .status.initContainerStatuses[*]}I {.name} {.imageID}{"\n"}{end}' 2>&1 \
+      | awk '$1 == "S" {img[$2] = $3; order[++m] = $2} $1 == "I" {id[$2] = $3} END {for (i = 1; i <= m; i++) print order[i], img[order[i]], id[order[i]]}')
+  done
+  echo "$n $bad"
+}
+
+# Leaf serial served on the Mac's :443 (through Lima) for an SNI name
+served_serial() { openssl s_client -servername "$1" -connect 127.0.0.1:443 </dev/null 2>/dev/null | openssl x509 -noout -serial 2>/dev/null; }
+
+# check_4's namespace belongs to ingress_traefik and is watched by Traefik (B-038): delete only our objects, never the namespace.
+CHECK4_NS=""
+cleanup_4() {
+  [[ -n "$CHECK4_NS" ]] || return 0
+  k delete ingress,service,pod,certificate -n "$CHECK4_NS" -l verify=check-4 --ignore-not-found --wait=false >/dev/null 2>&1
+  k delete secret verify-tls -n "$CHECK4_NS" --ignore-not-found --wait=false >/dev/null 2>&1
+}
+
+check_4() { # Ingress (Traefik) + TLS from the internal CA (cert-manager) + automatic renewal (M5)
   need_cluster || return 0
-  skip "not implemented (M5)"
+  local vy="$ROOT/ansible/group_vars/all/versions.yml" main="$ROOT/ansible/group_vars/all/main.yml"
+  local pki_role="$ROOT/ansible/roles/pki/defaults/main.yml" tr_role="$ROOT/ansible/roles/ingress_traefik/defaults/main.yml"
+  local cm_ns tr_ns issuer ca_secret https_port http_port check_ns bport node_ns_llm node_ns_mon
+  cm_ns="$(sed -n 's/^ns_cert_manager:[[:space:]]*\([a-z-]*\).*/\1/p' "$main")"
+  tr_ns="$(sed -n 's/^ns_ingress:[[:space:]]*\([a-z-]*\).*/\1/p' "$main")"
+  issuer="$(sed -n 's/^pki_cluster_issuer:[[:space:]]*\([a-z-]*\).*/\1/p' "$main")"
+  ca_secret="$(sed -n 's/^pki_ca_secret:[[:space:]]*\([a-z-]*\).*/\1/p' "$pki_role")"
+  https_port="$(sed -n 's/^  websecure:[[:space:]]*\([0-9]*\).*/\1/p' "$tr_role")"
+  http_port="$(sed -n 's/^  web:[[:space:]]*\([0-9]*\).*/\1/p' "$tr_role")"
+  check_ns="$(sed -n 's/^ingress_traefik_check_namespace:[[:space:]]*\([a-z-]*\).*/\1/p' "$tr_role")"
+  bport="$(sed -n 's/^ingress_traefik_check_backend_port:[[:space:]]*\([0-9]*\).*/\1/p' "$tr_role")"
+  node_ns_llm="$(sed -n 's/^ns_llm:[[:space:]]*\([a-z-]*\).*/\1/p' "$main")"
+  node_ns_mon="$(sed -n 's/^ns_monitoring:[[:space:]]*\([a-z-]*\).*/\1/p' "$main")"
+  if [[ -z "$cm_ns" || -z "$tr_ns" || -z "$issuer" || -z "$ca_secret" || -z "$https_port" || -z "$http_port" || -z "$check_ns" || -z "$bport" || -z "$node_ns_llm" || -z "$node_ns_mon" ]]; then
+    fail "pki/ingress_traefik defaults or namespaces not found in group_vars/roles"; return 0
+  fi
+
+  # --- Root CA on the host: a long-lived CA certificate; the key exists and is private (its contents are never read)
+  local ca_text; ca_text="$(openssl x509 -in "$CA_CERT" -noout -text 2>&1)"
+  if grep -A1 'Basic Constraints: critical' <<<"$ca_text" | grep -q 'CA:TRUE, pathlen:0'; then pass "certs/ca.crt is a CA (critical CA:TRUE, pathlen:0)"
+  else fail "certs/ca.crt missing or not a pathlen:0 CA"; fi
+  if grep -A1 'Key Usage: critical' <<<"$ca_text" | grep -q 'Certificate Sign'; then pass "certs/ca.crt key usage includes keyCertSign (critical)"
+  else fail "certs/ca.crt key usage lacks keyCertSign"; fi
+  # B-035: critical name constraints keep a leaked CA key from minting certificates for public domains or IPs
+  if grep -A5 'Name Constraints: critical' <<<"$ca_text" | tr -d '\n' | grep -Eq 'Permitted:[[:space:]]*DNS:local[[:space:]]*Excluded:[[:space:]]*IP:0\.0\.0\.0/0\.0\.0\.0[[:space:]]*IP:(0:){7}0/(0:){7}0'; then
+    pass "certs/ca.crt has critical name constraints (permitted DNS:local; excluded all IPv4/IPv6)"
+  else fail "certs/ca.crt lacks critical name constraints permitting only DNS:local and excluding all IPs"; fi
+  if openssl x509 -in "$CA_CERT" -noout -checkend 31536000 >/dev/null 2>&1; then pass "certs/ca.crt valid for more than 1 year"; else fail "certs/ca.crt expires within 1 year or is unreadable"; fi
+  local key="$ROOT/.secrets/ca.key" fmode
+  fmode="$(stat -f '%Lp' "$key" 2>/dev/null || stat -c '%a' "$key" 2>/dev/null)"
+  if [[ -f "$key" && "$fmode" == "600" ]]; then pass ".secrets/ca.key exists with mode 600"; else fail ".secrets/ca.key missing or mode '$fmode' (want 600)"; fi
+  # B-037: the key must belong to the committed certificate; only public-key hashes are compared and shown
+  local key_pub cert_pub
+  key_pub="$(openssl pkey -in "$key" -pubout 2>/dev/null | openssl sha256 2>/dev/null | awk '{print $NF}')"
+  cert_pub="$(openssl x509 -in "$CA_CERT" -noout -pubkey 2>/dev/null | openssl sha256 2>/dev/null | awk '{print $NF}')"
+  if [[ -n "$key_pub" && "$key_pub" == "$cert_pub" ]]; then pass ".secrets/ca.key matches certs/ca.crt (public key sha256 ${key_pub:0:12}...)"
+  else fail ".secrets/ca.key does not match certs/ca.crt (public key sha256 '${key_pub:0:12}' vs '${cert_pub:0:12}')"; fi
+
+  # --- cert-manager: rollout, restricted namespace, digest-pinned images, requests, CA Secret, ClusterIssuer
+  local dep ready
+  for dep in cert-manager cert-manager-webhook cert-manager-cainjector; do
+    ready="$(k get deployments "$dep" -n "$cm_ns" -o jsonpath='{.spec.replicas} {.status.readyReplicas}' 2>&1)"
+    if [[ "$ready" =~ ^([1-9][0-9]*)\ \1$ ]]; then pass "Deployment $dep ready ($ready)"; else fail "Deployment $dep replicas/ready: $ready"; fi
+  done
+  local mode label
+  for mode in enforce audit warn; do
+    label="$(k get namespaces "$cm_ns" -o jsonpath="{.metadata.labels.pod-security\\.kubernetes\\.io/$mode}" 2>&1)"
+    if [[ "$label" == "restricted" ]]; then pass "$cm_ns PSA $mode=restricted"; else fail "$cm_ns PSA $mode='$label'"; fi
+  done
+  local chart want_chart
+  want_chart="cert-manager-$(pinned cert_manager_chart_version)"
+  chart="$(k get deployments cert-manager -n "$cm_ns" -o jsonpath='{.metadata.labels.helm\.sh/chart}' 2>&1)"
+  if [[ "$chart" == "$want_chart" ]]; then pass "cert-manager chart is the pinned $want_chart"; else fail "cert-manager chart '$chart' (want $want_chart)"; fi
+  local digests res n bad
+  digests="$(awk '/^cert_manager_image_digests:/ {f = 1; next} f && /^[^ ]/ {f = 0} f' "$vy" | grep -o 'sha256:[0-9a-f]\{64\}')"
+  if [[ -z "$digests" ]]; then fail "no cert-manager image digests in versions.yml"; else
+    res="$(images_unpinned "$cm_ns" "$digests")"; n="${res%% *}"; bad="${res#* }"
+    if [[ "$n" -gt 0 && -z "${bad// /}" ]]; then pass "all $n cert-manager containers run by pinned digest (spec image and imageID)"
+    else fail "cert-manager not digest-pinned (n=$n): ${bad:-no containers}"; fi
+  fi
+  bad="$(k get pods -n "$cm_ns" -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.status.qosClass}{"\n"}{end}' 2>&1 | awk 'NF && $2 == "BestEffort" {printf "%s ", $1}')"
+  if [[ -z "$bad" ]]; then pass "cert-manager pods have resource requests"; else fail "BestEffort cert-manager pods: $bad"; fi
+  local secret_desc; secret_desc="$(k describe secret "$ca_secret" -n "$cm_ns" 2>&1)"
+  if grep -Eq '^Type:[[:space:]]+kubernetes.io/tls' <<<"$secret_desc" && grep -q '^tls.key:' <<<"$secret_desc" && grep -q '^tls.crt:' <<<"$secret_desc"; then
+    pass "CA Secret $ca_secret (kubernetes.io/tls, tls.crt + tls.key) exists in $cm_ns"
+  else fail "CA Secret $ca_secret missing or wrong type in $cm_ns"; fi
+  local ci; ci="$(k get clusterissuers "$issuer" -o jsonpath='{.spec.ca.secretName} {.status.conditions[?(@.type=="Ready")].status}' 2>&1)"
+  if [[ "$ci" == "$ca_secret True" ]]; then pass "ClusterIssuer $issuer (type ca, $ca_secret) is Ready"; else fail "ClusterIssuer $issuer: $ci"; fi
+
+  # --- Traefik: ready, host network, non-root, no added capabilities, digest-pinned, no NodePort/LoadBalancer, default IngressClass
+  ready="$(k get deployments traefik -n "$tr_ns" -o jsonpath='{.spec.replicas} {.status.readyReplicas}' 2>&1)"
+  if [[ "$ready" =~ ^([1-9][0-9]*)\ \1$ ]]; then pass "Deployment traefik ready ($ready)"; else fail "Deployment traefik replicas/ready: $ready"; fi
+  local want_tr_chart="traefik-$(pinned traefik_chart_version)"
+  chart="$(k get deployments traefik -n "$tr_ns" -o jsonpath='{.metadata.labels.helm\.sh/chart}' 2>&1)"
+  if [[ "$chart" == "$want_tr_chart" ]]; then pass "Traefik chart is the pinned $want_tr_chart"; else fail "Traefik chart '$chart' (want $want_tr_chart)"; fi
+  local pod_ready; pod_ready="$(k get pods -n "$tr_ns" -l app.kubernetes.io/name=traefik -o jsonpath='{range .items[*]}{.status.phase} {.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}' 2>&1)"
+  if [[ "$pod_ready" == "Running True" ]]; then pass "exactly one Traefik pod, Running and Ready"; else fail "Traefik pods: $(tr '\n' ',' <<<"$pod_ready")"; fi
+  local sc
+  sc="$(k get pods -n "$tr_ns" -l app.kubernetes.io/name=traefik -o jsonpath='{.items[0].spec.hostNetwork}|{.items[0].spec.securityContext.runAsNonRoot}|{.items[0].spec.securityContext.runAsUser}|{.items[0].spec.securityContext.seccompProfile.type}|{.items[0].spec.containers[0].securityContext.allowPrivilegeEscalation}|{.items[0].spec.containers[0].securityContext.readOnlyRootFilesystem}|{.items[0].spec.containers[0].securityContext.privileged}|{.items[0].spec.containers[0].securityContext.capabilities.add}|{.items[0].spec.containers[0].securityContext.capabilities.drop}' 2>&1)"
+  if [[ "$sc" == 'true|true|65532|RuntimeDefault|false|true|||["ALL"]' ]]; then
+    pass "Traefik: hostNetwork, runAsNonRoot UID 65532, no privilege escalation, read-only rootfs, seccomp RuntimeDefault, drop ALL, no added capabilities"
+  else fail "Traefik security context: $sc"; fi
+  bad="$(k get pods -n "$tr_ns" -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.status.qosClass}{"\n"}{end}' 2>&1 | awk 'NF && $2 == "BestEffort" {printf "%s ", $1}')"
+  if [[ -z "$bad" ]]; then pass "Traefik pod has resource requests"; else fail "BestEffort Traefik pods: $bad"; fi
+  res="$(images_unpinned "$tr_ns" "$(pinned traefik_image_digest)")"; n="${res%% *}"; bad="${res#* }"
+  if [[ "$n" -gt 0 && -z "${bad// /}" ]]; then pass "Traefik runs by the pinned digest (spec image and imageID)"; else fail "Traefik not digest-pinned (n=$n): ${bad:-no containers}"; fi
+  for mode in enforce audit warn; do
+    label="$(k get namespaces "$tr_ns" -o jsonpath="{.metadata.labels.pod-security\\.kubernetes\\.io/$mode}" 2>&1)"
+    if [[ "$label" == "privileged" ]]; then pass "$tr_ns PSA $mode=privileged (platform namespace: hostNetwork)"; else fail "$tr_ns PSA $mode='$label'"; fi
+  done
+  local classes; classes="$(k get ingressclasses -o jsonpath='{range .items[*]}{.metadata.name} {.metadata.annotations.ingressclass\.kubernetes\.io/is-default-class}{"\n"}{end}' 2>&1 | awk '$2 == "true" {print $1}')"
+  if [[ "$classes" == "traefik" ]]; then pass "traefik is the only default IngressClass"; else fail "default IngressClasses: '$(tr '\n' ' ' <<<"$classes")'"; fi
+  local exposed; exposed="$(k get services -n "$tr_ns" -o jsonpath='{range .items[*]}{.metadata.name}:{.spec.type}{"\n"}{end}' 2>&1 | grep -E ':(NodePort|LoadBalancer)$' | tr '\n' ' ')"
+  if [[ -z "$exposed" ]]; then pass "no NodePort/LoadBalancer Service in $tr_ns"; else fail "exposed Services in $tr_ns: $exposed"; fi
+  # B-036: Traefik's Secret access is namespaced; the CA key (cert-manager) and kube-system must be out of reach
+  local sa="system:serviceaccount:$tr_ns:traefik" can_ns
+  for can_ns in "$cm_ns" kube-system; do
+    if [[ "$(k auth can-i get secrets -n "$can_ns" --as="$sa" 2>&1)" == "no" ]]; then pass "Traefik ServiceAccount cannot get Secrets in $can_ns"
+    else fail "Traefik ServiceAccount can read Secrets in $can_ns (ClusterRole instead of namespaced Roles?)"; fi
+  done
+  # B-038: the Ingress provider only syncs if it can list in every watched namespace; a missing Role blanks all routes
+  local watched want_watched ns
+  watched="$(k get deployments traefik -n "$tr_ns" -o jsonpath='{.spec.template.spec.containers[0].args}' 2>&1 | grep -o 'providers.kubernetesingress.namespaces=[^"]*' | cut -d= -f2 | tr ',' '\n' | sort | tr '\n' ' ')"
+  want_watched="$(printf '%s\n' "$node_ns_llm" "$node_ns_mon" "$check_ns" | sort | tr '\n' ' ')"
+  if [[ "$watched" == "$want_watched" ]]; then pass "Traefik watches only the role-owned namespaces: $watched"; else fail "Traefik watches '$watched' (want '$want_watched'; no scratch namespaces)"; fi
+  local role_n rb_n
+  for ns in $watched; do
+    role_n="$(k get roles -n "$ns" --field-selector metadata.name=traefik-ingress -o name 2>&1 | grep -c '^role')"
+    rb_n="$(k get rolebindings -n "$ns" --field-selector metadata.name=traefik-ingress -o name 2>&1 | grep -c '^rolebinding')"
+    if [[ "$role_n" == 1 && "$rb_n" == 1 ]]; then pass "Traefik Role and RoleBinding exist in watched namespace $ns"
+    else fail "watched namespace $ns lacks the Traefik Role/RoleBinding (role=$role_n binding=$rb_n); re-run make provision TAGS=ingress_traefik"; fi
+  done
+  local forbidden; forbidden="$(k logs -n "$tr_ns" deployment/traefik --tail=1000 2>&1 | grep -ci 'forbidden')"
+  if [[ "$forbidden" == 0 ]]; then pass "no 'forbidden' errors in the Traefik log (Ingress provider can list its namespaces)"; else fail "$forbidden 'forbidden' lines in the Traefik log (RBAC gap, provider not synced?)"; fi
+  local p listen; listen="$(node ss -H -ltn 2>&1)"
+  for p in "$https_port" "$http_port"; do
+    if grep -Eq "[:*]$p[[:space:]]" <<<"$listen"; then pass "node listens on :$p (Lima forwards it)"; else fail "nothing listens on :$p on the node"; fi
+  done
+
+  # --- End to end through the Mac's :443/:80: non-root backend, Ingress without ingressClassName, cert from the internal CA
+  local img; img="docker.io/library/busybox:$(pinned local_path_helper_version)@$(pinned local_path_helper_digest)"
+  local host=verify.local body="verify-ingress-ok"
+  # The namespace is created by ingress_traefik (PSA restricted, default-deny, node-IP allow on $bport)
+  for mode in enforce audit warn; do
+    label="$(k get namespaces "$check_ns" -o jsonpath="{.metadata.labels.pod-security\\.kubernetes\\.io/$mode}" 2>&1)"
+    if [[ "$label" == "restricted" ]]; then pass "$check_ns PSA $mode=restricted"; else fail "$check_ns PSA $mode='$label' (namespace owned by ingress_traefik)"; return 0; fi
+  done
+  local np; np="$(k get networkpolicies -n "$check_ns" -o jsonpath='{range .items[*]}{.metadata.name}:{.spec.policyTypes}:{.spec.ingress[*].from[*].ipBlock.cidr}:{.spec.ingress[*].ports[*].port}{"\n"}{end}' 2>&1 | sort | tr '\n' ' ')"
+  if [[ "$np" =~ default-deny:\[\"Ingress\",\"Egress\"\]:: ]] && [[ "$np" =~ allow-node-ip:\[\"Ingress\"\]:[0-9.]+/32:$bport ]]; then pass "$check_ns has default-deny ingress+egress and an ingress allow from the node IP /32 on :$bport"
+  else fail "$check_ns NetworkPolicies unexpected: $np"; fi
+  CHECK4_NS="$check_ns"
+  trap cleanup_4 EXIT
+  local out
+  out="$(k apply -f - 2>&1 <<MANIFEST
+apiVersion: v1
+kind: Pod
+metadata:
+  name: verify-web
+  namespace: $check_ns
+  labels: {app: verify-web, verify: check-4}
+spec:
+  terminationGracePeriodSeconds: 0
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: web
+      image: $img
+      command: [sh, -c, "echo $body > /www/index.html && exec httpd -f -p $bport -h /www"]
+      ports:
+        - {name: http, containerPort: $bport}
+      readinessProbe:
+        tcpSocket: {port: http}
+        periodSeconds: 2
+      resources:
+        requests: {cpu: 10m, memory: 8Mi}
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: [ALL]
+      volumeMounts:
+        - {name: www, mountPath: /www}
+  volumes:
+    - name: www
+      emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: verify-web
+  namespace: $check_ns
+  labels: {verify: check-4}
+spec:
+  selector: {app: verify-web}
+  ports:
+    - {name: http, port: 80, targetPort: http}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: verify-tls
+  namespace: $check_ns
+  labels: {verify: check-4}
+spec:
+  secretName: verify-tls
+  dnsNames: [$host]
+  issuerRef: {name: $issuer, kind: ClusterIssuer}
+  # 1h is the minimum duration cert-manager accepts; renewBefore leaves a 15 s window, so it renews within seconds.
+  duration: 1h
+  renewBefore: 59m45s
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: verify-web
+  namespace: $check_ns
+  labels: {verify: check-4}
+spec:
+  tls:
+    - {hosts: [$host], secretName: verify-tls}
+  rules:
+    - host: $host
+      http:
+        paths:
+          - {path: /, pathType: Prefix, backend: {service: {name: verify-web, port: {name: http}}}}
+MANIFEST
+)"
+  if [[ $? -ne 0 ]]; then fail "could not create the test pod/Service/Certificate/Ingress in $check_ns: $out"; cleanup_4; trap - EXIT; return 0; fi
+
+  if k wait --for=condition=Ready pod/verify-web -n "$check_ns" --timeout=120s >/dev/null 2>&1; then pass "non-root backend pod (PSA restricted namespace) is Ready"
+  else fail "backend pod not Ready: $(k get pods verify-web -n "$check_ns" -o jsonpath='{.status.phase} {.status.containerStatuses[0].state}' 2>&1)"; cleanup_4; trap - EXIT; return 0; fi
+  if k wait --for=condition=Ready certificate/verify-tls -n "$check_ns" --timeout=120s >/dev/null 2>&1; then pass "cert-manager issued the test Certificate from $issuer"
+  else fail "Certificate not Ready: $(k get certificate verify-tls -n "$check_ns" -o jsonpath='{.status.conditions[*].message}' 2>&1)"; cleanup_4; trap - EXIT; return 0; fi
+
+  # HTTPS through Lima's :443 -> Traefik :8443, validated against the committed CA only
+  local i resp="" code=""
+  for i in $(seq 1 30); do
+    resp="$(curl -sS --max-time 5 --resolve "$host:443:127.0.0.1" --cacert "$CA_CERT" -w '\n%{http_code}' "https://$host/" 2>&1)"; code="${resp##*$'\n'}"
+    [[ "$code" == "200" ]] && break; sleep 2
+  done
+  local got="${resp%$'\n'*}"; got="${got%$'\n'}"
+  if [[ "$code" == "200" && "$got" == "$body" ]]; then pass "https://$host/ -> 200 with the backend body; chain verifies against certs/ca.crt"
+  else fail "https://$host/ via :443: ${resp//$'\n'/ }"; fi
+
+  # openssl (not just curl) must accept the name-constrained chain
+  local vrc; vrc="$(openssl s_client -servername "$host" -connect 127.0.0.1:443 -CAfile "$CA_CERT" </dev/null 2>&1 | grep -m1 'Verify return code')"
+  if [[ "$vrc" == *"code: 0 (ok)"* ]]; then pass "openssl s_client verifies the served chain against certs/ca.crt (name constraints satisfied)"
+  else fail "openssl s_client chain verification: ${vrc:-no result}"; fi
+
+  local redirect; redirect="$(curl -sS --max-time 5 --resolve "$host:80:127.0.0.1" -o /dev/null -w '%{http_code} %{redirect_url}' "http://$host/" 2>&1)"
+  if [[ "$redirect" == "301 https://$host/" || "$redirect" == "308 https://$host/" ]]; then pass "http://$host/ via :80 redirects permanently to HTTPS ($redirect)"
+  else fail "http://$host/ via :80: '$redirect' (want 301/308 to https://$host/)"; fi
+
+  # Renewal: the short-lived Certificate is re-issued and Traefik serves the new leaf without a restart
+  local serial0 serial="" rev="" renewed=0
+  serial0="$(served_serial "$host")"
+  for i in $(seq 1 45); do
+    rev="$(k get certificate verify-tls -n "$check_ns" -o jsonpath='{.status.revision}' 2>&1)"
+    serial="$(served_serial "$host")"
+    if [[ "$rev" =~ ^[0-9]+$ && "$rev" -ge 2 && -n "$serial" && -n "$serial0" && "$serial" != "$serial0" ]]; then renewed=1; break; fi
+    sleep 2
+  done
+  if [[ $renewed == 1 ]]; then pass "Certificate auto-renewed (revision $rev) and Traefik serves the new leaf ($serial0 -> $serial)"
+  else fail "no renewal within 90 s: revision '$rev', served serial '$serial0' -> '$serial'"; fi
+  resp="$(curl -sS --max-time 5 --resolve "$host:443:127.0.0.1" --cacert "$CA_CERT" "https://$host/" 2>&1)"
+  if [[ "$resp" == "$body" ]]; then pass "https://$host/ still verifies against certs/ca.crt after renewal"; else fail "https after renewal: $resp"; fi
+  cleanup_4; trap - EXIT
 }
 
 VERIFY_NS=verify-tmp
@@ -232,6 +509,7 @@ cleanup_5() {
   k delete pod verify-storage -n "$VERIFY_NS" --ignore-not-found --wait=false >/dev/null 2>&1
   k delete pvc verify-storage -n "$VERIFY_NS" --ignore-not-found --wait=false >/dev/null 2>&1
   if [[ "$VERIFY_NS_CREATED" == 1 ]]; then k delete namespace "$VERIFY_NS" --ignore-not-found --wait=false >/dev/null 2>&1; fi
+  VERIFY_NS_CREATED=0
 }
 
 check_5() { # default StorageClass: local-path-provisioner, dynamic PVC for a non-root pod, volume cleaned on delete (M4)
@@ -275,6 +553,7 @@ check_5() { # default StorageClass: local-path-provisioner, dynamic PVC for a no
   # End to end: PVC without storageClassName + PSA-restricted non-root pod writes a file
   local img; img="docker.io/library/busybox:$(pinned local_path_helper_version)@$(pinned local_path_helper_digest)"
   wait_verify_ns_gone
+  VERIFY_NS_CREATED=0
   if ! k get namespaces "$VERIFY_NS" >/dev/null 2>&1; then VERIFY_NS_CREATED=1; fi
   trap cleanup_5 EXIT
   local out
