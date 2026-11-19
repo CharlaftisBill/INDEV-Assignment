@@ -85,6 +85,9 @@ prometheus-node-exporter:
     tag: {{ monitoring_images.node_exporter.tag }}
     digest: {{ monitoring_images.node_exporter.digest }}
   resources: {{ monitoring_resources.node_exporter | to_json }}
+  # etcd_backup (M7) writes metrics to {{ node_textfile_dir }} on the node; read it through the existing read-only /host/root mount (no extra volume).
+  extraArgs:
+    - --collector.textfile.directory=/host/root{{ node_textfile_dir }}
   # hostPID/hostNetwork/hostPath stay (PSA privileged namespace), but the process gets no new privileges, no capabilities and a seccomp filter (B-040).
   securityContext:
     fsGroup: 65534
