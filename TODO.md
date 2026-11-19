@@ -3,7 +3,7 @@
 Live project state and bug tracker. Agents read this first and update it last (protocol in `CLAUDE.md`).
 
 ## Status
-Current milestone: **M8 — hardening** · Last verified: 2026-11-19 final gate M7 (`make idempotency` changed=0; 1: 17, 2: 20, 3a: 15, 4: 48, 5: 15, 6: 73, 7: 23, 8c: 8 PASS · 0 FAIL · 0 SKIP, strict) · Last SRE review: ec6b28b 2026-11-19 — M7 r1: clean (B-010 holds)
+Current milestone: **M9 — llm_app** · Last verified: 2026-11-19 final gate M8 (`make idempotency` changed=0; 1: 17, 2: 20, 3a: 15, 4: 48, 5: 15, 6: 73, 7: 23, 8a: 35, 8c: 8 PASS · 0 FAIL · 0 SKIP, strict) · Last SRE review: working tree 2026-11-19 — M8 r1: clean (SRE + security, 0 bugs)
 
 ## Milestones
 - [x] M0 Scaffolding: repo layout, agentic layer (`.claude/`), Makefile, lint configs, Lima config, docs skeleton, commit tooling (`split-commits` skill, `.githooks/commit-msg`)
@@ -16,7 +16,7 @@ Current milestone: **M8 — hardening** · Last verified: 2026-11-19 final gate 
   - Cross-role: `lima/k8s.yaml` (M1) forwards Mac 443→8443 and 80→8000 so Traefik stays non-root (B-009).
 - [x] M6 `monitoring`: kube-prometheus-stack, node + etcd alerts, Grafana ingress (req 6)
 - [x] M7 `etcd_backup`: systemd timer → host `./backups`, staleness alert (req 7)
-- [ ] M8 `hardening`: operator read-only role + kubeconfig (req 8a)
+- [x] M8 `hardening`: operator read-only role + kubeconfig (req 8a)
 - [ ] M9 `llm_app`: llama.cpp + model cache + NetworkPolicies + PSA-restricted namespace + TLS ingress (req 9, 3b, 8b)
 - [ ] M10 Final (all IDs: 1 2 3a 3b 4 5 6 7 8a 8b 8c 9): `make e2e` from a destroyed VM, full security review, docs pass (Backlog items marked "before M10" must be done first)
 
@@ -111,6 +111,9 @@ for each bug are in [Bug details](#bug-details) below.
 - `monitoring` NetworkPolicies: default-deny, DNS, then one policy per component; hostNetwork peers (API server on :6443 after DNAT, kubelet, etcd, node-exporter, Traefik, apiserver proxy) are `ipBlock` node-IP /32 (ADR 0003). `check_6` proves enforcement with a probe pod outside the namespace. `check_6` needs `jq` on the host.
 - etcd_backup (M7): snapshots every 30 min (`etcd_backup_schedule`) into `./backups` via the virtiofs mount, newest 48 kept, written by a root systemd oneshot (`/usr/local/sbin/etcd-backup`; etcdctl/etcdutl v3.6.6 from the etcd release tarball, sha256-pinned, matching kubeadm's etcd 3.6.6-0) with kubeadm's `healthcheck-client` cert. The snapshot files are 0600 and owned by the Mac user via virtiofs. Metrics (`etcd_backup_last_success_timestamp_seconds`, size, count) go to `/var/lib/node_exporter/textfile_collector/etcd_backup.prom` (`node_textfile_dir`); `EtcdBackupStale` fires when the last success is older than 3600 s (2x schedule) or the metric is absent, for 5m. The role takes one snapshot when none exists or the metric file is missing.
 - **Cross-role (M7):** the `monitoring` values got one node-exporter arg, `--collector.textfile.directory=/host/root<node_textfile_dir>`, reusing the existing read-only `/host/root` mount (no new volume, security context unchanged), because node-exporter had no textfile collector wired. Ansible's `mounts` fact omits virtiofs, so the mount assert uses `findmnt`. `mountType` virtiofs is assumed (`etcd_backup_mount_fstype`); the Linux-host backlog item must change it if Lima picks another mount type.
+- hardening (M8, req 8a): ClusterRole `operator-readonly` (explicit get/list/watch lists, no wildcards, no secrets/exec/proxy/token/impersonate/escalate/bind/CSR approval) bound to group `indev:operators`; the cert is CN=`operator`, O=that group. `pods/log` is readable (standard `view` behaviour; logs may hold app data). Reads also cover RBAC objects, CRDs, webhook configs, CSRs, cert-manager and Prometheus-operator kinds.
+- Operator cert: EC key generated on the Mac (`.secrets/operator.key`), signed via the CSR API (`kubernetes.io/kube-apiserver-client`, 180d), cert in `.secrets/operator.crt`, kubeconfig `out/operator.conf` (server 127.0.0.1:6443, 0600). Reissued when missing, wrong subject/key, not signed by the current cluster CA (VM rebuild) or within 30d of expiry.
+- Calico's `calico-tiered-policy-passthrough` binds create/update/delete on `projectcalico.org` policies to `system:authenticated`, so `can-i` says yes for the operator; the Calico API server still denies writes ("cannot get tier"), which `check_8a` probes with a real dry-run create. The operator role therefore must never get `tiers` read access; `check_8a` also allows only those Calico resources and the self-review APIs as write rows in `can-i --list`.
 - **Accepted risk (user, 2026-11-19, B-043, deferred to M10):** heavy parallel `/api/v1/series` calls over all series can OOMKill Prometheus (query caps don't cover that path). Reason: only an admin with a port-forward or the API proxy can send them, Prometheus restarts in seconds with its TSDB intact; PromQL load is bounded (B-042). Fix at M10.
 - **Accepted risk (user, 2026-11-18, B-026):** runc stays Debian trixie's `1.1.15` (EOL upstream, no fix for the Nov-2025 container-escape CVEs 2025-31133/52565/52881; trixie has no newer build). Reason: single-user local VM running only our own workloads, which are PSA `restricted`. Revisit if trixie-security ships a fixed runc, or before any shared/production use.
 

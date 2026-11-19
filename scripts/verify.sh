@@ -1085,9 +1085,145 @@ check_7() { # scheduled etcd snapshots stored outside the cluster (M7, B-010)
   fi
 }
 
+# can-i answer ("yes"/"no") for the operator identity; arguments go to `kubectl auth can-i`.
+cani_op() { kop auth can-i "$@" 2>/dev/null | tail -n 1; }
+
 check_8a() { # read-only operator role + operator kubeconfig (M8)
+  CURRENT_REQ=8a
   need_cluster || return 0
-  skip "not implemented (M8)"
+  if ! command -v jq >/dev/null 2>&1; then fail "jq is required on the host for check_8a"; return 0; fi
+  if [[ ! -f "$KUBECONFIG_OPERATOR" ]]; then fail "${KUBECONFIG_OPERATOR#"$ROOT"/} missing (run: make provision TAGS=hardening)"; return 0; fi
+  local role="$ROOT/ansible/roles/hardening/defaults/main.yml" user group crole renew
+  user="$(sed -n 's/^hardening_operator_user:[[:space:]]*\([a-z]*\).*/\1/p' "$role")"
+  group="$(sed -n 's/^hardening_operator_group:[[:space:]]*"\([^"]*\)".*/\1/p' "$role")"
+  crole="$(sed -n 's/^hardening_clusterrole:[[:space:]]*\([a-z-]*\).*/\1/p' "$role")"
+  renew="$(sed -n 's/^hardening_cert_renew_days:[[:space:]]*\([0-9]*\).*/\1/p' "$role")"
+  if [[ -z "$user" || -z "$group" || -z "$crole" || -z "$renew" ]]; then fail "hardening defaults not found"; return 0; fi
+
+  # --- credentials on the host
+  local fmode f
+  for f in "$KUBECONFIG_OPERATOR" "$ROOT/.secrets/operator.key"; do
+    fmode="$(stat -f '%Lp' "$f" 2>/dev/null || stat -c '%a' "$f" 2>/dev/null)"
+    if [[ "$fmode" == 600 ]]; then pass "${f#"$ROOT"/} is mode 0600"; else fail "${f#"$ROOT"/} mode is '$fmode', want 600"; fi
+  done
+  local server; server="$(kop config view -o jsonpath='{.clusters[0].cluster.server}' 2>&1)"
+  if [[ "$server" == "https://127.0.0.1:6443" ]]; then pass "operator kubeconfig server is the Lima forward $server"; else fail "operator kubeconfig server is '$server'"; fi
+  local cert; cert="$(kop config view --raw -o jsonpath='{.users[0].user.client-certificate-data}' 2>/dev/null | base64 -d 2>/dev/null)"
+  if [[ -z "$cert" ]]; then fail "operator kubeconfig has no client certificate"; else
+    local subj; subj="$(openssl x509 -noout -subject -nameopt multiline <<<"$cert" 2>&1)"
+    if grep -Eq "commonName[[:space:]]+= $user\$" <<<"$subj" && grep -Eq "organizationName[[:space:]]+= $group\$" <<<"$subj"; then pass "client cert subject is CN=$user, O=$group"; else fail "client cert subject unexpected: $subj"; fi
+    if openssl x509 -noout -checkend 0 <<<"$cert" >/dev/null 2>&1; then pass "client cert is not expired ($(openssl x509 -noout -enddate <<<"$cert" 2>&1))"; else fail "client cert is expired"; fi
+    if openssl x509 -noout -checkend $((renew * 86400)) <<<"$cert" >/dev/null 2>&1; then pass "client cert is outside the ${renew}-day renewal window"; else fail "client cert expires within ${renew} days (run: make provision TAGS=hardening)"; fi
+    if grep -q "kubeadm:cluster-admins\|system:masters" <<<"$subj"; then fail "client cert carries an admin group"; else pass "client cert carries no admin group"; fi
+  fi
+
+  # --- identity as the API server sees it
+  local who uname groups
+  who="$(kop auth whoami -o json 2>&1)"
+  uname="$(jq -r '.status.userInfo.username // empty' <<<"$who" 2>/dev/null)"
+  groups="$(jq -r '.status.userInfo.groups[]? // empty' <<<"$who" 2>/dev/null)"
+  if [[ "$uname" == "$user" ]]; then pass "whoami: username is $user"; else fail "whoami: username is '$uname' ($who)"; fi
+  if grep -qx "$group" <<<"$groups"; then pass "whoami: member of $group"; else fail "whoami: groups are '$(tr '\n' ' ' <<<"$groups")'"; fi
+  if grep -Eqx 'system:masters|kubeadm:cluster-admins' <<<"$groups"; then fail "whoami: member of an admin group"; else pass "whoami: not in system:masters or kubeadm:cluster-admins"; fi
+
+  # --- the role itself (admin view): get/list/watch only, no wildcards, no secrets, bound only by our group
+  local rj rbad
+  rj="$(k get clusterrole "$crole" -o json 2>&1)"
+  rbad="$(jq -r '[.rules[] | select((.verbs - ["get","list","watch"]) | length > 0)] | length' <<<"$rj" 2>/dev/null)"
+  if [[ "$rbad" == 0 ]]; then pass "ClusterRole $crole grants only get/list/watch"; else fail "ClusterRole $crole has '$rbad' rules with other verbs"; fi
+  rbad="$(jq -r '[.rules[] | select(((.resources // []) + (.apiGroups // []) + (.verbs // []) + (.nonResourceURLs // [])) | index("*"))] | length' <<<"$rj" 2>/dev/null)"
+  if [[ "$rbad" == 0 ]]; then pass "ClusterRole $crole has no wildcards"; else fail "ClusterRole $crole has '$rbad' rules with wildcards"; fi
+  rbad="$(jq -r '[.rules[] | select((.resources // []) | map(select(test("^(secrets|serviceaccounts/token|pods/(exec|attach|portforward|proxy)|.*/proxy|certificatesigningrequests/approval|signers)$"))) | length > 0)] | length' <<<"$rj" 2>/dev/null)"
+  if [[ "$rbad" == 0 ]]; then pass "ClusterRole $crole lists no secrets, exec, attach, portforward, proxy, token or approval resources"; else fail "ClusterRole $crole lists '$rbad' dangerous rules"; fi
+  local bj rbn rb
+  bj="$(k get clusterrolebindings -o json 2>&1)"
+  rbn="$(jq -r --arg u "$user" --arg g "$group" '[.items[] | select(any(.subjects[]?; (.kind == "User" and .name == $u) or (.kind == "Group" and .name == $g))) | .metadata.name + "->" + .roleRef.name] | sort | join(",")' <<<"$bj" 2>/dev/null)"
+  if [[ "$rbn" == "$crole->$crole" ]]; then pass "only ClusterRoleBinding $crole binds $user / $group"; else fail "bindings for $user / $group: '$rbn'"; fi
+  rb="$(k get rolebindings -A -o json 2>&1 | jq -r --arg u "$user" --arg g "$group" '[.items[] | select(any(.subjects[]?; (.kind == "User" and .name == $u) or (.kind == "Group" and .name == $g)))] | length' 2>/dev/null)"
+  if [[ "$rb" == 0 ]]; then pass "no namespaced RoleBinding grants $user / $group more"; else fail "RoleBindings for $user / $group: '$rb'"; fi
+
+  # --- allowed: day-to-day inspection
+  local v r bad=""
+  for r in pods nodes namespaces events services configmaps persistentvolumes persistentvolumeclaims serviceaccounts deployments.apps statefulsets.apps daemonsets.apps replicasets.apps jobs.batch cronjobs.batch \
+    ingresses.networking.k8s.io networkpolicies.networking.k8s.io storageclasses.storage.k8s.io customresourcedefinitions.apiextensions.k8s.io clusterroles.rbac.authorization.k8s.io \
+    certificates.cert-manager.io clusterissuers.cert-manager.io prometheusrules.monitoring.coreos.com servicemonitors.monitoring.coreos.com; do
+    for v in get list watch; do [[ "$(cani_op "$v" "$r" -A)" == yes ]] || bad="$bad $v/$r"; done
+  done
+  if [[ -z "$bad" ]]; then pass "can-i: get/list/watch on 25 inspection resources cluster-wide"; else fail "can-i: denied$bad"; fi
+  if [[ "$(cani_op get pods --subresource=log -n kube-system)" == yes ]]; then pass "can-i: get pods/log (logs are readable, documented)"; else fail "can-i: pods/log denied"; fi
+
+  # --- denied: secrets, cluster-wide and per namespace
+  bad=""
+  for v in get list watch; do
+    [[ "$(cani_op "$v" secrets -A)" == no ]] || bad="$bad $v/-A"
+    for r in kube-system monitoring llm cert-manager traefik default; do [[ "$(cani_op "$v" secrets -n "$r")" == no ]] || bad="$bad $v/$r"; done
+  done
+  if [[ -z "$bad" ]]; then pass "can-i: no get/list/watch on secrets (cluster-wide and in 6 namespaces)"; else fail "can-i: secrets readable:$bad"; fi
+
+  # --- denied: every write verb on the resources an operator could abuse
+  bad=""
+  for r in pods deployments.apps statefulsets.apps daemonsets.apps jobs.batch namespaces nodes configmaps services serviceaccounts persistentvolumes ingresses.networking.k8s.io networkpolicies.networking.k8s.io \
+    clusterroles.rbac.authorization.k8s.io clusterrolebindings.rbac.authorization.k8s.io roles.rbac.authorization.k8s.io rolebindings.rbac.authorization.k8s.io \
+    certificatesigningrequests.certificates.k8s.io customresourcedefinitions.apiextensions.k8s.io certificates.cert-manager.io prometheusrules.monitoring.coreos.com secrets; do
+    for v in create update patch delete deletecollection; do [[ "$(cani_op "$v" "$r" -A)" == no ]] || bad="$bad $v/$r"; done
+  done
+  if [[ -z "$bad" ]]; then pass "can-i: no create/update/patch/delete/deletecollection on 21 resource kinds"; else fail "can-i: writable:$bad"; fi
+  bad=""
+  [[ "$(cani_op '*' '*' -A)" == no ]] || bad="$bad */*"
+  for r in exec attach portforward proxy; do [[ "$(cani_op create pods --subresource="$r" -n kube-system)" == no ]] || bad="$bad pods/$r"; done
+  for r in get create; do
+    [[ "$(cani_op "$r" pods --subresource=proxy -n kube-system)" == no ]] || bad="$bad $r:pods/proxy"
+    [[ "$(cani_op "$r" nodes --subresource=proxy)" == no ]] || bad="$bad $r:nodes/proxy"
+    [[ "$(cani_op "$r" services --subresource=proxy -n kube-system)" == no ]] || bad="$bad $r:services/proxy"
+  done
+  [[ "$(cani_op update pods --subresource=ephemeralcontainers -n kube-system)" == no ]] || bad="$bad pods/ephemeralcontainers"
+  [[ "$(cani_op create pods --subresource=eviction -n kube-system)" == no ]] || bad="$bad pods/eviction"
+  [[ "$(cani_op create serviceaccounts --subresource=token -n kube-system)" == no ]] || bad="$bad serviceaccounts/token"
+  [[ "$(cani_op update nodes --subresource=status)" == no ]] || bad="$bad nodes/status"
+  for r in users groups serviceaccounts uids; do [[ "$(cani_op impersonate "$r")" == no ]] || bad="$bad impersonate/$r"; done
+  for v in escalate bind; do
+    for r in clusterroles.rbac.authorization.k8s.io roles.rbac.authorization.k8s.io; do [[ "$(cani_op "$v" "$r")" == no ]] || bad="$bad $v/$r"; done
+  done
+  [[ "$(cani_op update certificatesigningrequests --subresource=approval)" == no ]] || bad="$bad csr/approval"
+  [[ "$(cani_op approve signers.certificates.k8s.io)" == no ]] || bad="$bad csr/approve-signer"
+  [[ "$(cani_op sign signers.certificates.k8s.io)" == no ]] || bad="$bad csr/sign-signer"
+  if [[ -z "$bad" ]]; then pass "can-i: no */*, exec/attach/portforward/proxy, token, impersonate, escalate/bind, CSR approve/sign, eviction"; else fail "can-i: allowed:$bad"; fi
+
+  # --- what system:authenticated adds (Calico's passthrough binding, system:basic-user) must not be a write path
+  local rules unexpected
+  rules="$(kop auth can-i --list 2>&1)"
+  unexpected="$(awk 'NR > 1 { v = $0; sub(/^[^[]*\[[^]]*\][[:space:]]+\[[^]]*\][[:space:]]+/, "", v); if (v ~ /(create|update|patch|delete|\*|impersonate|escalate|bind|approve|sign)/) print $1 }' <<<"$rules" |
+    grep -Ev '^(selfsubject(access|rules)?reviews\.(authentication|authorization)\.k8s\.io|(globalnetworkpolicies|networkpolicies|stagedglobalnetworkpolicies|stagednetworkpolicies)\.projectcalico\.org)$')"
+  if [[ -z "$unexpected" ]]; then pass "can-i --list: write verbs only on self-reviews (system:basic-user) and Calico policies (calico-tiered-policy-passthrough)"; else fail "can-i --list: unexpected write rules: $(tr '\n' ' ' <<<"$unexpected")"; fi
+  if [[ "$(cani_op get tiers.projectcalico.org)" == no ]]; then pass "operator cannot get Calico tiers, so Calico's passthrough grant is not a write path"; else fail "operator can get Calico tiers: policy writes would go through"; fi
+
+  # --- real requests, not just SelfSubjectAccessReviews
+  local out apipod="kube-apiserver-$NODE_NAME"
+  if out="$(kop get nodes -o name 2>&1)" && [[ "$out" == "node/$NODE_NAME" ]]; then pass "kubectl get nodes works as $user"; else fail "get nodes as $user failed: $out"; fi
+  if out="$(kop get pods -A -o name 2>&1)" && [[ -n "$out" ]]; then pass "kubectl get pods -A works as $user ($(wc -l <<<"$out" | tr -d ' ') pods)"; else fail "get pods -A as $user failed: $out"; fi
+  if out="$(kop logs -n kube-system "$apipod" --tail=1 2>&1)" && [[ "$out" != *orbidden* ]]; then pass "kubectl logs works as $user"; else fail "logs as $user failed: $out"; fi
+  expect_forbidden() { # <label> <command...>: the API server must answer Forbidden
+    local label="$1" o; shift
+    if o="$("$@" 2>&1)"; then fail "$label: succeeded as $user: $o"
+    elif [[ "$o" == *[Ff]orbidden* ]]; then pass "$label: Forbidden"
+    else fail "$label: failed, but not Forbidden: $o"; fi
+  }
+  expect_forbidden "get secrets -n kube-system" kop get secrets -n kube-system
+  expect_forbidden "get secrets -A" kop get secrets -A
+  expect_forbidden "create configmap (dry-run=server)" kop create configmap verify-8a --dry-run=server -n default
+  expect_forbidden "delete configmap (dry-run=server)" kop delete configmap kube-root-ca.crt --dry-run=server -n default
+  expect_forbidden "label node (dry-run=server)" kop label node "$NODE_NAME" verify-8a=1 --overwrite --dry-run=server
+  expect_forbidden "scale coredns (dry-run=server)" kop scale deployment coredns -n kube-system --replicas=1 --dry-run=server
+  expect_forbidden "exec in the apiserver pod" kop exec -n kube-system "$apipod" -- true
+  expect_forbidden "create token for default SA" kop create token default -n default
+  expect_forbidden "Calico NetworkPolicy create (dry-run=server)" kop create --dry-run=server -f - <<'YAML'
+apiVersion: projectcalico.org/v3
+kind: NetworkPolicy
+metadata: {name: verify-8a, namespace: default}
+spec: {selector: all(), types: [Ingress]}
+YAML
+  # Nothing may have been created by the probes above.
+  if k get configmap verify-8a -n default >/dev/null 2>&1 || k get node "$NODE_NAME" -o jsonpath='{.metadata.labels}' 2>/dev/null | grep -q verify-8a; then fail "a write probe left an object behind"; else pass "no write probe left an object behind"; fi
 }
 
 check_8b() { # app workloads cannot run as root / privileged: PSA restricted on app namespaces (M9)

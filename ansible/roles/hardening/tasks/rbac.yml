@@ -1,0 +1,6 @@
+---
+- name: Create the operator ClusterRole and ClusterRoleBinding
+  kubernetes.core.k8s:
+    kubeconfig: "{{ hardening_kubeconfig }}"
+    state: present
+    template: operator-rbac.yaml.j2
