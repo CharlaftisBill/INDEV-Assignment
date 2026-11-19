@@ -1,0 +1,44 @@
+---
+# Kubernetes modules run on the node with admin.conf (python3-kubernetes from the kubeadm role).
+llm_app_kubeconfig: /etc/kubernetes/admin.conf
+llm_app_namespace: "{{ ns_llm }}"
+llm_app_name: llama-cpp
+llm_app_port: 8080
+llm_app_wait_timeout: 900  # model-fetch Job and rollout
+llm_app_node_ip: "{{ ansible_facts['default_ipv4']['address'] }}"
+
+llm_app_tls_secret: llm-tls
+llm_app_model_pvc: llm-model
+llm_app_model_pvc_size: 2Gi
+llm_app_model_dir: /models
+llm_app_model_alias: qwen2.5-0.5b-instruct
+
+# Unprivileged UID/GID, also the PVC group (PSA restricted needs a numeric non-root user).
+llm_app_uid: 10001
+
+# llama-server flags: 2 slots of 2048 tokens each; threads below the CPU limit leave a core for the HTTP loop.
+llm_app_ctx_size: 4096
+llm_app_parallel: 2
+llm_app_threads: 3
+
+# Footprint: monitoring requests stay under 1536Mi (check_6), so 8 GiB leaves llama.cpp well above 2.5 GiB. Model mmap (~0.5 GiB) counts as page cache.
+llm_app_resources:
+  requests: {cpu: "1", memory: 768Mi}
+  limits: {cpu: "3", memory: 1536Mi}
+# Init container (verify only) and the model-fetch Job (download + verify): both hash 469 MiB.
+llm_app_init_resources:
+  requests: {cpu: 50m, memory: 32Mi}
+  limits: {cpu: 500m, memory: 128Mi}
+
+# The model is downloaded by a short-lived Job (Ansible creates and deletes it), so only its pods get DNS + egress; the server pod gets none (B-044).
+# The Job runs when the model file on the node (path from the bound PV) is missing or its sha256 differs from the pinned one (B-045).
+llm_app_fetch_name: model-fetch
+llm_app_fetch_deadline: 900
+# Model file on the node, from the bound PV (hostPath for local-path, local.path accepted); empty while the PVC has no PV.
+llm_app_pv_spec: "{{ (llm_app_pv.resources | default([]) | first | default({})).spec | default({}) }}"
+llm_app_model_dir_host: "{{ (llm_app_pv_spec.hostPath | default(llm_app_pv_spec.local | default({}))).path | default('') }}"
+llm_app_model_host_path: "{{ (llm_app_model_dir_host ~ '/' ~ llm_model_file) if llm_app_model_dir_host | length > 0 else '' }}"
+
+# The Job needs HTTPS to Hugging Face and its CDN (hostnames change, NetworkPolicy has no FQDN match): any public IP on 443,
+# never private ranges (node, pods, services, CGNAT, link-local metadata).
+llm_app_egress_except: [10.0.0.0/8, 100.64.0.0/10, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16]

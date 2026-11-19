@@ -1,0 +1,62 @@
+{% set image = llama_cpp_image ~ ':' ~ llama_cpp_tag ~ '@' ~ llama_cpp_digest %}
+{% set model = llm_app_model_dir ~ '/' ~ llm_model_file %}
+{# Same pinned image (curl + sha256sum). Own labels: the server's NetworkPolicies must not match this pod, nor this one the server's. #}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ llm_app_fetch_name }}
+  namespace: {{ llm_app_namespace }}
+spec:
+  backoffLimit: 3
+  activeDeadlineSeconds: {{ llm_app_fetch_deadline }}
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ llm_app_name }}-fetch
+        app.kubernetes.io/component: {{ llm_app_fetch_name }}
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: {{ llm_app_uid }}
+        runAsGroup: {{ llm_app_uid }}
+        fsGroup: {{ llm_app_uid }}
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: fetch
+          image: {{ image }}
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              f="$MODEL_PATH"
+              if [ -f "$f" ] && echo "$MODEL_SHA256  $f" | sha256sum -c - >/dev/null 2>&1; then
+                echo "model cached: $f verified, no download"; exit 0
+              fi
+              echo "model missing or corrupt: downloading $MODEL_URL"
+              rm -f "$f.part"
+              curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 --retry 5 --retry-delay 5 -o "$f.part" "$MODEL_URL"
+              echo "$MODEL_SHA256  $f.part" | sha256sum -c -
+              mv "$f.part" "$f"
+              echo "model downloaded: $f"
+          env:
+            - {name: MODEL_URL, value: "{{ llm_model_url }}"}
+            - {name: MODEL_SHA256, value: "{{ llm_model_sha256 }}"}
+            - {name: MODEL_PATH, value: "{{ model }}"}
+          resources: {{ llm_app_init_resources | to_json }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: {{ llm_app_uid }}
+            runAsGroup: {{ llm_app_uid }}
+            capabilities: {drop: [ALL]}
+            seccompProfile: {type: RuntimeDefault}
+          volumeMounts:
+            - {name: model, mountPath: {{ llm_app_model_dir }}}
+      volumes:
+        - name: model
+          persistentVolumeClaim: {claimName: {{ llm_app_model_pvc }}}

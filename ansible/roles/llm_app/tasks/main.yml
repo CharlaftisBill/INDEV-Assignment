@@ -1,0 +1,152 @@
+---
+# llama.cpp + Qwen2.5-0.5B-Instruct Q4 on CPU in the llm namespace (req 9), PSA restricted (8b), default-deny NetworkPolicies (3b).
+# The namespace is created bare by ingress_traefik (Traefik watches it, B-038); labels and policies merge in here.
+- name: Label the llm namespace PSA restricted (pinned version)
+  kubernetes.core.k8s:
+    kubeconfig: "{{ llm_app_kubeconfig }}"
+    state: present
+    template: namespace.yaml.j2
+
+# Policies first: the pod never runs in an open namespace. force: a merge would keep stale selector labels (B-044: the server pod must not stay selected).
+- name: Apply default-deny and the minimal allow NetworkPolicies
+  kubernetes.core.k8s:
+    kubeconfig: "{{ llm_app_kubeconfig }}"
+    state: present
+    force: true
+    template: networkpolicies.yaml.j2
+
+# No wait: the local-path PVC binds when the pod is scheduled (WaitForFirstConsumer).
+- name: Create the model PVC on the default StorageClass
+  kubernetes.core.k8s:
+    kubeconfig: "{{ llm_app_kubeconfig }}"
+    state: present
+    template: pvc.yaml.j2
+
+# The server pod has no egress (B-044): a short-lived Job (own labels, the only pods allowed DNS + HTTPS) downloads and verifies the model.
+# The gate is the file itself (B-045): its sha256 on the node, found through the bound PV, so a lost or damaged file (VM rebuild + etcd
+# restore, manual edit) is refetched. No PV yet (fresh VM, PVC unbound until its first consumer) counts as "absent".
+- name: Read the model PVC
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ llm_app_kubeconfig }}"
+    api_version: v1
+    kind: PersistentVolumeClaim
+    name: "{{ llm_app_model_pvc }}"
+    namespace: "{{ llm_app_namespace }}"
+  register: llm_app_pvc
+  changed_when: false
+
+- name: Read the bound PersistentVolume
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ llm_app_kubeconfig }}"
+    api_version: v1
+    kind: PersistentVolume
+    name: "{{ llm_app_pvc.resources[0].spec.volumeName }}"
+  register: llm_app_pv
+  changed_when: false
+  when: llm_app_pvc.resources[0].spec.volumeName | default('') | length > 0
+
+- name: Hash the model file on the node
+  ansible.builtin.stat:
+    path: "{{ llm_app_model_host_path }}"
+    checksum_algorithm: sha256
+  become: true
+  register: llm_app_model_stat
+  when: llm_app_model_host_path | length > 0
+
+# A failed Job stays for its logs until the next run, which removes it here whether or not a fetch is needed.
+- name: Remove a leftover model-fetch Job
+  kubernetes.core.k8s:
+    kubeconfig: "{{ llm_app_kubeconfig }}"
+    state: absent
+    api_version: batch/v1
+    kind: Job
+    name: "{{ llm_app_fetch_name }}"
+    namespace: "{{ llm_app_namespace }}"
+    delete_options: {propagationPolicy: Foreground}
+    wait: true
+    wait_timeout: 120
+
+- name: Fetch the model with a one-shot Job
+  when: not (llm_app_model_stat.stat.exists | default(false)) or llm_app_model_stat.stat.checksum != llm_model_sha256
+  block:
+    - name: Create the model-fetch Job
+      kubernetes.core.k8s:
+        kubeconfig: "{{ llm_app_kubeconfig }}"
+        state: present
+        template: model-fetch-job.yaml.j2
+
+    # Polls instead of the module waiter, which only knows Complete: a failed Job (backoffLimit, deadline) stops the play at once.
+    - name: Wait for the model-fetch Job to finish
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ llm_app_kubeconfig }}"
+        api_version: batch/v1
+        kind: Job
+        name: "{{ llm_app_fetch_name }}"
+        namespace: "{{ llm_app_namespace }}"
+      register: llm_app_fetch_job
+      changed_when: false
+      until: >-
+        llm_app_fetch_job.resources | length > 0 and
+        (llm_app_fetch_job.resources[0].status.conditions | default([]) | selectattr('status', 'equalto', 'True')
+        | map(attribute='type') | intersect(['Complete', 'Failed']) | length > 0)
+      retries: "{{ ((llm_app_fetch_deadline | int + 120) / 5) | int }}"
+      delay: 5
+
+    - name: Fail with the reason when the model-fetch Job failed
+      ansible.builtin.assert:
+        that: >-
+          llm_app_fetch_job.resources[0].status.conditions | selectattr('type', 'equalto', 'Complete')
+          | selectattr('status', 'equalto', 'True') | list | length > 0
+        fail_msg: >-
+          model-fetch Job failed: {{ llm_app_fetch_job.resources[0].status.conditions | selectattr('type', 'equalto', 'Failed')
+          | map(attribute='message') | join('; ') }} (logs: kubectl logs -n {{ llm_app_namespace }} job/{{ llm_app_fetch_name }})
+        quiet: true
+
+    - name: Delete the finished model-fetch Job
+      kubernetes.core.k8s:
+        kubeconfig: "{{ llm_app_kubeconfig }}"
+        state: absent
+        api_version: batch/v1
+        kind: Job
+        name: "{{ llm_app_fetch_name }}"
+        namespace: "{{ llm_app_namespace }}"
+        delete_options: {propagationPolicy: Foreground}
+        wait: true
+        wait_timeout: 120
+
+    # A server pod stuck in Init:Error (model was missing) is in back-off: restart it now instead of waiting for the next retry.
+    # It also loads a re-pinned model. Nothing to delete on a fresh VM; the Deployment rollout wait below covers readiness.
+    - name: Restart the llama.cpp pods so they pick up the fetched model
+      kubernetes.core.k8s:
+        kubeconfig: "{{ llm_app_kubeconfig }}"
+        state: absent
+        api_version: v1
+        kind: Pod
+        namespace: "{{ llm_app_namespace }}"
+        label_selectors: ["app.kubernetes.io/name={{ llm_app_name }}"]
+
+- name: Request the TLS Certificate from the internal CA
+  kubernetes.core.k8s:
+    kubeconfig: "{{ llm_app_kubeconfig }}"
+    state: present
+    template: certificate.yaml.j2
+    wait: true
+    wait_condition: {type: Ready, status: "True"}
+    wait_timeout: 120
+
+# apply: a plain merge would keep a renamed init container alongside the new one.
+# Waits for the rollout (observedGeneration, readiness); the init container fails closed if the model is missing.
+- name: Deploy llama.cpp and its Service
+  kubernetes.core.k8s:
+    kubeconfig: "{{ llm_app_kubeconfig }}"
+    state: present
+    apply: true
+    template: deployment.yaml.j2
+    wait: true
+    wait_timeout: "{{ llm_app_wait_timeout }}"
+
+- name: Publish llama.cpp through Traefik
+  kubernetes.core.k8s:
+    kubeconfig: "{{ llm_app_kubeconfig }}"
+    state: present
+    template: ingress.yaml.j2
