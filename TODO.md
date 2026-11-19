@@ -3,7 +3,7 @@
 Live project state and bug tracker. Agents read this first and update it last (protocol in `CLAUDE.md`).
 
 ## Status
-Current milestone: **M5 — pki + cert-manager + ingress_traefik** · Last verified: 2026-11-18 final gate M4 (`make idempotency` changed=0; 1: 17, 2: 20, 3a: 15, 5: 15, 8c: 8 PASS · 0 FAIL · 0 SKIP, strict) · Last SRE review: working tree 2026-11-18 — M4 r2: clean
+Current milestone: **M6 — monitoring** · Last verified: 2026-11-19 final gate M5 (`make idempotency` changed=0; 1: 17, 2: 20, 3a: 15, 4: 48, 5: 15, 8c: 8 PASS · 0 FAIL · 0 SKIP, strict) · Last SRE review: working tree 2026-11-19 — M5 r2 + B-038 re-check: clean
 
 ## Milestones
 - [x] M0 Scaffolding: repo layout, agentic layer (`.claude/`), Makefile, lint configs, Lima config, docs skeleton, commit tooling (`split-commits` skill, `.githooks/commit-msg`)
@@ -12,7 +12,8 @@ Current milestone: **M5 — pki + cert-manager + ingress_traefik** · Last verif
   - Cross-role: `containerd` template sets `sandbox_image` to kubeadm's pause (`pause_image_tag`), else kubeadm preflight warns and two pause images are used.
 - [x] M3 `cni_calico` (req 3a)
 - [x] M4 `storage`: local-path-provisioner as default StorageClass (req 5)
-- [ ] M5 `pki` + cert-manager + `ingress_traefik` (req 4)
+- [x] M5 `pki` + cert-manager + `ingress_traefik` (req 4)
+  - Cross-role: `lima/k8s.yaml` (M1) forwards Mac 443→8443 and 80→8000 so Traefik stays non-root (B-009).
 - [ ] M6 `monitoring`: kube-prometheus-stack, node + etcd alerts, Grafana ingress (req 6)
 - [ ] M7 `etcd_backup`: systemd timer → host `./backups`, staleness alert (req 7)
 - [ ] M8 `hardening`: operator read-only role + kubeconfig (req 8a)
@@ -41,8 +42,8 @@ for each bug are in [Bug details](#bug-details) below.
 | B-005 | [sec] Agent could read CA key, admin kubeconfig and snapshots without a prompt | Medium | Solved | M0 | 2026-11-17 | 2026-11-17 | 6ba2a85 |
 | B-006 | [sre] `review-loop` cannot stop while later-milestone bugs are Open | Medium | Solved | M0 | 2026-11-17 | 2026-11-17 | dfc00b7 |
 | B-007 | [sre] Host kubeconfig at 127.0.0.1:6443 fails TLS (no loopback SAN) | Medium | Solved | M2 | 2026-11-17 | 2026-11-18 | ba24ebb |
-| B-008 | [sec] "Allow from Traefik" NetworkPolicy cannot match a hostNetwork Traefik | Medium | Open | M5 | 2026-11-17 |  |  |
-| B-009 | [sre] hostNetwork Traefik cannot bind :443/:80 as non-root | Medium | Open | M5 | 2026-11-17 |  |  |
+| B-008 | [sec] "Allow from Traefik" NetworkPolicy cannot match a hostNetwork Traefik | Medium | Solved | M5 | 2026-11-17 | 2026-11-19 | 144f11c |
+| B-009 | [sre] hostNetwork Traefik cannot bind :443/:80 as non-root | Medium | Solved | M5 | 2026-11-17 | 2026-11-19 | e31f4da |
 | B-010 | [sre] etcd snapshots can silently land on the VM disk | Medium | Open | M7 | 2026-11-17 |  |  |
 | B-011 | [sec] Secrets still readable unprompted via other `get` spellings (B-005 follow-up) | Medium | Solved | M0 | 2026-11-17 | 2026-11-17 | 6ba2a85 |
 | B-012 | [sre] Milestone gate and `bug solve` still accept SKIP (B-004 follow-up) | Medium | Solved | M0 | 2026-11-17 | 2026-11-17 | dfc00b7 |
@@ -68,6 +69,10 @@ for each bug are in [Bug details](#bug-details) below.
 | B-032 | local-path-provisioner crash-loops: helper pod template adds capabilities, fatal at startup | — | Solved | M4 | 2026-11-18 | 2026-11-18 | 716f2e1 |
 | B-033 | [sre] storage role passes on a stuck provisioner rollout: waits only for Deployment Available | Medium | Solved | M4 | 2026-11-18 | 2026-11-18 | 9fe3d95 |
 | B-034 | [sre] check_5 fails when re-run within ~10 s: verify-tmp still Terminating from the last run | Medium | Solved | M4 | 2026-11-18 | 2026-11-18 | a3b8ac8 |
+| B-035 | [sec] Internal root CA has no name constraints: its key can mint trusted certs for any domain | Medium | Solved | M5 | 2026-11-19 | 2026-11-19 | 768ad66 |
+| B-036 | [sec] Traefik (Mac-facing, hostNetwork) can read every Secret, including the CA key | Medium | Solved | M5 | 2026-11-19 | 2026-11-19 | e31f4da |
+| B-037 | [sre] Fresh clone (ca.crt committed, no key) pairs a new CA key with the old cert, reports success | High | Solved | M5 | 2026-11-19 | 2026-11-19 | 768ad66 |
+| B-038 | [sre] A deleted watched namespace (e.g. verify-tmp) blanks every Ingress on Traefik restart | Medium | Solved | M5 | 2026-11-19 | 2026-11-19 | e31f4da |
 
 ## Assumptions / open questions
 - Host is an Apple Silicon Mac → VM is Debian 13 **arm64** under Lima (vz). amd64 image is listed in `lima/k8s.yaml` for Intel hosts but untested. Linux hosts are planned (Backlog), Windows is out of scope (Ansible needs WSL2).
@@ -87,6 +92,11 @@ for each bug are in [Bug details](#bug-details) below.
 - Audit: one `Metadata` catch-all rule, `RequestReceived` stage omitted (every request still logs ResponseComplete/ResponseStarted).
 - pkgs.k8s.io signing key `DE15…6436` expires 2026-12-29; the role re-downloads it each run and checks the fingerprint, so an OBS expiry extension is picked up.
 - local-path-provisioner v0.0.37 (`local-path-storage`, PSA `privileged`: helper pods mount hostPath as root) with data in `/opt/local-path-provisioner` on the VM disk (not the Mac mount; PVs die with the VM). The provisioner rejects `capabilities.add` in the helper template unless `--allow-unsafe-helper-pod-template` is set, so the helper drops every default capability except `DAC_OVERRIDE` (teardown deletes files owned by other UIDs) and the flag stays off.
+- cert-manager chart v1.21.3 (2026-10-23; supports k8s 1.33-1.36) and Traefik chart 42.3.0 / v3.7.17 (2026-11-03; 42.3.2 is <2 weeks old), all images by multi-arch index digest. cert-manager `startupapicheck` is disabled (role waits on the Deployments and retries the ClusterIssuer); `acmesolver` is pinned but unused (no ACME).
+- Internal CA: EC P-256 root, CN `INDEV internal CA`, 10 years, created once by the `pki` role (`.secrets/ca.key` 0600, `certs/ca.crt`), never regenerated if the cert exists. Shared defaults `pki_cluster_issuer` (`internal-ca`), `pki_cert_duration` 2160h, `pki_cert_renew_before` 720h live in `group_vars/all/main.yml`. cert-manager is PSA `restricted`; `traefik` is PSA `privileged` (hostNetwork).
+- Traefik RBAC is ours, not the chart's (B-036): Secrets readable only in `ingress_traefik_watched_namespaces` (llm, monitoring, `ingress-check`), which `ingress_traefik` creates (B-038: only role-owned namespaces nothing deletes; scratch `verify-tmp` is not watched, its stale Role is removed); M6/M9 roles add labels/policies on top, and a new Ingress namespace must be added to that list. `ingress-check` is check_4's namespace (PSA restricted, default-deny + node-IP /32 allow on 8080).
+- Traefik runs non-root on node ports 8443/8000 (Lima forwards Mac 443/80, B-009), Service disabled, IngressRoute CRDs skipped (Ingress provider only); internal ports: metrics 9101 (9100 is node-exporter's in M6), health/ping 9102 (avoids the common 8080). `check_4` renews a 1h Certificate (renewBefore 59m45s, cert-manager's minimum duration) to prove automatic renewal in seconds.
+- Req 3 "accept only the traffic they need" is read as traffic from other pods/networks; node-local traffic is always allowed (Kubernetes NetworkPolicy docs, Calico host→workload). Accepted (user, 2026-11-19; [ADR 0003](docs/decisions/0003-traefik-ingress.md)).
 - **Accepted risk (user, 2026-11-18, B-026):** runc stays Debian trixie's `1.1.15` (EOL upstream, no fix for the Nov-2025 container-escape CVEs 2025-31133/52565/52881; trixie has no newer build). Reason: single-user local VM running only our own workloads, which are PSA `restricted`. Revisit if trixie-security ships a fixed runc, or before any shared/production use.
 
 ## Bug details
@@ -137,11 +147,15 @@ Max 5 lines per bug (heading + up to 4 one-line bullets, ~200 chars each). Full 
 
 ### B-008: [sec] "Allow from Traefik" NetworkPolicy cannot match a hostNetwork Traefik
 - **Report** (sre round 1): hostNetwork traffic comes from the node IP, which selectors never match and NetworkPolicy always allows; the rule is a no-op.
-- **Direction:** decide in ADR 0003 (accept node-origin ingress or move Traefik off the host network); `check_3b` proves the deny from a normal pod.
+- **Root cause:** hostNetwork traffic leaves from the node IP; pod/namespace selectors can't match it.
+- **Fix:** user decision in ADR 0003: app NetworkPolicies allow ingress from the node IP (`ipBlock` /32) on the app port only; any hostNetwork process reaching it is accepted (single node).
+- **Verification:** ADR 0003 Accepted; enforcement is proven by `check_3b` in M9 (normal pod denied).
 
 ### B-009: [sre] hostNetwork Traefik cannot bind :443/:80 as non-root
 - **Report** (sre round 1): the Traefik chart runs as UID 65532 without capabilities on 8000/8443; binding 443/80 needs root or `NET_BIND_SERVICE`.
-- **Direction:** keep Traefik non-root on 8000/8443; Lima forwards host 443→8443 and 80→8000; update ADR 0003.
+- **Root cause:** ports < 1024 need root or `NET_BIND_SERVICE`; the chart runs UID 65532 with no capabilities.
+- **Fix:** Traefik listens on 8443/8000; `lima/k8s.yaml` forwards Mac 443→8443, 80→8000 (running VM edited + restarted, user-approved); ADR 0003.
+- **Verification:** `make verify REQ=4 STRICT=1` 34 PASS (UID 65532, no caps, :8443/:8000 listening, Mac 443 TLS 200, :80 → 301); sre r1 confirmed.
 
 ### B-010: [sre] etcd snapshots can silently land on the VM disk
 - **Report** (sre round 1): `/mnt/host-backups` is the host mount only if `make vm-up` created the VM; otherwise snapshots stay on the VM disk unnoticed.
@@ -288,3 +302,27 @@ Max 5 lines per bug (heading + up to 4 one-line bullets, ~200 chars each). Full 
 - **Root cause:** `cleanup_5` deletes verify-tmp with `--wait=false`; the next run applied into the still-Terminating namespace.
 - **Fix:** `wait_verify_ns_gone` in `scripts/verify.sh` waits for a Terminating verify-tmp to go before check_5 creates it; reusable by later checks.
 - **Verification:** `make verify REQ=5 STRICT=1` twice back to back: 15 PASS both; 1/2/3a/8c strict 17/20/15/8 PASS; lint OK.
+
+### B-035: [sec] Internal root CA has no name constraints: its key can mint trusted certs for any domain
+- **Report** (sec round 1): `openssl x509 -in certs/ca.crt -text`: no Name Constraints; 10-year key also in a cluster Secret and etcd snapshots; whoever trusts the CA (e.g. for grafana.local) is MITM-able anywhere.
+- **Root cause:** the CA CSR in `pki/tasks/ca.yml` set no name constraints.
+- **Fix:** critical permitted `DNS:local`, excluded `IP:0.0.0.0/0`, `IP:::/0` (`pki_ca_*_names`); CA regenerated (never committed); check_4 asserts it + `openssl s_client` chain verify.
+- **Verification:** `openssl x509 -text` shows the constraints; macOS curl and openssl verify the leaf; `make verify REQ=4 STRICT=1` 39 PASS.
+
+### B-036: [sec] Traefik (Mac-facing, hostNetwork) can read every Secret, including the CA key
+- **Report** (sec round 1): ClusterRole `traefik-traefik` grants secrets get/list/watch cluster-wide; `auth can-i get secrets -n cert-manager --as=system:serviceaccount:traefik:traefik` = yes (`internal-ca-key-pair`).
+- **Root cause:** the chart's ClusterRole grants Secrets cluster-wide; its `rbac.namespaced` mode drops IngressClass access, so Ingresses with a class are ignored.
+- **Fix:** chart RBAC off; own ClusterRole (ingressclasses, nodes) + per-namespace Roles for `ingress_traefik_watched_namespaces` (llm, monitoring, verify-tmp; created bare by the role), provider limited to them.
+- **Verification:** `auth can-i get secrets` as the Traefik SA: no in cert-manager/kube-system/traefik; check_4 asserts it; verify 4 39 PASS twice; idempotency changed=0.
+
+### B-037: [sre] Fresh clone (ca.crt committed, no key) pairs a new CA key with the old cert, reports success
+- **Report** (sre round 1): `pki` ca.yml on a copy with only `certs/ca.crt`: key created, cert kept (changed=2, no error); cert/key pubkey sha256 `033d45…` vs `ee99a9…`.
+- **Root cause:** ca.yml created a missing key and kept an existing cert without checking they pair.
+- **Fix:** fail before key creation if the cert exists without the key; assert key/cert public-key sha256 match every run (no_log); check_4 compares pubkey hashes.
+- **Verification:** scratch copies: cert-only fails with the restore/delete message, no key made; clean dir creates the pair then changed=0; swapped cert fails the assert.
+
+### B-038: [sre] A deleted watched namespace (e.g. verify-tmp) blanks every Ingress on Traefik restart
+- **Report** (sre round 2): delete ns verify-tmp + Traefik pod restart: a `monitoring` route 503 → 404 for 60 s+ (Role gone, list forbidden, no sync), pod still Ready; back ~50 s after re-provision.
+- **Root cause:** Traefik watched scratch ns verify-tmp; deleting it removed its Role, so after a restart the provider's lists were forbidden and it never synced.
+- **Fix:** watch only role-owned llm, monitoring, `ingress-check` (check_4's own ns, never deleted); stale verify-tmp Role removed; role + check_4 assert a Role/RoleBinding per watched ns, no `forbidden` in logs.
+- **Verification:** verify-tmp deleted + Traefik restarted → `make verify REQ=4 STRICT=1` 48 PASS (twice); idempotency changed=0. Runbook line + M6 Ingress-probe alert: docs pass / M6.
