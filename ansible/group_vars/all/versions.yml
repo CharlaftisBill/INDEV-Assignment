@@ -62,9 +62,15 @@ local_path_provisioner_digest: "sha256:e757967a5ec338f6a9b371c5a9688bedaa8c3578e
 local_path_helper_version: "1.38.0"  # hub.docker.com library/busybox tags, 2026-11-18
 local_path_helper_digest: "sha256:a46257e06c82ad85242d0d38077d0a52d9896389ca60a1a59d3463db586e5fa4"  # imagetools inspect (arm64 present), 2026-11-18
 #
-# M5  pki + ingress
-#   cert_manager_version:          # chart
-#   traefik_chart_version:
+# M5  pki + ingress_traefik (all images have linux/arm64; digests are the multi-arch index digests)
+# cert-manager 1.21 supports Kubernetes 1.33-1.36. Newest release >= 2 weeks old: v1.21.3 (2026-10-23).
+cert_manager_chart_version: "v1.21.3"  # helm search repo jetstack/cert-manager (charts.jetstack.io index, created 2026-10-23), 2026-11-18
+cert_manager_image_digests:  # docker buildx imagetools inspect quay.io/jetstack/<key>:v1.21.3 (arm64 present), 2026-11-18
+  controller: "sha256:9f4f96a33c7774cef24466fcd85031997531a03a8d117f151126baa8d1290dcc"
+  webhook: "sha256:055ac8e9de6a0ba6763794838fe38944acc650f68ebe1b01dd8be079e580f458"
+  cainjector: "sha256:083d0e906f8eb44e255fe4ff817ae54e49f9ed82e22f1011bb4e9e4f4b8a641f"
+  acmesolver: "sha256:c8c1225bb2fe8ab37a330b77f0d8c2ee6a41210fcb54fc07ca606ab9a022b8b7"  # unused (no ACME issuer); pinned, not a mutable tag
+# startupapicheck is disabled (the role waits for the webhook Deployment instead), so it has no image pin.
 #
 # M6  monitoring
 #   kube_prometheus_stack_version: # chart

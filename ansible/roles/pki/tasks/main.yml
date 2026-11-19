@@ -1,0 +1,60 @@
+---
+# Internal CA + cert-manager + ClusterIssuer (req 4, certificate part); Traefik consumes the issuer in ingress_traefik.
+- name: Create the internal root CA on the host
+  ansible.builtin.import_tasks: ca.yml
+
+- name: Create the cert-manager namespace with PSA restricted labels
+  kubernetes.core.k8s:
+    kubeconfig: "{{ pki_kubeconfig }}"
+    state: present
+    template: namespace.yaml.j2
+
+# Images are pinned by digest through the chart values; the CRDs ship with the chart.
+- name: Install the cert-manager chart
+  kubernetes.core.helm:
+    kubeconfig: "{{ pki_kubeconfig }}"
+    name: "{{ pki_release }}"
+    chart_ref: "{{ pki_chart }}"
+    chart_repo_url: "{{ pki_chart_repo }}"
+    chart_version: "{{ cert_manager_chart_version }}"
+    release_namespace: "{{ pki_namespace }}"
+    create_namespace: false
+    values: "{{ lookup('ansible.builtin.template', 'values.yaml.j2') | from_yaml }}"
+    wait: true
+    timeout: "{{ pki_wait_timeout }}s"
+
+# No wait_condition: a custom condition bypasses the Deployment rollout check (B-033).
+- name: Wait for the cert-manager Deployment rollouts to complete
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ pki_kubeconfig }}"
+    api_version: apps/v1
+    kind: Deployment
+    name: "{{ item }}"
+    namespace: "{{ pki_namespace }}"
+    wait: true
+    wait_timeout: "{{ pki_wait_timeout }}"
+  loop: "{{ pki_deployments }}"
+  changed_when: false
+
+- name: Load the CA key pair into a Secret for the ClusterIssuer
+  kubernetes.core.k8s:
+    kubeconfig: "{{ pki_kubeconfig }}"
+    state: present
+    template: ca-secret.yaml.j2
+  no_log: true
+
+# The webhook may reject the first requests until cainjector has published its CA bundle, so retry.
+- name: Create the internal-ca ClusterIssuer and wait until it is Ready
+  kubernetes.core.k8s:
+    kubeconfig: "{{ pki_kubeconfig }}"
+    state: present
+    template: clusterissuer.yaml.j2
+    wait: true
+    wait_condition:
+      type: Ready
+      status: "True"
+    wait_timeout: "{{ pki_wait_timeout }}"
+  register: pki_issuer
+  until: pki_issuer is succeeded
+  retries: 12
+  delay: 10
