@@ -38,6 +38,7 @@ pki_cert_duration: 2160h
 pki_cert_renew_before: 720h
 
 # Node-side paths
+node_textfile_dir: /var/lib/node_exporter/textfile_collector  # node-exporter textfile collector (read via its /host/root mount)
 node_backup_dir: /mnt/host-backups      # Lima mount of ./backups on the Mac
 etcd_backup_schedule: "*-*-* *:00/30:00"  # systemd OnCalendar: every 30 min
 etcd_backup_retention: 48               # number of snapshots kept

@@ -1,0 +1,24 @@
+# Managed by Ansible (etcd_backup role).
+[Unit]
+Description=Snapshot etcd to the host backup mount
+# B-010: never start (and never write to the VM disk) when the mount is missing.
+RequiresMountsFor={{ node_backup_dir }}
+After=network-online.target
+
+[Service]
+Type=oneshot
+Environment=BACKUP_DIR={{ node_backup_dir }}
+Environment=KEEP={{ etcd_backup_retention }}
+Environment=TEXTFILE_DIR={{ node_textfile_dir }}
+Environment=METRICS_FILE={{ etcd_backup_metrics_file }}
+Environment=MOUNT_FSTYPE={{ etcd_backup_mount_fstype }}
+Environment=ENDPOINT={{ etcd_backup_endpoint }}
+Environment=PKI_DIR={{ etcd_backup_pki_dir }}
+Environment=SNAPSHOT_GLOB={{ etcd_backup_snapshot_glob }}
+ExecStart={{ etcd_backup_script }}
+TimeoutStartSec={{ etcd_backup_run_timeout }}
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths={{ node_backup_dir }} {{ node_textfile_dir }}

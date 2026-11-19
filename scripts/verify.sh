@@ -69,6 +69,8 @@ check_1() { # OS preparation, containerd, pinned packages
 # Pinned value from versions.yml (single source of truth), e.g. pinned kubernetes_version -> 1.35.10-1.1
 pinned() { sed -n "s/^$1: \"\\([^\"]*\\)\".*/\\1/p" "$ROOT/ansible/group_vars/all/versions.yml"; }
 NODE_NAME="${NODE_NAME:-k8s-node}"
+# Role default: pinned_role <role> <key>
+pinned_role() { sed -n "s/^$2:[[:space:]]*\\([a-z0-9-]*\\).*/\\1/p" "$ROOT/ansible/roles/$1/defaults/main.yml"; }
 
 check_2() { # kubeadm single node, schedulable control plane (node Ready, control-plane pods healthy; CNI details: check_3a)
   need_cluster || return 0
@@ -978,8 +980,109 @@ MANIFEST
   cleanup_6; trap - EXIT
 }
 
-check_7() { # scheduled etcd snapshots stored outside the cluster
-  skip "not implemented (M7)"
+# check_7 only reads names, sizes and mtimes under backups/ (snapshots hold every Secret); content is read on the node by etcdutl only.
+check_7() { # scheduled etcd snapshots stored outside the cluster (M7, B-010)
+  CURRENT_REQ=7
+  need_cluster || return 0
+  if ! command -v jq >/dev/null 2>&1; then fail "jq is required on the host for check_7"; return 0; fi
+  local main="$ROOT/ansible/group_vars/all/main.yml" role="$ROOT/ansible/roles/etcd_backup/defaults/main.yml"
+  local bdir keep stale glob unit script fstype ns rule
+  bdir="$(sed -n 's/^node_backup_dir:[[:space:]]*\([^[:space:]#]*\).*/\1/p' "$main")"
+  keep="$(sed -n 's/^etcd_backup_retention:[[:space:]]*\([0-9]*\).*/\1/p' "$main")"
+  ns="$(sed -n 's/^ns_monitoring:[[:space:]]*\([a-z-]*\).*/\1/p' "$main")"
+  stale="$(sed -n 's/^etcd_backup_stale_after_seconds:[[:space:]]*\([0-9]*\).*/\1/p' "$role")"
+  glob="$(sed -n 's/^etcd_backup_snapshot_glob:[[:space:]]*"\([^"]*\)".*/\1/p' "$role")"
+  unit="$(sed -n 's/^etcd_backup_unit:[[:space:]]*\([a-z-]*\).*/\1/p' "$role")"
+  script="$(sed -n 's/^etcd_backup_script:[[:space:]]*\([^[:space:]#]*\).*/\1/p' "$role")"
+  fstype="$(sed -n 's/^etcd_backup_mount_fstype:[[:space:]]*\([a-z0-9]*\).*/\1/p' "$role")"
+  rule="$(sed -n 's/^etcd_backup_rule_name:[[:space:]]*\([a-z-]*\).*/\1/p' "$role")"
+  if [[ -z "$bdir" || -z "$keep" || -z "$ns" || -z "$stale" || -z "$glob" || -z "$unit" || -z "$script" || -z "$fstype" || -z "$rule" ]]; then
+    fail "etcd_backup defaults or group_vars keys not found"; return 0
+  fi
+  local hstat; hstat() { stat -f '%z %m' "$1" 2>/dev/null || stat -c '%s %Y' "$1" 2>/dev/null; } # size mtime (BSD, then GNU)
+
+  # --- Timer and unit
+  if [[ "$(node systemctl is-active "$unit.timer" 2>&1)" == "active" ]]; then pass "$unit.timer is active"; else fail "$unit.timer is not active"; fi
+  if [[ "$(node systemctl is-enabled "$unit.timer" 2>&1)" == "enabled" ]]; then pass "$unit.timer is enabled"; else fail "$unit.timer is not enabled"; fi
+  if node systemctl cat "$unit.timer" 2>&1 | grep -q '^Persistent=true'; then pass "timer is Persistent (catches up after downtime)"; else fail "timer is not Persistent"; fi
+  if [[ "$(node systemctl show "$unit.service" -p RequiresMountsFor --value 2>&1)" == *"$bdir"* ]]; then pass "$unit.service has RequiresMountsFor=$bdir"; else fail "$unit.service lacks RequiresMountsFor=$bdir (B-010)"; fi
+  if [[ "$(node systemctl show "$unit.service" -p Result --value 2>&1)" == "success" ]]; then pass "last $unit.service run succeeded"; else fail "last $unit.service run did not succeed (journalctl -u $unit)"; fi
+
+  # --- B-010: the node directory is the host mount, and the script refuses to write anywhere else
+  local fs; fs="$(node findmnt -n -o FSTYPE -M "$bdir" 2>&1)"
+  if [[ "$fs" == "$fstype" ]]; then pass "$bdir on the node is a $fstype mountpoint"; else fail "$bdir on the node: '$fs' (want a $fstype mountpoint)"; fi
+  local out rc
+  out="$(node env BACKUP_DIR=/var/tmp KEEP=1 TEXTFILE_DIR=/var/tmp METRICS_FILE=check7.prom MOUNT_FSTYPE="$fstype" ENDPOINT=x PKI_DIR=x SNAPSHOT_GLOB="$glob" "$script" 2>&1)"; rc=$?
+  if [[ $rc -ne 0 && "$out" == *"refusing to write"* ]] && ! node sh -c 'ls /var/tmp/etcd-snapshot-* /var/tmp/.etcd-snapshot-* /var/tmp/check7.prom' >/dev/null 2>&1; then
+    pass "the script refuses to write to a directory that is not the $fstype mount (nothing written to the VM disk)"
+  else fail "the script did not refuse a non-mount directory (rc=$rc): ${out:0:200}"; fi
+
+  # --- etcdctl/etcdutl match the pinned version and the etcd kubeadm runs
+  local want img; want="$(pinned etcdctl_version)"
+  img="$(k get pods "etcd-$NODE_NAME" -n kube-system -o jsonpath='{.spec.containers[0].image}' 2>&1)"
+  if [[ "$img" == *"/etcd:${want#v}-"* ]]; then pass "pinned etcdctl $want matches the running etcd image ($img)"; else fail "etcd image '$img' vs pinned etcdctl $want"; fi
+  if [[ "$(node etcdctl version 2>&1)" == *"etcdctl version: ${want#v}"* && "$(node etcdutl version 2>&1)" == *"etcdutl version: ${want#v}"* ]]; then pass "node etcdctl and etcdutl are $want"
+  else fail "node etcdctl/etcdutl are not $want"; fi
+
+  # --- Snapshots in host ./backups, the same files on the node (proves the mount), fresh, pruned
+  local f name host_names="" latest="" now; now="$(date +%s)"
+  shopt -s nullglob
+  for f in "$ROOT"/backups/$glob; do
+    name="${f##*/}"; host_names+="$name"$'\n'; latest="$name"
+  done
+  shopt -u nullglob
+  host_names="$(sort <<<"${host_names%$'\n'}")"
+  if [[ -z "$latest" ]]; then fail "no snapshot ($glob) in host ./backups"; else
+    latest="$(tail -n 1 <<<"$host_names")"
+    local hs hm age; read -r hs hm <<<"$(hstat "$ROOT/backups/$latest")"
+    age=$((now - hm))
+    if [[ "$hs" -gt 1000000 ]]; then pass "latest host snapshot $latest is $hs bytes"; else fail "latest host snapshot $latest is only $hs bytes"; fi
+    if [[ $age -le $stale ]]; then pass "latest snapshot is ${age}s old (limit ${stale}s = 2x schedule)"; else fail "latest snapshot is ${age}s old (limit ${stale}s)"; fi
+    local ns_ nm; read -r ns_ nm <<<"$(node stat -c '%s %Y' "$bdir/$latest" 2>&1)"
+    if [[ "$ns_" == "$hs" && $((nm - hm)) -ge -2 && $((nm - hm)) -le 2 ]]; then pass "the same file ($hs bytes, same mtime) is visible on the node at $bdir: it is the host mount"
+    else fail "host $latest ($hs B, $hm) differs from the node's view ($ns_ B, $nm)"; fi
+    local node_names; node_names="$(node find "$bdir" -maxdepth 1 -name "$glob" -printf '%f\n' 2>&1 | sort)"
+    if [[ "$node_names" == "$host_names" ]]; then pass "host ./backups and $bdir list the same $(wc -l <<<"$host_names" | tr -d ' ') snapshot(s)"; else fail "host and node snapshot lists differ"; fi
+    if [[ "$(wc -l <<<"$host_names" | tr -d ' ')" -le "$keep" ]]; then pass "at most $keep snapshots kept (retention)"; else fail "more than $keep snapshots kept"; fi
+    if [[ "$(node find "$bdir" -maxdepth 1 -name '.etcd-snapshot-*.tmp*' 2>&1)" == "" ]]; then pass "no half-written tmp snapshot left behind"; else fail "tmp snapshot left in $bdir"; fi
+    local st; st="$(node etcdutl snapshot status "$bdir/$latest" --write-out=json 2>&1)"
+    if jq -e '.revision > 0 and .totalKey > 0 and (.hash | type == "number")' >/dev/null 2>&1 <<<"$st"; then pass "etcdutl snapshot status OK for $latest (revision $(jq .revision <<<"$st"), $(jq .totalKey <<<"$st") keys)"
+    else fail "etcdutl snapshot status failed for $latest: ${st:0:200}"; fi
+  fi
+
+  # --- Metric through node-exporter's textfile collector, staleness rule loaded and quiet
+  local prom am q e m; prom="$(pinned_role monitoring monitoring_release)-prometheus:http-web"; am="$(pinned_role monitoring monitoring_release)-alertmanager:http-web"
+  m=etcd_backup_last_success_timestamp_seconds
+  qprom() { svc_get "$ns" "$prom" "api/v1/query?query=$(jq -rn --arg q "$1" '$q|@uri')"; }
+  local i age_p=""
+  for i in $(seq 1 40); do
+    q="$(qprom "time() - max($m)")"; age_p="$(jq -r '.data.result[0].value[1] // empty' 2>/dev/null <<<"$q")"
+    [[ -n "$age_p" ]] && break; sleep 3
+  done
+  if [[ -n "$age_p" ]] && awk -v a="$age_p" -v s="$stale" 'BEGIN{exit !(a >= -5 && a < s)}'; then pass "Prometheus scrapes $m (last success ${age_p%.*}s ago, textfile collector works)"
+  else fail "Prometheus has no fresh $m (age '${age_p:-none}'): is node-exporter reading the textfile directory?"; fi
+  # A new rule file takes a config-reloader cycle to load and one evaluation to leave health "unknown".
+  local rules
+  for i in $(seq 1 60); do
+    rules="$(svc_get "$ns" "$prom" api/v1/rules)"
+    jq -e '[.data.groups[].rules[] | select(.type == "alerting" and .name == "EtcdBackupStale" and .health != "unknown")] | length == 1' >/dev/null 2>&1 <<<"$rules" && break
+    sleep 3
+  done
+  e="$(jq -r --arg r "EtcdBackupStale" '[.data.groups[].rules[] | select(.type == "alerting" and .name == $r)][0] | .query // empty' <<<"$rules" 2>/dev/null)"
+  if [[ -n "$e" ]]; then pass "alert rule EtcdBackupStale loaded in Prometheus"; else fail "alert rule EtcdBackupStale not loaded"; fi
+  if jq -e '[.data.groups[].rules[] | select(.type == "alerting" and .name == "EtcdBackupStale")][0] | .health == "ok" and .state == "inactive"' >/dev/null 2>&1 <<<"$rules"; then
+    pass "EtcdBackupStale is healthy and not firing"
+  else fail "EtcdBackupStale is not healthy/inactive"; fi
+  if [[ "$(svc_get "$ns" "$am" api/v2/alerts | jq -r '[.[] | select(.labels.alertname == "EtcdBackupStale")] | length' 2>/dev/null)" == "0" ]]; then pass "no EtcdBackupStale alert in Alertmanager"
+  else fail "EtcdBackupStale is present in Alertmanager (or Alertmanager unreachable)"; fi
+  # The rule's own expression: quiet now, and it yields a sample on both failure modes (stale threshold crossed, metric absent).
+  if [[ -n "$e" ]]; then
+    local stale_expr absent_expr
+    stale_expr="$(sed -E 's/> [0-9]+\)/> 0)/' <<<"$e")"; absent_expr="${e//$m/etcd_backup_never_exported}"
+    if [[ "$(qprom "$e" | jq -r '.data.result | length' 2>/dev/null)" == "0" ]]; then pass "rule expression is empty while backups are fresh"; else fail "rule expression returns a sample although backups are fresh"; fi
+    if [[ "$(qprom "$stale_expr" | jq -r '.data.result | length' 2>/dev/null)" =~ ^[1-9] ]]; then pass "rule expression fires once the snapshot is older than the threshold"; else fail "rule expression does not fire when stale"; fi
+    if [[ "$(qprom "$absent_expr" | jq -r '.data.result | length' 2>/dev/null)" =~ ^[1-9] ]]; then pass "rule expression fires when the metric is absent"; else fail "rule expression does not fire when the metric is absent"; fi
+  fi
 }
 
 check_8a() { # read-only operator role + operator kubeconfig (M8)

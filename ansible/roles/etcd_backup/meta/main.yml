@@ -1,0 +1,10 @@
+---
+galaxy_info:
+  author: indev
+  description: Scheduled etcd snapshots (systemd timer) written to the host through the Lima mount, with a staleness alert
+  license: MIT
+  min_ansible_version: "2.17"
+  platforms:
+    - name: Debian
+      versions: [trixie]
+dependencies: []

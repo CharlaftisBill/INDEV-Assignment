@@ -1,0 +1,24 @@
+---
+# Kubernetes modules run on the node with admin.conf (python3-kubernetes from the kubeadm role).
+etcd_backup_kubeconfig: /etc/kubernetes/admin.conf
+etcd_backup_arch: "{{ {'aarch64': 'arm64', 'x86_64': 'amd64'}[ansible_facts['architecture']] }}"
+
+# etcdctl/etcdutl (pinned in versions.yml) are unpacked here and linked into /usr/local/bin.
+etcd_backup_tools_dir: /opt/etcd
+etcd_backup_script: /usr/local/sbin/etcd-backup
+etcd_backup_unit: etcd-backup
+
+# kubeadm's etcd: client TLS on loopback, kubeadm's healthcheck client cert (etcd has no auth enabled).
+etcd_backup_endpoint: https://127.0.0.1:2379
+etcd_backup_pki_dir: /etc/kubernetes/pki/etcd
+
+# B-010: the script refuses to write unless the backup dir is itself a mount of this filesystem type (the Lima mount of ./backups).
+etcd_backup_mount_fstype: virtiofs
+etcd_backup_snapshot_glob: "etcd-snapshot-*.db"
+etcd_backup_metrics_file: etcd_backup.prom
+
+# Alert when the last success is older than 2x the schedule (etcd_backup_schedule, 30 min) or the metric is missing.
+etcd_backup_stale_after_seconds: 3600
+etcd_backup_alert_for: 5m
+etcd_backup_rule_name: etcd-backup
+etcd_backup_run_timeout: 300
