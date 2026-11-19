@@ -3,7 +3,7 @@
 Live project state and bug tracker. Agents read this first and update it last (protocol in `CLAUDE.md`).
 
 ## Status
-Current milestone: **M7 — etcd_backup** · Last verified: 2026-11-19 final gate M6 (`make idempotency` changed=0; 1: 17, 2: 20, 3a: 15, 4: 48, 5: 15, 6: 73, 8c: 8 PASS · 0 FAIL · 0 SKIP, strict) · Last SRE review: working tree 2026-11-19 — M6 r2 + B-042 re-checks: B-042 holds, B-043 deferred to M10 (user)
+Current milestone: **M8 — hardening** · Last verified: 2026-11-19 final gate M7 (`make idempotency` changed=0; 1: 17, 2: 20, 3a: 15, 4: 48, 5: 15, 6: 73, 7: 23, 8c: 8 PASS · 0 FAIL · 0 SKIP, strict) · Last SRE review: ec6b28b 2026-11-19 — M7 r1: clean (B-010 holds)
 
 ## Milestones
 - [x] M0 Scaffolding: repo layout, agentic layer (`.claude/`), Makefile, lint configs, Lima config, docs skeleton, commit tooling (`split-commits` skill, `.githooks/commit-msg`)
@@ -15,7 +15,7 @@ Current milestone: **M7 — etcd_backup** · Last verified: 2026-11-19 final gat
 - [x] M5 `pki` + cert-manager + `ingress_traefik` (req 4)
   - Cross-role: `lima/k8s.yaml` (M1) forwards Mac 443→8443 and 80→8000 so Traefik stays non-root (B-009).
 - [x] M6 `monitoring`: kube-prometheus-stack, node + etcd alerts, Grafana ingress (req 6)
-- [ ] M7 `etcd_backup`: systemd timer → host `./backups`, staleness alert (req 7)
+- [x] M7 `etcd_backup`: systemd timer → host `./backups`, staleness alert (req 7)
 - [ ] M8 `hardening`: operator read-only role + kubeconfig (req 8a)
 - [ ] M9 `llm_app`: llama.cpp + model cache + NetworkPolicies + PSA-restricted namespace + TLS ingress (req 9, 3b, 8b)
 - [ ] M10 Final (all IDs: 1 2 3a 3b 4 5 6 7 8a 8b 8c 9): `make e2e` from a destroyed VM, full security review, docs pass (Backlog items marked "before M10" must be done first)
@@ -44,7 +44,7 @@ for each bug are in [Bug details](#bug-details) below.
 | B-007 | [sre] Host kubeconfig at 127.0.0.1:6443 fails TLS (no loopback SAN) | Medium | Solved | M2 | 2026-11-17 | 2026-11-18 | ba24ebb |
 | B-008 | [sec] "Allow from Traefik" NetworkPolicy cannot match a hostNetwork Traefik | Medium | Solved | M5 | 2026-11-17 | 2026-11-19 | 144f11c |
 | B-009 | [sre] hostNetwork Traefik cannot bind :443/:80 as non-root | Medium | Solved | M5 | 2026-11-17 | 2026-11-19 | e31f4da |
-| B-010 | [sre] etcd snapshots can silently land on the VM disk | Medium | Open | M7 | 2026-11-17 |  |  |
+| B-010 | [sre] etcd snapshots can silently land on the VM disk | Medium | Solved | M7 | 2026-11-17 | 2026-11-19 | ec6b28b |
 | B-011 | [sec] Secrets still readable unprompted via other `get` spellings (B-005 follow-up) | Medium | Solved | M0 | 2026-11-17 | 2026-11-17 | 6ba2a85 |
 | B-012 | [sre] Milestone gate and `bug solve` still accept SKIP (B-004 follow-up) | Medium | Solved | M0 | 2026-11-17 | 2026-11-17 | dfc00b7 |
 | B-013 | [sre] Strict verify is per requirement, but req 3 and 8 span milestones | Medium | Solved | M0 | 2026-11-17 | 2026-11-17 | 0c72290 |
@@ -109,6 +109,8 @@ for each bug are in [Bug details](#bug-details) below.
 - "Node and etcd alerts fire in Alertmanager" is read as: the chart's default node/etcd rules are loaded and healthy; the always-firing `Watchdog` reaches Alertmanager (live pipeline proof); and the alerts fire on failing input, proven by `promtool test rules` (`monitoring/files/alert-tests.yaml`, run by `check_6` in a throwaway pod against the rule files Prometheus loaded). A real node or etcd failure cannot be provoked within seconds without disrupting the cluster (`for:` is 1-20 min).
 - B-038 follow-up: `TraefikDown` (Traefik target absent/down) and `TraefikIngressNotSynced` (kube-state-metrics sees Ingresses with TLS but Traefik loaded no certificate, `traefik_tls_certs_not_after`); covers TLS Ingresses only, unit-tested with promtool.
 - `monitoring` NetworkPolicies: default-deny, DNS, then one policy per component; hostNetwork peers (API server on :6443 after DNAT, kubelet, etcd, node-exporter, Traefik, apiserver proxy) are `ipBlock` node-IP /32 (ADR 0003). `check_6` proves enforcement with a probe pod outside the namespace. `check_6` needs `jq` on the host.
+- etcd_backup (M7): snapshots every 30 min (`etcd_backup_schedule`) into `./backups` via the virtiofs mount, newest 48 kept, written by a root systemd oneshot (`/usr/local/sbin/etcd-backup`; etcdctl/etcdutl v3.6.6 from the etcd release tarball, sha256-pinned, matching kubeadm's etcd 3.6.6-0) with kubeadm's `healthcheck-client` cert. The snapshot files are 0600 and owned by the Mac user via virtiofs. Metrics (`etcd_backup_last_success_timestamp_seconds`, size, count) go to `/var/lib/node_exporter/textfile_collector/etcd_backup.prom` (`node_textfile_dir`); `EtcdBackupStale` fires when the last success is older than 3600 s (2x schedule) or the metric is absent, for 5m. The role takes one snapshot when none exists or the metric file is missing.
+- **Cross-role (M7):** the `monitoring` values got one node-exporter arg, `--collector.textfile.directory=/host/root<node_textfile_dir>`, reusing the existing read-only `/host/root` mount (no new volume, security context unchanged), because node-exporter had no textfile collector wired. Ansible's `mounts` fact omits virtiofs, so the mount assert uses `findmnt`. `mountType` virtiofs is assumed (`etcd_backup_mount_fstype`); the Linux-host backlog item must change it if Lima picks another mount type.
 - **Accepted risk (user, 2026-11-19, B-043, deferred to M10):** heavy parallel `/api/v1/series` calls over all series can OOMKill Prometheus (query caps don't cover that path). Reason: only an admin with a port-forward or the API proxy can send them, Prometheus restarts in seconds with its TSDB intact; PromQL load is bounded (B-042). Fix at M10.
 - **Accepted risk (user, 2026-11-18, B-026):** runc stays Debian trixie's `1.1.15` (EOL upstream, no fix for the Nov-2025 container-escape CVEs 2025-31133/52565/52881; trixie has no newer build). Reason: single-user local VM running only our own workloads, which are PSA `restricted`. Revisit if trixie-security ships a fixed runc, or before any shared/production use.
 
@@ -172,7 +174,9 @@ Max 5 lines per bug (heading + up to 4 one-line bullets, ~200 chars each). Full 
 
 ### B-010: [sre] etcd snapshots can silently land on the VM disk
 - **Report** (sre round 1): `/mnt/host-backups` is the host mount only if `make vm-up` created the VM; otherwise snapshots stay on the VM disk unnoticed.
-- **Direction:** assert the mount in the role, `RequiresMountsFor=` on the unit, a mountpoint check in the script, host/node comparison in `check_7`.
+- **Root cause:** nothing tied `/mnt/host-backups` to the host mount; a plain directory on the VM disk accepted the snapshots.
+- **Fix:** `etcd_backup` asserts a `virtiofs` mountpoint (findmnt), unit has `RequiresMountsFor=`, script exits 1 unless the dir is that mount; `check_7` compares host and node files.
+- **Verification:** `make verify REQ=7 STRICT=1` 23 PASS (same file on host and node, script refuses `/var/tmp`, `RequiresMountsFor` set); idempotency changed=0.
 
 ### B-011: [sec] Secrets still readable unprompted via other `get` spellings (B-005 follow-up)
 - **Report** (sre round 2): B-005's rules missed plural, `secret/<name>`, `-n` before the kind, `--raw` and node-side `--all-namespaces`.
