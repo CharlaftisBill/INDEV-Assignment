@@ -1,0 +1,7 @@
+---
+# Read-only operator (req 8a): ClusterRole + binding, and a client-cert kubeconfig at out/operator.conf.
+- name: Apply the read-only operator RBAC
+  ansible.builtin.import_tasks: rbac.yml
+
+- name: Issue the operator credentials
+  ansible.builtin.import_tasks: kubeconfig.yml

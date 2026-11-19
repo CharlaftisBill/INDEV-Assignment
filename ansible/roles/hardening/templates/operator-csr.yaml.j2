@@ -1,0 +1,9 @@
+apiVersion: certificates.k8s.io/v1
+kind: CertificateSigningRequest
+metadata:
+  name: {{ hardening_csr_name }}
+spec:
+  request: {{ hardening_csr_pem | b64encode }}
+  signerName: {{ hardening_csr_signer }}
+  expirationSeconds: {{ hardening_cert_days * 86400 }}
+  usages: [client auth]

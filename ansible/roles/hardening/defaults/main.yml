@@ -1,0 +1,22 @@
+---
+# Kubernetes modules run on the node with admin.conf (python3-kubernetes from the kubeadm role).
+hardening_kubeconfig: /etc/kubernetes/admin.conf
+hardening_cluster_ca: /etc/kubernetes/pki/ca.crt
+
+# Read-only operator (req 8a). Bound by group: the client cert carries CN=operator, O=indev:operators.
+hardening_operator_user: operator
+hardening_operator_group: "indev:operators"
+hardening_clusterrole: operator-readonly
+
+# Operator credentials on the host: key + cert in .secrets/, kubeconfig in out/ (all gitignored).
+hardening_operator_key: "{{ host_secrets_dir }}/operator.key"
+hardening_operator_cert: "{{ host_secrets_dir }}/operator.crt"
+hardening_operator_conf: "{{ host_out_dir }}/operator.conf"
+# Same Lima forward as out/admin.conf (the apiserver cert has a 127.0.0.1 SAN, B-007).
+hardening_api_server: https://127.0.0.1:6443
+
+# Cert lifetime is requested through the CSR API; reissued when it expires within the renew window.
+hardening_cert_days: 180
+hardening_cert_renew_days: 30
+hardening_csr_signer: kubernetes.io/kube-apiserver-client
+hardening_csr_timeout_retries: 30

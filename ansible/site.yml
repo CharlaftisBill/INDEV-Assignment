@@ -33,6 +33,6 @@
     - { role: ingress_traefik, tags: [ingress_traefik] }
     - { role: monitoring, tags: [monitoring] }
     - { role: etcd_backup, tags: [etcd_backup] }
+    - { role: hardening, tags: [hardening] }
   # Planned order (uncommented as each milestone lands):
-  #   - { role: hardening,       tags: [hardening] }
   #   - { role: llm_app,         tags: [llm_app] }

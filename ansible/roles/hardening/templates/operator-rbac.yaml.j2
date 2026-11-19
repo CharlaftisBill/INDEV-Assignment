@@ -1,0 +1,99 @@
+# Explicit resource lists, no wildcards: a new CRD or subresource never silently becomes readable.
+# Deliberately absent: secrets, serviceaccounts/token, pods/exec|attach|portforward, */proxy, impersonate/escalate/bind, CSR approval.
+# pods/log is included (standard view-role behaviour); logs may hold application data, so treat it as readable.
+# No projectcalico.org rules, on purpose: Calico binds write verbs on its policies to system:authenticated and only its API server
+# (tier access) stops them. Granting tiers get here would turn that into a write path (check_8a asserts it stays denied).
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ hardening_clusterrole }}
+rules:
+  - apiGroups: [""]
+    resources:
+      - configmaps
+      - endpoints
+      - events
+      - limitranges
+      - namespaces
+      - namespaces/status
+      - nodes
+      - nodes/status
+      - persistentvolumeclaims
+      - persistentvolumeclaims/status
+      - persistentvolumes
+      - persistentvolumes/status
+      - pods
+      - pods/log
+      - pods/status
+      - replicationcontrollers
+      - resourcequotas
+      - resourcequotas/status
+      - serviceaccounts
+      - services
+      - services/status
+    verbs: [get, list, watch]
+  - apiGroups: [apps]
+    resources: [controllerrevisions, daemonsets, daemonsets/status, deployments, deployments/status, replicasets, replicasets/status, statefulsets, statefulsets/status]
+    verbs: [get, list, watch]
+  - apiGroups: [batch]
+    resources: [cronjobs, cronjobs/status, jobs, jobs/status]
+    verbs: [get, list, watch]
+  - apiGroups: [autoscaling]
+    resources: [horizontalpodautoscalers, horizontalpodautoscalers/status]
+    verbs: [get, list, watch]
+  - apiGroups: [policy]
+    resources: [poddisruptionbudgets, poddisruptionbudgets/status]
+    verbs: [get, list, watch]
+  - apiGroups: [networking.k8s.io]
+    resources: [ingressclasses, ingresses, ingresses/status, networkpolicies]
+    verbs: [get, list, watch]
+  - apiGroups: [discovery.k8s.io]
+    resources: [endpointslices]
+    verbs: [get, list, watch]
+  - apiGroups: [events.k8s.io]
+    resources: [events]
+    verbs: [get, list, watch]
+  - apiGroups: [storage.k8s.io]
+    resources: [csidrivers, csinodes, storageclasses, volumeattachments]
+    verbs: [get, list, watch]
+  - apiGroups: [scheduling.k8s.io]
+    resources: [priorityclasses]
+    verbs: [get, list, watch]
+  - apiGroups: [node.k8s.io]
+    resources: [runtimeclasses]
+    verbs: [get, list, watch]
+  - apiGroups: [coordination.k8s.io]
+    resources: [leases]
+    verbs: [get, list, watch]
+  - apiGroups: [rbac.authorization.k8s.io]
+    resources: [clusterrolebindings, clusterroles, rolebindings, roles]
+    verbs: [get, list, watch]
+  - apiGroups: [apiextensions.k8s.io]
+    resources: [customresourcedefinitions]
+    verbs: [get, list, watch]
+  - apiGroups: [admissionregistration.k8s.io]
+    resources: [mutatingwebhookconfigurations, validatingwebhookconfigurations, validatingadmissionpolicies, validatingadmissionpolicybindings]
+    verbs: [get, list, watch]
+  - apiGroups: [certificates.k8s.io]
+    resources: [certificatesigningrequests]
+    verbs: [get, list, watch]
+  - apiGroups: [cert-manager.io]
+    resources: [certificaterequests, certificates, clusterissuers, issuers]
+    verbs: [get, list, watch]
+  - apiGroups: [monitoring.coreos.com]
+    resources: [alertmanagers, podmonitors, probes, prometheuses, prometheusrules, servicemonitors]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ hardening_clusterrole }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ hardening_clusterrole }}
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: Group
+    name: {{ hardening_operator_group }}
