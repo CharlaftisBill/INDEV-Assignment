@@ -33,7 +33,7 @@
 | 5 | `storage` | local-path-storage | 5 |
 | 6 | `pki` | cert-manager (+ root CA on the host) | 4 |
 | 7 | `ingress_traefik` | traefik; creates `llm`, `monitoring`, `ingress-check` | 4 |
-| 8 | `monitoring` | monitoring | 6 |
+| 8 | `monitoring` | monitoring (PSA restricted), node-exporter (PSA privileged) | 6 |
 | 9 | `etcd_backup` | — (systemd on the node) | 7 |
 | 10 | `hardening` | — (cluster RBAC) | 8a |
 | 11 | `llm_app` | llm | 9, 3b, 8b |
@@ -58,7 +58,7 @@ Filled from `ansible/group_vars/all/versions.yml` as milestones land.
 | busybox | 1.38.0 (`sha256:a46257e0…e5fa4`) | helper pod and `check_5` test pod; arm64 digest pinned |
 | cert-manager | chart v1.21.3; controller, webhook, cainjector by digest (`versions.yml`) | charts.jetstack.io, 2026-11-18; internal CA ([ADR 0005](decisions/0005-internal-ca-and-renewal.md)) |
 | Traefik | chart 42.3.0, image v3.7.17 (`sha256:f4bb143d…86f5a`) | traefik.github.io/charts, 2026-11-18; Ports 8443 (HTTPS) and 8000 (redirect) on the node, Lima maps Mac 443/80 ([ADR 0003](decisions/0003-traefik-ingress.md)) |
-| kube-prometheus-stack | — | M6 |
+| kube-prometheus-stack | chart 92.18.0; operator and config-reloader v0.94.2, Prometheus v3.15.1-distroless, Alertmanager v0.34.2, Grafana 13.3.0-distroless, k8s-sidecar 2.14.3, kube-state-metrics v2.20.0, node-exporter v1.12.1 (all by digest, `versions.yml`) | prometheus-community.github.io/helm-charts, 2026-11-19 ([ADR 0010](decisions/0010-monitoring-stack.md)) |
 | llama.cpp server image | — | M9 |
 | Model | Qwen2.5-0.5B-Instruct GGUF Q4 | M9 |
 
@@ -68,6 +68,10 @@ Filled from `ansible/group_vars/all/versions.yml` as milestones land.
 - Metrics bind to the node IP for Prometheus (M6): kube-controller-manager and kube-scheduler `bind-address`, kube-proxy `:10249`, etcd `listen-metrics-urls` `127.0.0.1:2381` (first, for the probe) plus node IP:2381. Lima forwards none of these.
 - The kubeadm config is read only by the first `kubeadm init`; later changes need `make vm-reset`. Audit policy and PSA config are re-read by an API server restart handler.
 - Pod Security defaults: [ADR 0007](decisions/0007-pod-security-restricted.md).
+
+## Monitoring ports (`monitoring` role)
+
+Prometheus scrapes the node IP: apiserver 6443, kubelet 10250, etcd 2381 (HTTP), controller-manager 10257, scheduler 10259, kube-proxy 10249, node-exporter 9100, Traefik 9101. Grafana is served at `https://grafana.local` through Traefik. Operation: [monitoring runbook](runbooks/monitoring.md).
 
 ## Traffic allowed into application pods (`llm` namespace)
 

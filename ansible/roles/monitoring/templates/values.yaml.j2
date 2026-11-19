@@ -1,0 +1,137 @@
+# kube-prometheus-stack {{ kube_prometheus_stack_chart_version }}; every image runs by digest.
+# The chart's pod/container security contexts are already PSA restricted (non-root, drop ALL, seccomp, read-only rootfs).
+fullnameOverride: {{ monitoring_release }}
+crds:
+  enabled: true
+# Control-plane and kubelet targets are ServiceMonitors on the node IP; the kubeadm role moved these binds off loopback.
+kubeEtcd:
+  service:
+    port: {{ monitoring_etcd_metrics_port }}
+    targetPort: {{ monitoring_etcd_metrics_port }}
+kubeProxy:
+  service:
+    port: {{ monitoring_kube_proxy_port }}
+    targetPort: {{ monitoring_kube_proxy_port }}
+# Default rules stay on (node, node-exporter, etcd, kubernetes-system groups); the loaded groups are asserted by check_6.
+defaultRules:
+  create: true
+prometheusOperator:
+  image:
+    tag: {{ monitoring_images.prometheus_operator.tag }}
+    sha: {{ monitoring_images.prometheus_operator.digest | replace('sha256:', '') }}
+  prometheusConfigReloader:
+    image:
+      tag: {{ monitoring_images.config_reloader.tag }}
+      sha: {{ monitoring_images.config_reloader.digest | replace('sha256:', '') }}
+    resources: {{ monitoring_resources.config_reloader | to_json }}
+  resources: {{ monitoring_resources.operator | to_json }}
+  admissionWebhooks:
+    # The chart's own PrometheusRules are created before the operator can answer the webhook; Ignore lets the first install through.
+    failurePolicy: Ignore
+    # cert-manager issues the webhook certificate (self-signed chain from the chart): the internal CA is name-constrained to .local.
+    certManager:
+      enabled: true
+    patch:
+      enabled: false
+alertmanager:
+  alertmanagerSpec:
+    image:
+      tag: {{ monitoring_images.alertmanager.tag }}
+      sha: {{ monitoring_images.alertmanager.digest | replace('sha256:', '') }}
+    # No PVC: silences are lost on a restart, which is acceptable here (no receivers are configured).
+    resources: {{ monitoring_resources.alertmanager | to_json }}
+prometheus:
+  prometheusSpec:
+    image:
+      tag: {{ monitoring_images.prometheus.tag }}
+      sha: {{ monitoring_images.prometheus.digest | replace('sha256:', '') }}
+    retention: {{ monitoring_prometheus_retention }}
+    retentionSize: {{ monitoring_prometheus_retention_size }}
+    resources: {{ monitoring_resources.prometheus | to_json }}
+    # B-042: bound the memory a query can take so wide queries fail with an error instead of OOM-killing Prometheus (and alerting).
+    # Go's default GOGC=100 lets the heap float to 2x the ~560Mi live set even when queries are small; a lower value keeps garbage from pushing the cgroup to its limit.
+    containers:
+      - name: prometheus
+        env:
+          - {name: GOGC, value: "{{ monitoring_prometheus_gogc }}"}
+    query:
+      maxConcurrency: {{ monitoring_query_max_concurrency }}
+      maxSamples: {{ monitoring_query_max_samples }}
+      timeout: {{ monitoring_query_timeout }}
+    # Pick up our own PodMonitor/PrometheusRule objects without the release label.
+    ruleSelectorNilUsesHelmValues: false
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          accessModes: [ReadWriteOnce]
+          resources:
+            requests:
+              storage: {{ monitoring_prometheus_storage }}
+kube-state-metrics:
+  image:
+    tag: {{ monitoring_images.kube_state_metrics.tag }}
+    sha: {{ monitoring_images.kube_state_metrics.digest }}
+  resources: {{ monitoring_resources.kube_state_metrics | to_json }}
+# The VM is Linux only: no AIX/Darwin dashboards.
+nodeExporter:
+  operatingSystems:
+    aix: {enabled: false}
+    darwin: {enabled: false}
+prometheus-node-exporter:
+  namespaceOverride: {{ monitoring_node_exporter_namespace }}
+  image:
+    tag: {{ monitoring_images.node_exporter.tag }}
+    digest: {{ monitoring_images.node_exporter.digest }}
+  resources: {{ monitoring_resources.node_exporter | to_json }}
+  # hostPID/hostNetwork/hostPath stay (PSA privileged namespace), but the process gets no new privileges, no capabilities and a seccomp filter (B-040).
+  securityContext:
+    fsGroup: 65534
+    runAsGroup: 65534
+    runAsNonRoot: true
+    runAsUser: 65534
+    seccompProfile:
+      type: RuntimeDefault
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: [ALL]
+grafana:
+  image:
+    tag: {{ monitoring_images.grafana.tag }}
+    sha: {{ monitoring_images.grafana.digest | replace('sha256:', '') }}
+  # The chart's RBAC reads Secrets (ClusterRole when searching all namespaces): replaced by grafana-rbac.yaml.j2 (B-039).
+  rbac:
+    create: false
+  sidecar:
+    image:
+      tag: {{ monitoring_images.grafana_sidecar.tag }}
+      sha: {{ monitoring_images.grafana_sidecar.digest | replace('sha256:', '') }}
+    # Dashboards and datasources are ConfigMaps in this namespace only; no Secret access.
+    dashboards:
+      resource: configmap
+      searchNamespace: {{ monitoring_namespace }}
+    datasources:
+      resource: configmap
+    resources: {{ monitoring_resources.grafana_sidecar | to_json }}
+  resources: {{ monitoring_resources.grafana | to_json }}
+  admin:
+    existingSecret: {{ monitoring_grafana_secret }}
+  testFramework:
+    enabled: false
+  # The Ingress and its Certificate are ours (grafana-ingress.yaml.j2).
+  ingress:
+    enabled: false
+  grafana.ini:
+    server:
+      domain: {{ grafana_hostname }}
+      root_url: https://{{ grafana_hostname }}/
+    users:
+      allow_sign_up: false
+    auth.anonymous:
+      enabled: false
+    analytics:
+      reporting_enabled: false
+      check_for_updates: false

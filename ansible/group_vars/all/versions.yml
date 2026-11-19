@@ -76,8 +76,27 @@ traefik_chart_version: "42.3.0"  # helm search repo traefik/traefik (traefik.git
 traefik_image_version: "v3.7.17"  # appVersion of chart 42.3.0; versionOverride needed with a digest, 2026-11-18
 traefik_image_digest: "sha256:f4bb143d1135a579b630ed491e17ec50f6f7c9c6a30585ff3d385471d2a86f5a"  # imagetools inspect traefik:v3.7.17 (arm64), 2026-11-18
 #
-# M6  monitoring
-#   kube_prometheus_stack_version: # chart
+# M6  monitoring (kube-prometheus-stack; every image has linux/arm64, digests are the multi-arch index digests)
+# Chart 92.18.0 (kubeVersion >=1.25; operator v0.94.2): newest chart >= 2 weeks old (92.20.0 is 2026-11-05; 93.x is a newer major, 12 days old).
+kube_prometheus_stack_chart_version: "92.18.0"  # helm search repo prometheus-community/kube-prometheus-stack (index created 2026-11-04), 2026-11-19
+monitoring_images:  # tags = chart 92.18.0 defaults (helm template); digest = imagetools inspect <image>:<tag> (arm64 present), 2026-11-19
+  # quay.io/prometheus-operator/prometheus-operator
+  prometheus_operator: {tag: "v0.94.2", digest: "sha256:c7edf0379b7271ef1705dce258d2bb73820e299cc95559369e9f6fc3321639ec"}
+  # quay.io/prometheus-operator/prometheus-config-reloader
+  config_reloader: {tag: "v0.94.2", digest: "sha256:a1897c67478bc23434534e91ad3855280771196b1daf17144db9dbcb655bef71"}
+  # quay.io/prometheus/prometheus
+  prometheus: {tag: "v3.15.1-distroless", digest: "sha256:451a845bae1d51622b41af1780eb2ad911bbb79a9855bc8e9bb67fabbc03f934"}
+  # quay.io/prometheus/alertmanager
+  alertmanager: {tag: "v0.34.2", digest: "sha256:39d8bb3966c694a124428a3a88fbcffd40bd069129ecd47c059f8a3f17c55f3b"}
+  # docker.io/grafana/grafana
+  grafana: {tag: "13.3.0-distroless", digest: "sha256:540b8afb775bf34aefce417e4329039daa5d44b6f2fbda6881397b1b247ca7df"}
+  # quay.io/kiwigrid/k8s-sidecar
+  grafana_sidecar: {tag: "2.14.3", digest: "sha256:52d311dcedd587421a236c4d6c621f05614c40a51386e955e0699dca97ec0880"}
+  # registry.k8s.io/kube-state-metrics/kube-state-metrics
+  kube_state_metrics: {tag: "v2.20.0", digest: "sha256:42cfe3723a5f058171c627537fb57a3ea0f26e4380fa18555a95cb1a1b4cfc5b"}
+  # quay.io/prometheus/node-exporter:v1.12.1-distroless (the chart appends -distroless to the tag)
+  node_exporter: {tag: "v1.12.1", digest: "sha256:8c9bac11973b94b59be88d6e11fee4429aa743c8846cdc75d65b18db33f6a106"}
+# Not deployed (disabled in values): kube-webhook-certgen (cert-manager issues the webhook cert), Thanos, helm-test bats, CRD upgrade job.
 #
 # M7  etcd_backup
 #   etcdctl_version:               # must match the etcd shipped by kubeadm

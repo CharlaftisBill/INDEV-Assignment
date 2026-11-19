@@ -1,0 +1,29 @@
+# Certificate from the internal CA, renewed by cert-manager before expiry; Traefik serves it for {{ grafana_hostname }}.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ monitoring_grafana_tls_secret }}
+  namespace: {{ monitoring_namespace }}
+spec:
+  secretName: {{ monitoring_grafana_tls_secret }}
+  dnsNames: [{{ grafana_hostname }}]
+  issuerRef: {name: {{ pki_cluster_issuer }}, kind: ClusterIssuer}
+  duration: {{ pki_cert_duration }}
+  renewBefore: {{ pki_cert_renew_before }}
+---
+# No ingressClassName: Traefik is the default IngressClass.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: grafana
+  namespace: {{ monitoring_namespace }}
+spec:
+  tls:
+    - {hosts: [{{ grafana_hostname }}], secretName: {{ monitoring_grafana_tls_secret }}}
+  rules:
+    - host: {{ grafana_hostname }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend: {service: {name: {{ monitoring_release }}-grafana, port: {number: 80}}}

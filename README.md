@@ -24,7 +24,7 @@ curl --cacert certs/ca.crt https://llm.local/v1/chat/completions \
 | Backups | etcd snapshots → `./backups` on the host via Lima mount | [0006](docs/decisions/0006-etcd-backups-outside-cluster.md) |
 | Agent permissions | allow-list + ask + narrow deny in `.claude/settings.json`, a guardrail, not a boundary | [0009](docs/decisions/0009-agent-permissions-guardrail.md) |
 | Workload security | Pod Security Admission `restricted` for app namespaces | [0007](docs/decisions/0007-pod-security-restricted.md) |
-| Monitoring | kube-prometheus-stack (Prometheus, Alertmanager, Grafana) | [architecture](docs/architecture.md) |
+| Monitoring | kube-prometheus-stack (Prometheus, Alertmanager, Grafana) | [0010](docs/decisions/0010-monitoring-stack.md) |
 | Sample app | llama.cpp server + Qwen2.5-0.5B-Instruct Q4 GGUF, model cached on a PVC | [0008](docs/decisions/0008-model-caching.md) |
 
 Exact versions: [`ansible/group_vars/all/versions.yml`](ansible/group_vars/all/versions.yml).
@@ -68,6 +68,8 @@ Notes from the install:
 
 To use the pinned tools outside `make`, run `source .venv/bin/activate`.
 
+Required for `make verify REQ=6`: `brew install jq` (`check_6` fails without it; `make deps` does not install it).
+
 Optional: `brew install shellcheck` adds shell-script linting to `make lint` (skipped when it isn't installed).
 
 **Checked after install:** `limactl validate lima/k8s.yaml` OK, `make lint` clean (yamllint + ansible-lint `production` profile), `make check` OK.
@@ -86,7 +88,7 @@ This points git at `.githooks/`, whose `commit-msg` hook enforces Conventional C
 scripts/hosts-entry.sh --apply
 ```
 
-This adds `127.0.0.1 llm.local grafana.local` to `/etc/hosts`.
+This adds `127.0.0.1 llm.local grafana.local` to `/etc/hosts`. Grafana is then at `https://grafana.local` (user `admin`, password in `.secrets/grafana-admin-password`; see the [monitoring runbook](docs/runbooks/monitoring.md)).
 
 ## Quick start
 
@@ -141,5 +143,5 @@ k8s-single-node-assignment.pdf   the assignment brief
 - [Architecture](docs/architecture.md)
 - [Requirements matrix](docs/requirements-matrix.md): each requirement → implementation → how it is verified
 - [Decisions (ADRs)](docs/decisions/)
-- [Runbooks](docs/runbooks/): etcd restore, operator kubeconfig, CA rotation, troubleshooting
+- [Runbooks](docs/runbooks/): etcd restore, operator kubeconfig, CA rotation, monitoring, troubleshooting
 - [How this was built with Claude Code](docs/ai-workflow.md)

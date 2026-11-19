@@ -1,0 +1,39 @@
+# Traefik runs on the host network without a Service, so it is scraped per pod on the node IP.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: traefik
+  namespace: {{ monitoring_namespace }}
+spec:
+  jobLabel: app.kubernetes.io/name
+  namespaceSelector: {matchNames: [{{ monitoring_traefik_namespace }}]}
+  selector: {matchLabels: {app.kubernetes.io/name: traefik}}
+  podMetricsEndpoints:
+    - {port: metrics, path: /metrics}
+---
+# B-038: Traefik can stay Ready while its Ingress provider is not synced (every route 404). A synced Traefik holds the TLS
+# certificates of the Ingresses (traefik_tls_certs_not_after); kube-state-metrics knows how many Ingresses have TLS.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: traefik-ingress
+  namespace: {{ monitoring_namespace }}
+spec:
+  groups:
+    - name: traefik-ingress
+      rules:
+        - alert: TraefikDown
+          expr: absent(up{job="traefik"} == 1)
+          for: 3m
+          labels: {severity: critical}
+          annotations:
+            summary: Traefik is not being scraped or is down; no Ingress is served.
+        - alert: TraefikIngressNotSynced
+          expr: |
+            (count(kube_ingress_tls) > 0)
+              and on() (count(up{job="traefik"} == 1) > 0)
+              unless on() (count(traefik_tls_certs_not_after) > 0)
+          for: 3m
+          labels: {severity: critical}
+          annotations:
+            summary: Traefik is up but serves no TLS certificate for the cluster's Ingresses (provider not synced, e.g. a missing Role).

@@ -1,0 +1,59 @@
+---
+# Kubernetes modules run on the node with admin.conf (python3-kubernetes from the kubeadm role).
+monitoring_kubeconfig: /etc/kubernetes/admin.conf
+monitoring_namespace: "{{ ns_monitoring }}"
+# node-exporter needs hostNetwork/hostPID/hostPath (PSA privileged), so it gets its own namespace and the rest stays PSA restricted.
+monitoring_node_exporter_namespace: node-exporter
+monitoring_chart_repo: https://prometheus-community.github.io/helm-charts
+monitoring_chart: kube-prometheus-stack
+monitoring_release: kps
+monitoring_wait_timeout: 600
+
+# kubeadm binds these to the node IP (kubeadm role); pods reach them on it. etcd metrics are plain HTTP.
+monitoring_node_ip: "{{ ansible_facts['default_ipv4']['address'] }}"
+monitoring_apiserver_port: 6443
+monitoring_kubelet_port: 10250
+monitoring_etcd_metrics_port: 2381
+monitoring_controller_manager_port: 10257
+monitoring_scheduler_port: 10259
+monitoring_kube_proxy_port: 10249
+monitoring_node_exporter_port: 9100
+# Traefik's metrics port (ingress_traefik_ports.metrics), scraped for the ingress alerts.
+monitoring_traefik_namespace: "{{ ns_ingress }}"
+monitoring_traefik_metrics_port: 9101
+
+# Grafana admin password: generated once on the host (0600, gitignored) and loaded into a Secret the chart references.
+monitoring_grafana_password_file: "{{ host_secrets_dir }}/grafana-admin-password"
+monitoring_grafana_secret: grafana-admin
+monitoring_grafana_tls_secret: grafana-tls
+
+# Small footprint: the llama.cpp pod (M9) needs >= 2.5 GiB of the ~7.7 GiB VM and the base cluster uses ~2 GiB, which leaves ~3 GiB for this
+# stack. Requests follow measured idle use (working set: grafana ~280Mi, sidecars ~80Mi, prometheus ~450Mi, rest < 40Mi), limits add headroom for
+# query load; check_6 asserts the sums stay under these caps (container limits, not live free memory, so the check is stable).
+monitoring_budget_requests_mib: 1536
+monitoring_budget_limits_mib: 3072
+monitoring_prometheus_retention: 3d
+monitoring_prometheus_retention_size: 3GB
+monitoring_prometheus_storage: 5Gi
+# Query caps (B-042). Prometheus sets GOMEMLIMIT to ~90% of its memory limit (1280Mi -> ~1152Mi); the idle heap is ~600Mi at ~120k series, so
+# ~500Mi is left for queries after a growth margin. GOGC=50 (Go default 100) stops garbage from floating the heap up to the limit (with 100,
+# 8 parallel wide queries took memory.current to 95% of the limit). Measured wide raw results (50-60k series, labels + JSON): ~85 B per sample
+# per in-flight query, and the JSON is encoded after the query slot is freed, so queued queries overlap the running ones. check_6 asserts
+# concurrency x overlap x samples x bytes <= headroom. maxSamples must stay above the largest rule window (~0.85M); wider queries fail with
+# "too many samples". 1.5M did not fit: 8 parallel queries at 1.49M reached 94% of the limit.
+monitoring_prometheus_gogc: 50
+monitoring_query_max_concurrency: 2
+monitoring_query_max_samples: 1200000
+monitoring_query_timeout: 1m
+monitoring_query_bytes_per_sample: 100
+monitoring_query_overlap: 2
+monitoring_query_headroom_mib: 500
+monitoring_resources:
+  operator: {requests: {cpu: 20m, memory: 64Mi}, limits: {memory: 192Mi}}
+  prometheus: {requests: {cpu: 100m, memory: 512Mi}, limits: {memory: 1280Mi}}
+  config_reloader: {requests: {cpu: 10m, memory: 24Mi}, limits: {memory: 64Mi}}
+  alertmanager: {requests: {cpu: 10m, memory: 48Mi}, limits: {memory: 128Mi}}
+  grafana: {requests: {cpu: 50m, memory: 384Mi}, limits: {memory: 640Mi}}
+  grafana_sidecar: {requests: {cpu: 10m, memory: 96Mi}, limits: {memory: 160Mi}}
+  kube_state_metrics: {requests: {cpu: 10m, memory: 48Mi}, limits: {memory: 128Mi}}
+  node_exporter: {requests: {cpu: 10m, memory: 24Mi}, limits: {memory: 64Mi}}
