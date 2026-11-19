@@ -1,0 +1,11 @@
+# Managed by Ansible (etcd_backup role).
+[Unit]
+Description=Schedule etcd snapshots
+
+[Timer]
+OnCalendar={{ etcd_backup_schedule }}
+# Catch up one run after downtime.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,113 @@
+---
+# Scheduled etcd snapshots to the host through the Lima mount (req 7, ADR 0006): systemd timer on the node, staleness alert in Prometheus.
+# B-010: the mount is asserted here, by RequiresMountsFor= on the unit and by the script, so a missing mount can never mean "backup on the VM disk".
+# ansible_facts['mounts'] omits virtiofs mounts, so ask findmnt (prints nothing when the path is not itself a mountpoint).
+- name: Read the filesystem type of the backup mount
+  ansible.builtin.command: findmnt -n -o FSTYPE -M {{ node_backup_dir }}
+  register: etcd_backup_mount
+  changed_when: false
+  failed_when: false
+
+- name: Assert the backup directory is the host mount
+  ansible.builtin.assert:
+    that: etcd_backup_mount.stdout | trim == etcd_backup_mount_fstype
+    fail_msg: >-
+      {{ node_backup_dir }} is not a {{ etcd_backup_mount_fstype }} mount (found '{{ etcd_backup_mount.stdout | trim }}'): snapshots would
+      stay on the VM disk. Create the VM with 'make vm-up' (adds the ./backups mount).
+    quiet: true
+
+- name: Create the etcd tools directory
+  ansible.builtin.file:
+    path: "{{ etcd_backup_tools_dir }}"
+    state: directory
+    mode: "0755"
+    owner: root
+    group: root
+
+- name: Download the etcd release (etcdctl, etcdutl)
+  ansible.builtin.get_url:
+    url: "https://github.com/etcd-io/etcd/releases/download/{{ etcdctl_version }}/etcd-{{ etcdctl_version }}-linux-{{ etcd_backup_arch }}.tar.gz"
+    dest: "{{ etcd_backup_tools_dir }}/etcd-{{ etcdctl_version }}-linux-{{ etcd_backup_arch }}.tar.gz"
+    checksum: "{{ etcdctl_checksums[etcd_backup_arch] }}"
+    mode: "0644"
+    owner: root
+    group: root
+
+- name: Unpack etcdctl and etcdutl
+  ansible.builtin.unarchive:
+    src: "{{ etcd_backup_tools_dir }}/etcd-{{ etcdctl_version }}-linux-{{ etcd_backup_arch }}.tar.gz"
+    dest: "{{ etcd_backup_tools_dir }}"
+    remote_src: true
+    include:
+      - "etcd-{{ etcdctl_version }}-linux-{{ etcd_backup_arch }}/etcdctl"
+      - "etcd-{{ etcdctl_version }}-linux-{{ etcd_backup_arch }}/etcdutl"
+    creates: "{{ etcd_backup_tools_dir }}/etcd-{{ etcdctl_version }}-linux-{{ etcd_backup_arch }}/etcdutl"
+
+- name: Link etcdctl and etcdutl into the PATH
+  ansible.builtin.file:
+    src: "{{ etcd_backup_tools_dir }}/etcd-{{ etcdctl_version }}-linux-{{ etcd_backup_arch }}/{{ item }}"
+    dest: "/usr/local/bin/{{ item }}"
+    state: link
+  loop: [etcdctl, etcdutl]
+
+# node-exporter reads this directory through its read-only /host/root mount (monitoring role).
+- name: Create the node-exporter textfile directory
+  ansible.builtin.file:
+    path: "{{ node_textfile_dir }}"
+    state: directory
+    mode: "0755"
+    owner: root
+    group: root
+
+- name: Install the backup script
+  ansible.builtin.copy:
+    src: etcd-backup.sh
+    dest: "{{ etcd_backup_script }}"
+    mode: "0755"
+    owner: root
+    group: root
+
+- name: Install the backup service and timer
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "/etc/systemd/system/{{ item }}"
+    mode: "0644"
+    owner: root
+    group: root
+  loop:
+    - "{{ etcd_backup_unit }}.service"
+    - "{{ etcd_backup_unit }}.timer"
+  notify: Reload systemd
+
+- name: Apply unit changes before enabling the timer
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable and start the backup timer
+  ansible.builtin.systemd:
+    name: "{{ etcd_backup_unit }}.timer"
+    enabled: true
+    state: started
+
+- name: Find existing snapshots on the host mount
+  ansible.builtin.find:
+    paths: "{{ node_backup_dir }}"
+    patterns: "{{ etcd_backup_snapshot_glob }}"
+  register: etcd_backup_existing
+
+- name: Check for the metrics file
+  ansible.builtin.stat:
+    path: "{{ node_textfile_dir }}/{{ etcd_backup_metrics_file }}"
+  register: etcd_backup_metrics
+
+# Only on a fresh node (no snapshot, or no metric yet): keeps later runs unchanged and avoids a stale alert until the first tick.
+- name: Take the first snapshot
+  ansible.builtin.systemd:
+    name: "{{ etcd_backup_unit }}.service"
+    state: started
+  when: etcd_backup_existing.matched == 0 or not etcd_backup_metrics.stat.exists
+
+- name: Alert when snapshots stop reaching the host
+  kubernetes.core.k8s:
+    kubeconfig: "{{ etcd_backup_kubeconfig }}"
+    state: present
+    template: prometheusrule.yaml.j2
