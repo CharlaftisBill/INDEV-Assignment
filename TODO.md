@@ -28,6 +28,12 @@ Current milestone: **M10 — Final** · Last verified: 2026-11-20 final gate M9 
   - [ ] `scripts/hosts-entry.sh`: only flush the macOS DNS cache on macOS
   - [ ] README + `CLAUDE.md`: list host support (tested: Apple Silicon macOS; expected to work, untested: Linux, Intel macOS; unsupported: Windows without WSL2) and Linux install steps
   - [ ] Test on a Linux host if one is available; otherwise keep "untested" in the docs
+- [ ] **Host uninstall** (target: before M10). One command removes everything the project adds to the host.
+  - [ ] `scripts/hosts-entry.sh --remove`: delete the `# indev-k8s` line from `/etc/hosts` (sudo) and flush the DNS cache (macOS only)
+  - [ ] `make uninstall`: VM (`limactl delete`), hosts line, `.venv/`, `.ansible/`, `ansible/collections/`, `out/`, `backups/*` (keep `.gitkeep`), `git config --unset core.hooksPath`; asks before each destructive step
+  - [ ] `.secrets/` only with an explicit flag (`PURGE_SECRETS=1`), warning that a new CA then replaces the committed `certs/ca.crt` (B-037)
+  - [ ] Homebrew `lima` / `python@3.14` only with `PURGE_DEPS=1` (may be used by other projects); Linux: print the distro commands instead
+  - [ ] `.claude/settings.json`: `make uninstall` stays an ask (never pre-approved); README "Uninstall" section listing what is and isn't removed
 
 ## Bugs
 Index of all bugs (format and rules: `bug` skill). Short rows only; the report, root cause, fix and verification
