@@ -639,9 +639,343 @@ MANIFEST
   cleanup_5; trap - EXIT
 }
 
-check_6() { # Prometheus, Grafana, node + etcd alerts in Alertmanager
+# check_6 queries Prometheus and Alertmanager through the API-server service proxy (admin kubeconfig, no port-forward).
+# Test objects live in the role-owned monitoring namespace (labelled verify=check-6) and in verify-tmp; all are removed.
+CHECK6_NS=""
+cleanup_6() {
+  if [[ -n "$CHECK6_NS" ]]; then k delete pod,configmap -n "$CHECK6_NS" -l verify=check-6 --ignore-not-found --wait=false >/dev/null 2>&1; fi
+  k delete pod verify-netpol -n "$VERIFY_NS" --ignore-not-found --wait=false >/dev/null 2>&1
+  if [[ "$VERIFY_NS_CREATED" == 1 ]]; then k delete namespace "$VERIFY_NS" --ignore-not-found --wait=false >/dev/null 2>&1; fi
+  VERIFY_NS_CREATED=0
+}
+# svc_get <namespace> <service:port> <path>
+svc_get() { k get --raw "/api/v1/namespaces/$1/services/$2/proxy/$3" 2>&1; }
+# grafana_get <path> [password]: HTTPS via Lima :443 and Traefik, trusting only certs/ca.crt; the password goes to curl on stdin, never into argv or output.
+grafana_get() {
+  local path="$1" pw="${2:-}"
+  if [[ -n "$pw" ]]; then
+    printf 'user = "admin:%s"\n' "$pw" | curl -sS --max-time 10 -K - --resolve "$GRAFANA_HOST:443:127.0.0.1" --cacert "$CA_CERT" -w '\n%{http_code}' "https://$GRAFANA_HOST$path" 2>&1
+  else
+    curl -sS --max-time 10 --resolve "$GRAFANA_HOST:443:127.0.0.1" --cacert "$CA_CERT" -w '\n%{http_code}' "https://$GRAFANA_HOST$path" 2>&1
+  fi
+}
+
+check_6() { # Prometheus, Grafana, node + etcd alerts in Alertmanager (M6)
   need_cluster || return 0
-  skip "not implemented (M6)"
+  if ! command -v jq >/dev/null 2>&1; then fail "jq is required on the host for check_6"; return 0; fi
+  local vy="$ROOT/ansible/group_vars/all/versions.yml" main="$ROOT/ansible/group_vars/all/main.yml" role="$ROOT/ansible/roles/monitoring/defaults/main.yml"
+  local ns ne_ns rel gsecret gtls host issuer duration renew
+  ns="$(sed -n 's/^ns_monitoring:[[:space:]]*\([a-z-]*\).*/\1/p' "$main")"
+  host="$(sed -n 's/^grafana_hostname:[[:space:]]*\([a-z.-]*\).*/\1/p' "$main")"
+  issuer="$(sed -n 's/^pki_cluster_issuer:[[:space:]]*\([a-z-]*\).*/\1/p' "$main")"
+  duration="$(sed -n 's/^pki_cert_duration:[[:space:]]*\([0-9a-z]*\).*/\1/p' "$main")"
+  renew="$(sed -n 's/^pki_cert_renew_before:[[:space:]]*\([0-9a-z]*\).*/\1/p' "$main")"
+  ne_ns="$(sed -n 's/^monitoring_node_exporter_namespace:[[:space:]]*\([a-z-]*\).*/\1/p' "$role")"
+  rel="$(sed -n 's/^monitoring_release:[[:space:]]*\([a-z-]*\).*/\1/p' "$role")"
+  gsecret="$(sed -n 's/^monitoring_grafana_secret:[[:space:]]*\([a-z-]*\).*/\1/p' "$role")"
+  gtls="$(sed -n 's/^monitoring_grafana_tls_secret:[[:space:]]*\([a-z-]*\).*/\1/p' "$role")"
+  if [[ -z "$ns" || -z "$host" || -z "$issuer" || -z "$duration" || -z "$renew" || -z "$ne_ns" || -z "$rel" || -z "$gsecret" || -z "$gtls" ]]; then
+    fail "monitoring role defaults or group_vars keys not found"; return 0
+  fi
+  GRAFANA_HOST="$host"
+  local prom="$rel-prometheus:http-web" am="$rel-alertmanager:http-web"
+
+  # --- Workloads ready: operator, Grafana, kube-state-metrics, node-exporter, Prometheus, Alertmanager
+  local ready dep sts
+  for dep in operator grafana kube-state-metrics; do
+    ready="$(k get deployments "$rel-$dep" -n "$ns" -o jsonpath='{.spec.replicas} {.status.readyReplicas}' 2>&1)"
+    if [[ "$ready" =~ ^([1-9][0-9]*)\ \1$ ]]; then pass "Deployment $rel-$dep ready ($ready)"; else fail "Deployment $rel-$dep replicas/ready: $ready"; fi
+  done
+  ready="$(k get daemonsets "$rel-prometheus-node-exporter" -n "$ne_ns" -o jsonpath='{.status.desiredNumberScheduled} {.status.numberReady}' 2>&1)"
+  if [[ "$ready" =~ ^([1-9][0-9]*)\ \1$ ]]; then pass "DaemonSet node-exporter ready ($ready)"; else fail "DaemonSet node-exporter desired/ready: $ready"; fi
+  for sts in "prometheus-$rel-prometheus" "alertmanager-$rel-alertmanager"; do
+    ready="$(k get statefulsets "$sts" -n "$ns" -o jsonpath='{.spec.replicas} {.status.readyReplicas}' 2>&1)"
+    if [[ "$ready" =~ ^([1-9][0-9]*)\ \1$ ]]; then pass "StatefulSet $sts ready ($ready)"; else fail "StatefulSet $sts replicas/ready: $ready"; fi
+  done
+  local chart want_chart
+  want_chart="kube-prometheus-stack-$(pinned kube_prometheus_stack_chart_version)"
+  chart="$(k get deployments "$rel-operator" -n "$ns" -o jsonpath='{.metadata.labels.chart}' 2>&1)"
+  if [[ "$chart" == "$want_chart" ]]; then pass "chart is the pinned $want_chart"; else fail "chart '$chart' (want $want_chart)"; fi
+
+  # --- Hardening: PSA labels, digest-pinned images, requests, restricted-style security contexts
+  local mode label
+  for mode in enforce audit warn; do
+    label="$(k get namespaces "$ns" -o jsonpath="{.metadata.labels.pod-security\\.kubernetes\\.io/$mode}" 2>&1)"
+    if [[ "$label" == "restricted" ]]; then pass "$ns PSA $mode=restricted"; else fail "$ns PSA $mode='$label'"; fi
+  done
+  for mode in enforce audit warn; do
+    label="$(k get namespaces "$ne_ns" -o jsonpath="{.metadata.labels.pod-security\\.kubernetes\\.io/$mode}" 2>&1)"
+    if [[ "$label" == "privileged" ]]; then pass "$ne_ns PSA $mode=privileged (platform namespace: node-exporter needs hostNetwork/hostPID/hostPath)"; else fail "$ne_ns PSA $mode='$label'"; fi
+  done
+  local digests res n bad
+  digests="$(awk '/^monitoring_images:/ {f = 1; next} f && /^[^ ]/ {f = 0} f' "$vy" | grep -o 'sha256:[0-9a-f]\{64\}')"
+  if [[ -z "$digests" ]]; then fail "no monitoring image digests in versions.yml"; else
+    for n in "$ns" "$ne_ns"; do
+      res="$(images_unpinned "$n" "$digests")"; bad="${res#* }"; res="${res%% *}"
+      if [[ "$res" -gt 0 && -z "${bad// /}" ]]; then pass "all $res containers in $n run by pinned digest (spec image and imageID)"
+      else fail "$n not digest-pinned (n=$res): ${bad:-no containers}"; fi
+    done
+  fi
+  bad="$({ k get pods -n "$ns" -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.status.qosClass}{"\n"}{end}'; k get pods -n "$ne_ns" -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.status.qosClass}{"\n"}{end}'; } 2>&1 | awk 'NF && $2 == "BestEffort" {printf "%s ", $1}')"
+  if [[ -z "$bad" ]]; then pass "monitoring pods have resource requests"; else fail "BestEffort pods: $bad"; fi
+  bad="$(k get pods -n "$ns" -o json 2>&1 | jq -r '.items[] | .metadata.name as $p | .spec as $s
+    | ( [ ($s.containers + ($s.initContainers // []))[]
+          | select((.securityContext.runAsNonRoot == true or $s.securityContext.runAsNonRoot == true | not)
+                or (.securityContext.allowPrivilegeEscalation != false)
+                or (.securityContext.privileged == true)
+                or (((.securityContext.capabilities.drop // []) | index("ALL")) == null)
+                or ((.securityContext.seccompProfile.type // $s.securityContext.seccompProfile.type // "") != "RuntimeDefault")
+                or (.securityContext.readOnlyRootFilesystem != true))
+          | "\($p)/\(.name)" ]
+        + (if ($s.hostNetwork == true or $s.hostPID == true or $s.hostIPC == true) then ["\($p)/host-namespaces"] else [] end) )[]' | tr '\n' ' ')"
+  if [[ -z "${bad// /}" ]]; then pass "every $ns container: runAsNonRoot, no privilege escalation, drop ALL, seccomp RuntimeDefault, read-only rootfs; no host namespaces"
+  else fail "$ns containers not restricted-clean: $bad"; fi
+  # B-040: node-exporter needs host namespaces and mounts (PSA privileged) but nothing else: non-root, no new privileges, no capabilities, seccomp
+  bad="$(k get pods -n "$ne_ns" -o json 2>&1 | jq -r '.items[] | .metadata.name as $p | .spec as $s | $s.containers[]
+    | select((.securityContext.runAsNonRoot == true or $s.securityContext.runAsNonRoot == true | not)
+          or (.securityContext.allowPrivilegeEscalation != false)
+          or (.securityContext.privileged == true)
+          or (((.securityContext.capabilities.drop // []) | index("ALL")) == null)
+          or ((.securityContext.capabilities.add // []) | length > 0)
+          or ((.securityContext.seccompProfile.type // $s.securityContext.seccompProfile.type // "") != "RuntimeDefault")
+          or (.securityContext.readOnlyRootFilesystem != true))
+    | "\($p)/\(.name)"' 2>&1 | tr '\n' ' ')"
+  if [[ -z "${bad// /}" ]]; then pass "$ne_ns containers: runAsNonRoot, no privilege escalation, drop ALL (no added caps), seccomp RuntimeDefault, read-only rootfs"
+  else fail "$ne_ns containers not hardened: $bad"; fi
+
+  # --- Storage and sizing: Prometheus on a default-class PVC with retention limits; room left for the llama.cpp pod
+  local pvc; pvc="$(k get pvc -n "$ns" -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.spec.storageClassName}{" "}{.status.phase}{"\n"}{end}' 2>&1)"
+  if grep -Eq "^prometheus-$rel-prometheus-db-.* local-path Bound\$" <<<"$pvc"; then pass "Prometheus data is on a Bound local-path PVC"; else fail "Prometheus PVC: ${pvc:-none}"; fi
+  local ret; ret="$(k get prometheuses "$rel-prometheus" -n "$ns" -o jsonpath='{.spec.retention} {.spec.retentionSize}' 2>&1)"
+  if [[ "$ret" =~ ^[0-9]+[a-z]\ [0-9]+[A-Za-z]+$ ]]; then pass "Prometheus retention bounded by time and size ($ret)"; else fail "Prometheus retention/retentionSize: '$ret'"; fi
+  # B-042: query caps in the live Prometheus args, sized so concurrency x samples x bytes/sample fits the heap headroom under the memory limit
+  local qc qs qt qb qo qh qargs
+  qc="$(sed -n 's/^monitoring_query_max_concurrency:[[:space:]]*\([0-9]*\).*/\1/p' "$role")"
+  qs="$(sed -n 's/^monitoring_query_max_samples:[[:space:]]*\([0-9]*\).*/\1/p' "$role")"
+  qt="$(sed -n 's/^monitoring_query_timeout:[[:space:]]*\([0-9a-z]*\).*/\1/p' "$role")"
+  qb="$(sed -n 's/^monitoring_query_bytes_per_sample:[[:space:]]*\([0-9]*\).*/\1/p' "$role")"
+  qo="$(sed -n 's/^monitoring_query_overlap:[[:space:]]*\([0-9]*\).*/\1/p' "$role")"
+  qh="$(sed -n 's/^monitoring_query_headroom_mib:[[:space:]]*\([0-9]*\).*/\1/p' "$role")"
+  qargs="$(k get pod "prometheus-$rel-prometheus-0" -n "$ns" -o json 2>&1 | jq -r '[.spec.containers[] | select(.name == "prometheus") | .args[] | select(startswith("--query."))] | sort | join(" ")' 2>&1)"
+  if [[ -z "$qc" || -z "$qs" || -z "$qt" || -z "$qb" || -z "$qo" || -z "$qh" ]]; then fail "monitoring_query_* defaults not found in the monitoring role"
+  elif [[ "$qargs" != "--query.max-concurrency=$qc --query.max-samples=$qs --query.timeout=$qt" ]]; then fail "Prometheus query args '$qargs' differ from the role defaults (concurrency $qc, samples $qs, timeout $qt)"
+  elif [[ $((qc * qo * qs * qb)) -le $((qh * 1048576)) ]]; then pass "Prometheus query caps: $qc concurrent x $qo overlap x $qs samples x ${qb}B = $((qc * qo * qs * qb / 1048576))Mi <= ${qh}Mi heap headroom (timeout $qt)"
+  else fail "Prometheus query caps too loose: $qc x $qo x $qs x ${qb}B = $((qc * qo * qs * qb / 1048576))Mi > ${qh}Mi headroom (OOM risk)"; fi
+  local gogc want_gogc; want_gogc="$(sed -n 's/^monitoring_prometheus_gogc:[[:space:]]*\([0-9]*\).*/\1/p' "$role")"
+  gogc="$(k get pod "prometheus-$rel-prometheus-0" -n "$ns" -o json 2>&1 | jq -r '.spec.containers[] | select(.name == "prometheus") | .env[]? | select(.name == "GOGC") | .value' 2>&1)"
+  if [[ -n "$want_gogc" && "$gogc" == "$want_gogc" ]]; then pass "Prometheus runs with GOGC=$gogc (heap does not float up to the memory limit)"; else fail "Prometheus GOGC '$gogc' (want '$want_gogc')"; fi
+  local restarts; restarts="$(k get pod "prometheus-$rel-prometheus-0" -n "$ns" -o jsonpath='{.status.containerStatuses[?(@.name=="prometheus")].lastState.terminated.reason}' 2>&1)"
+  if [[ "$restarts" != "OOMKilled" ]]; then pass "Prometheus container was not OOMKilled"; else fail "Prometheus container last state: OOMKilled (raise the limit or lower the query caps)"; fi
+  # Budget (B-041): every container has a memory request and limit, and the sums stay under the caps that leave room for llama.cpp (M9)
+  local cap_req cap_lim mem
+  cap_req="$(sed -n 's/^monitoring_budget_requests_mib:[[:space:]]*\([0-9]*\).*/\1/p' "$role")"
+  cap_lim="$(sed -n 's/^monitoring_budget_limits_mib:[[:space:]]*\([0-9]*\).*/\1/p' "$role")"
+  mem="$({ k get pods -n "$ns" -o json; k get pods -n "$ne_ns" -o json; } 2>&1 | jq -rs '
+    def mib: if . == null then null elif test("Gi$") then (.[:-2] | tonumber * 1024) elif test("Mi$") then (.[:-2] | tonumber)
+      elif test("Ki$") then (.[:-2] | tonumber / 1024) elif test("G$") then (.[:-1] | tonumber * 953.67) elif test("M$") then (.[:-1] | tonumber * 0.9537)
+      elif test("^[0-9]+$") then (tonumber / 1048576) else null end;
+    [.[].items[].spec.containers[] | {n: .name, r: (.resources.requests.memory | mib), l: (.resources.limits.memory | mib)}] as $c
+    | "\([$c[] | select(.r == null or .l == null) | .n] | join(",")) \($c | map(.r // 0) | add | floor) \($c | map(.l // 0) | add | floor) \($c | length)"' 2>&1)"
+  if [[ -z "$cap_req" || -z "$cap_lim" ]]; then fail "monitoring_budget_*_mib not found in the monitoring role defaults"
+  elif [[ "$mem" =~ ^([^\ ]*)\ ([0-9]+)\ ([0-9]+)\ ([0-9]+)$ ]]; then
+    local unset_c="${BASH_REMATCH[1]}" sum_req="${BASH_REMATCH[2]}" sum_lim="${BASH_REMATCH[3]}" n_c="${BASH_REMATCH[4]}"
+    if [[ -z "$unset_c" ]]; then pass "all $n_c monitoring containers have memory requests and limits"; else fail "containers without a memory request or limit: $unset_c"; fi
+    if [[ "$sum_req" -le "$cap_req" && "$sum_lim" -le "$cap_lim" ]]; then pass "memory budget: requests ${sum_req}Mi <= ${cap_req}Mi, limits ${sum_lim}Mi <= ${cap_lim}Mi (leaves room for llama.cpp, M9)"
+    else fail "memory budget exceeded: requests ${sum_req}Mi (cap ${cap_req}Mi), limits ${sum_lim}Mi (cap ${cap_lim}Mi)"; fi
+  else fail "could not compute the memory budget: ${mem:0:200}"; fi
+
+  # --- Grafana credentials: Secret exists and is referenced by the Deployment (no plaintext); the host copy is private and only used to log in
+  local desc; desc="$(k describe secret "$gsecret" -n "$ns" 2>&1)"
+  if grep -q '^admin-password:' <<<"$desc" && grep -q '^admin-user:' <<<"$desc"; then pass "Secret $gsecret (admin-user, admin-password) exists in $ns"; else fail "Secret $gsecret missing or incomplete in $ns"; fi
+  local envref; envref="$(k get deployments "$rel-grafana" -n "$ns" -o json 2>&1 | jq -r '.spec.template.spec.containers[] | select(.name == "grafana") | .env[] | select(.name == "GF_SECURITY_ADMIN_PASSWORD") | "\(.valueFrom.secretKeyRef.name) \(.value // "no-plaintext")"' 2>&1)"
+  if [[ "$envref" == "$gsecret no-plaintext" ]]; then pass "Grafana takes the admin password from Secret $gsecret, not from a plaintext env value"; else fail "Grafana admin password env: '$envref'"; fi
+  local pwfile="$ROOT/.secrets/grafana-admin-password" fmode pw=""
+  fmode="$(stat -f '%Lp' "$pwfile" 2>/dev/null || stat -c '%a' "$pwfile" 2>/dev/null)"
+  if [[ -f "$pwfile" && "$fmode" == "600" ]]; then pass ".secrets/grafana-admin-password exists with mode 600"; else fail ".secrets/grafana-admin-password missing or mode '$fmode' (want 600)"; fi
+  if [[ -f "$pwfile" ]]; then pw="$(<"$pwfile")"; fi
+  # B-039: Grafana is reachable from the Mac; its ServiceAccount must not read the CA key or any other Secret
+  local gsa="system:serviceaccount:$ns:$rel-grafana" can_ns
+  for can_ns in cert-manager kube-system "$ns"; do
+    if [[ "$(k auth can-i get secrets -n "$can_ns" --as="$gsa" 2>&1)" == "no" ]]; then pass "Grafana ServiceAccount cannot get Secrets in $can_ns"
+    else fail "Grafana ServiceAccount can read Secrets in $can_ns"; fi
+  done
+  if [[ "$(k auth can-i list secrets --all-namespaces --as="$gsa" 2>&1)" == "no" ]]; then pass "Grafana ServiceAccount cannot list Secrets cluster-wide"; else fail "Grafana ServiceAccount can list Secrets cluster-wide"; fi
+  if [[ "$(k auth can-i list configmaps -n "$ns" --as="$gsa" 2>&1)" == "yes" ]]; then pass "Grafana ServiceAccount reads ConfigMaps in $ns (sidecar provisioning)"; else fail "Grafana ServiceAccount cannot list ConfigMaps in $ns"; fi
+  bad="$(k get deployments "$rel-grafana" -n "$ns" -o json 2>&1 | jq -r '[.spec.template.spec.containers[] | select(.name | startswith("grafana-sc-")) | select(([.env[] | select(.name == "RESOURCE" and .value == "configmap")] | length) != 1 or ([.env[] | select(.name == "NAMESPACE" and .value == "ALL")] | length) != 0) | .name] | join(" ")' 2>&1)"
+  if [[ -z "$bad" ]]; then pass "Grafana sidecars watch ConfigMaps only, not all namespaces"; else fail "Grafana sidecars not narrowed: $bad"; fi
+
+  # --- Scrape targets: every kubeadm control-plane component, kubelet, node-exporter and the stack itself, all UP
+  # A just-restarted Prometheus needs one scrape interval before every target reports: wait for that, not for a fix.
+  local targets tw; targets="$(svc_get "$ns" "$prom" api/v1/targets)"
+  for tw in $(seq 1 45); do
+    jq -e '[.data.activeTargets[] | select(.health != "up")] | length == 0' >/dev/null 2>&1 <<<"$targets" && break
+    sleep 2; targets="$(svc_get "$ns" "$prom" api/v1/targets)"
+  done
+  if ! jq -e '.status == "success"' >/dev/null 2>&1 <<<"$targets"; then fail "Prometheus targets API unreachable via the service proxy: ${targets:0:200}"; else
+    local job up_n
+    for job in kube-etcd node-exporter kubelet apiserver kube-controller-manager kube-scheduler kube-proxy kube-state-metrics coredns "$rel-prometheus" "$rel-alertmanager" "$rel-grafana" "$rel-operator" traefik; do
+      up_n="$(jq -r --arg j "$job" '[.data.activeTargets[] | select(.labels.job == $j and .health == "up")] | length' <<<"$targets")"
+      if [[ "$up_n" =~ ^[1-9][0-9]*$ ]]; then pass "target job $job: $up_n UP"; else fail "target job $job has no UP target"; fi
+    done
+    bad="$(jq -r '[.data.activeTargets[] | select(.health != "up") | "\(.labels.job)@\(.scrapeUrl) \(.lastError)"] | join("; ")' <<<"$targets")"
+    if [[ -z "$bad" ]]; then pass "no scrape target is down ($(jq '.data.activeTargets | length' <<<"$targets") active)"; else fail "targets not UP: ${bad:0:300}"; fi
+  fi
+
+  # --- Rules: node-health, etcd-health and Traefik alerts loaded and evaluating without errors
+  # Right after a Prometheus restart some groups (30d burn-rate rules) report health "unknown" until their first evaluation: wait for it.
+  local rules w; rules="$(svc_get "$ns" "$prom" api/v1/rules)"
+  for w in $(seq 1 90); do
+    jq -e '[.data.groups[].rules[] | select(.health == "unknown")] | length == 0' >/dev/null 2>&1 <<<"$rules" && break
+    sleep 2; rules="$(svc_get "$ns" "$prom" api/v1/rules)"
+  done
+  if ! jq -e '.status == "success"' >/dev/null 2>&1 <<<"$rules"; then fail "Prometheus rules API unreachable: ${rules:0:200}"; else
+    local alert
+    for alert in KubeNodeNotReady KubeNodeUnreachable KubeletDown NodeFilesystemAlmostOutOfSpace NodeClockNotSynchronising etcdMembersDown etcdNoLeader etcdInsufficientMembers TraefikDown TraefikIngressNotSynced Watchdog; do
+      if jq -e --arg a "$alert" '[.data.groups[].rules[] | select(.type == "alerting" and .name == $a)] | length > 0' >/dev/null <<<"$rules"; then pass "alert rule $alert loaded"; else fail "alert rule $alert not loaded"; fi
+    done
+    bad="$(jq -r '[.data.groups[] | .name as $g | .rules[] | select(.health != "ok" or ((.lastError // "") != "")) | "\($g)/\(.name)"] | join(" ")' <<<"$rules")"
+    if [[ -z "$bad" ]]; then pass "all $(jq '[.data.groups[].rules[]] | length' <<<"$rules") rules in $(jq '.data.groups | length' <<<"$rules") groups have health ok and no lastError"; else fail "rules unhealthy: ${bad:0:300}"; fi
+  fi
+
+  # --- Pipeline: Prometheus -> Alertmanager; the always-firing Watchdog proves delivery end to end
+  local ams i state="" phase="" out; ams="$(svc_get "$ns" "$prom" api/v1/alertmanagers)"
+  if [[ "$(jq -r '.data.activeAlertmanagers | length' 2>/dev/null <<<"$ams")" =~ ^[1-9] ]]; then pass "Prometheus has an active Alertmanager endpoint"; else fail "Prometheus sees no active Alertmanager: ${ams:0:200}"; fi
+  for i in $(seq 1 30); do
+    state="$(svc_get "$ns" "$am" api/v2/alerts | jq -r '[.[] | select(.labels.alertname == "Watchdog")] | .[0].status.state // "absent"' 2>/dev/null)"
+    [[ "$state" == "active" ]] && break; sleep 2
+  done
+  if [[ "$state" == "active" ]]; then pass "Alertmanager holds the Watchdog alert as active (Prometheus -> Alertmanager delivery works)"; else fail "Watchdog in Alertmanager: '${state:-unreachable}'"; fi
+
+  # --- Alerts fire: a real node or etcd failure cannot be provoked without disrupting the cluster, so promtool unit-tests the rule
+  # files Prometheus actually loaded (the operator's ConfigMap, not copies) in a throwaway pod (promtool needs a writable /tmp).
+  local img cmname; img="$(k get prometheuses "$rel-prometheus" -n "$ns" -o jsonpath='{.spec.image}' 2>&1)"
+  cmname="prometheus-$rel-prometheus-rulefiles-0"
+  CHECK6_NS="$ns"; trap cleanup_6 EXIT
+  k delete pod verify-promtool -n "$ns" --ignore-not-found --wait=true >/dev/null 2>&1
+  k delete configmap verify-promtool-tests -n "$ns" --ignore-not-found >/dev/null 2>&1
+  out="$(k create configmap verify-promtool-tests -n "$ns" --from-file=alert-tests.yaml="$ROOT/ansible/roles/monitoring/files/alert-tests.yaml" 2>&1 \
+    && k label configmap verify-promtool-tests -n "$ns" verify=check-6 2>&1 \
+    && k apply -f - 2>&1 <<MANIFEST
+apiVersion: v1
+kind: Pod
+metadata:
+  name: verify-promtool
+  namespace: $ns
+  labels: {verify: check-6}
+spec:
+  restartPolicy: Never
+  automountServiceAccountToken: false
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65534
+    runAsGroup: 65534
+    seccompProfile: {type: RuntimeDefault}
+  containers:
+    - name: promtool
+      image: $img
+      command: [promtool, test, rules, /tests/alert-tests.yaml]
+      resources:
+        requests: {cpu: 10m, memory: 64Mi}
+        limits: {memory: 256Mi}
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities: {drop: [ALL]}
+      volumeMounts:
+        - {name: tests, mountPath: /tests}
+        - {name: rules, mountPath: /etc/prometheus/rules/$cmname}
+        - {name: tmp, mountPath: /tmp}
+  volumes:
+    - {name: tests, configMap: {name: verify-promtool-tests}}
+    - {name: rules, configMap: {name: $cmname}}
+    - {name: tmp, emptyDir: {}}
+MANIFEST
+)"
+  if [[ $? -ne 0 ]]; then fail "could not create the promtool pod: ${out:0:300}"; else
+    for i in $(seq 1 60); do
+      phase="$(k get pod verify-promtool -n "$ns" -o jsonpath='{.status.phase}' 2>&1)"
+      [[ "$phase" == "Succeeded" || "$phase" == "Failed" ]] && break; sleep 2
+    done
+    out="$(k logs verify-promtool -n "$ns" 2>&1)"
+    if [[ "$phase" == "Succeeded" ]]; then pass "promtool: node (KubeNodeNotReady, NodeFilesystemAlmostOutOfSpace), etcd (NoLeader, InsufficientMembers, MembersDown) and Traefik alerts fire on failing input against the loaded rules"
+    else fail "promtool rule tests ($phase): $(tr '\n' ' ' <<<"${out:0:600}")"; fi
+  fi
+
+  # --- Grafana through Traefik over TLS from the internal CA, no anonymous access, Prometheus datasource healthy, default dashboards
+  local cert; cert="$(k get certificates "$gtls" -n "$ns" -o jsonpath='{.spec.issuerRef.name} {.spec.duration} {.spec.renewBefore} {.status.conditions[?(@.type=="Ready")].status}' 2>&1)"
+  if [[ "$cert" == "$issuer $duration $renew True" ]]; then pass "Certificate $gtls from $issuer is Ready (duration $duration, renewBefore $renew)"; else fail "Certificate $gtls: $cert"; fi
+  local resp code body
+  resp="$(grafana_get /api/health)"; code="${resp##*$'\n'}"; body="${resp%$'\n'*}"
+  if [[ "$code" == "200" && "$(jq -r '.database' 2>/dev/null <<<"$body")" == "ok" ]]; then pass "https://$host/api/health -> 200, database ok (chain verifies against certs/ca.crt, via Lima :443 and Traefik)"
+  else fail "https://$host/api/health: ${resp//$'\n'/ }"; fi
+  local vrc; vrc="$(openssl s_client -servername "$host" -connect 127.0.0.1:443 -CAfile "$CA_CERT" </dev/null 2>&1 | grep -m1 'Verify return code')"
+  if [[ "$vrc" == *"code: 0 (ok)"* ]]; then pass "openssl s_client verifies the Grafana chain against certs/ca.crt"; else fail "openssl s_client chain verification: ${vrc:-no result}"; fi
+  resp="$(grafana_get /api/org)"; code="${resp##*$'\n'}"
+  if [[ "$code" == "401" ]]; then pass "anonymous access is off (/api/org without credentials -> 401)"; else fail "anonymous /api/org -> $code (want 401)"; fi
+  if [[ -z "$pw" ]]; then fail "no Grafana admin password on the host: cannot log in"; else
+    resp="$(grafana_get /api/org "$pw")"; code="${resp##*$'\n'}"
+    if [[ "$code" == "200" ]]; then pass "admin login with the generated password works"; else fail "admin login -> $code"; fi
+    resp="$(grafana_get /api/datasources/uid/prometheus/health "$pw")"; code="${resp##*$'\n'}"; body="${resp%$'\n'*}"
+    if [[ "$code" == "200" && "$(jq -r '.status' 2>/dev/null <<<"$body")" == "OK" ]]; then pass "Grafana's Prometheus datasource is healthy"; else fail "datasource health ($code): ${body:0:200}"; fi
+    resp="$(grafana_get '/api/search?type=dash-db' "$pw")"; code="${resp##*$'\n'}"; body="${resp%$'\n'*}"
+    n="$(jq 'length' 2>/dev/null <<<"$body")"
+    if [[ "$code" == "200" && "$n" =~ ^[1-9][0-9]*$ ]]; then pass "$n default dashboards provisioned"; else fail "dashboards ($code): ${body:0:200}"; fi
+  fi
+
+  # --- NetworkPolicies: default-deny ingress+egress, enforced (a pod outside the namespace reaches CoreDNS metrics but not Prometheus)
+  local np; np="$(k get networkpolicies default-deny -n "$ns" -o jsonpath='{.spec.podSelector}{.spec.policyTypes}' 2>&1)"
+  if [[ "$np" == '{}["Ingress","Egress"]' ]]; then pass "$ns has a default-deny NetworkPolicy for ingress and egress"; else fail "$ns default-deny: $np"; fi
+  local prom_ip dns_ip busy
+  prom_ip="$(k get pod "prometheus-$rel-prometheus-0" -n "$ns" -o jsonpath='{.status.podIP}' 2>&1)"
+  dns_ip="$(k get pods -n kube-system -l k8s-app=kube-dns -o jsonpath='{.items[0].status.podIP}' 2>&1)"
+  busy="docker.io/library/busybox:$(pinned local_path_helper_version)@$(pinned local_path_helper_digest)"
+  wait_verify_ns_gone
+  VERIFY_NS_CREATED=0
+  if ! k get namespaces "$VERIFY_NS" >/dev/null 2>&1; then VERIFY_NS_CREATED=1; fi
+  out="$(k apply -f - 2>&1 <<MANIFEST
+apiVersion: v1
+kind: Namespace
+metadata: {name: $VERIFY_NS}
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: verify-netpol
+  namespace: $VERIFY_NS
+  labels: {verify: check-6}
+spec:
+  restartPolicy: Never
+  automountServiceAccountToken: false
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    seccompProfile: {type: RuntimeDefault}
+  containers:
+    - name: probe
+      image: $busy
+      command:
+        - sh
+        - -c
+        - "wget -T 3 -q -O /dev/null http://$dns_ip:9153/metrics && echo DNS_OPEN; wget -T 3 -q -O /dev/null http://$prom_ip:9090/-/ready && echo PROM_OPEN || echo PROM_BLOCKED"
+      resources:
+        requests: {cpu: 10m, memory: 8Mi}
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities: {drop: [ALL]}
+MANIFEST
+)"
+  if [[ $? -ne 0 ]]; then fail "could not create the NetworkPolicy probe pod: ${out:0:300}"; else
+    for i in $(seq 1 60); do
+      phase="$(k get pod verify-netpol -n "$VERIFY_NS" -o jsonpath='{.status.phase}' 2>&1)"
+      [[ "$phase" == "Succeeded" || "$phase" == "Failed" ]] && break; sleep 2
+    done
+    out="$(k logs verify-netpol -n "$VERIFY_NS" 2>&1 | tr '\n' ' ')"
+    if [[ "$out" == *DNS_OPEN* && "$out" == *PROM_BLOCKED* && "$out" != *PROM_OPEN* ]]; then pass "NetworkPolicy enforced: a pod outside $ns reaches CoreDNS but not Prometheus:9090"
+    else fail "NetworkPolicy probe ($phase): ${out:0:200}"; fi
+  fi
+  cleanup_6; trap - EXIT
 }
 
 check_7() { # scheduled etcd snapshots stored outside the cluster
