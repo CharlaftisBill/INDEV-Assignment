@@ -3,7 +3,7 @@
 Live project state and bug tracker. Agents read this first and update it last (protocol in `CLAUDE.md`).
 
 ## Status
-Current milestone: **M6 — monitoring** · Last verified: 2026-11-19 final gate M5 (`make idempotency` changed=0; 1: 17, 2: 20, 3a: 15, 4: 48, 5: 15, 8c: 8 PASS · 0 FAIL · 0 SKIP, strict) · Last SRE review: working tree 2026-11-19 — M5 r2 + B-038 re-check: clean
+Current milestone: **M7 — etcd_backup** · Last verified: 2026-11-19 final gate M6 (`make idempotency` changed=0; 1: 17, 2: 20, 3a: 15, 4: 48, 5: 15, 6: 73, 8c: 8 PASS · 0 FAIL · 0 SKIP, strict) · Last SRE review: working tree 2026-11-19 — M6 r2 + B-042 re-checks: B-042 holds, B-043 deferred to M10 (user)
 
 ## Milestones
 - [x] M0 Scaffolding: repo layout, agentic layer (`.claude/`), Makefile, lint configs, Lima config, docs skeleton, commit tooling (`split-commits` skill, `.githooks/commit-msg`)
@@ -14,7 +14,7 @@ Current milestone: **M6 — monitoring** · Last verified: 2026-11-19 final gate
 - [x] M4 `storage`: local-path-provisioner as default StorageClass (req 5)
 - [x] M5 `pki` + cert-manager + `ingress_traefik` (req 4)
   - Cross-role: `lima/k8s.yaml` (M1) forwards Mac 443→8443 and 80→8000 so Traefik stays non-root (B-009).
-- [ ] M6 `monitoring`: kube-prometheus-stack, node + etcd alerts, Grafana ingress (req 6)
+- [x] M6 `monitoring`: kube-prometheus-stack, node + etcd alerts, Grafana ingress (req 6)
 - [ ] M7 `etcd_backup`: systemd timer → host `./backups`, staleness alert (req 7)
 - [ ] M8 `hardening`: operator read-only role + kubeconfig (req 8a)
 - [ ] M9 `llm_app`: llama.cpp + model cache + NetworkPolicies + PSA-restricted namespace + TLS ingress (req 9, 3b, 8b)
@@ -73,6 +73,11 @@ for each bug are in [Bug details](#bug-details) below.
 | B-036 | [sec] Traefik (Mac-facing, hostNetwork) can read every Secret, including the CA key | Medium | Solved | M5 | 2026-11-19 | 2026-11-19 | e31f4da |
 | B-037 | [sre] Fresh clone (ca.crt committed, no key) pairs a new CA key with the old cert, reports success | High | Solved | M5 | 2026-11-19 | 2026-11-19 | 768ad66 |
 | B-038 | [sre] A deleted watched namespace (e.g. verify-tmp) blanks every Ingress on Traefik restart | Medium | Solved | M5 | 2026-11-19 | 2026-11-19 | e31f4da |
+| B-039 | [sec] Grafana (Mac-facing via Traefik) can read every Secret cluster-wide, including the CA key | Medium | Solved | M6 | 2026-11-19 | 2026-11-19 | 83e1d34 |
+| B-040 | [sec] node-exporter (hostPID, host / mounted) runs without no_new_privs, drop ALL or seccomp | Medium | Solved | M6 | 2026-11-19 | 2026-11-19 | 83e1d34 |
+| B-041 | [sre] Grafana undersized: 299Mi RSS at idle vs 384Mi limit, 128Mi request (OOMKill/eviction risk) | Medium | Solved | M6 | 2026-11-19 | 2026-11-19 | 83e1d34 |
+| B-042 | [sre] Concurrent heavy PromQL queries OOMKill Prometheus (no query sample or concurrency caps) | Medium | Solved | M6 | 2026-11-19 | 2026-11-19 | 83e1d34 |
+| B-043 | [sre] Parallel `/api/v1/series` over all series OOMKills Prometheus (bypasses the query caps) | Medium | Open | M10 | 2026-11-19 | | |
 
 ## Assumptions / open questions
 - Host is an Apple Silicon Mac → VM is Debian 13 **arm64** under Lima (vz). amd64 image is listed in `lima/k8s.yaml` for Intel hosts but untested. Linux hosts are planned (Backlog), Windows is out of scope (Ansible needs WSL2).
@@ -97,6 +102,14 @@ for each bug are in [Bug details](#bug-details) below.
 - Traefik RBAC is ours, not the chart's (B-036): Secrets readable only in `ingress_traefik_watched_namespaces` (llm, monitoring, `ingress-check`), which `ingress_traefik` creates (B-038: only role-owned namespaces nothing deletes; scratch `verify-tmp` is not watched, its stale Role is removed); M6/M9 roles add labels/policies on top, and a new Ingress namespace must be added to that list. `ingress-check` is check_4's namespace (PSA restricted, default-deny + node-IP /32 allow on 8080).
 - Traefik runs non-root on node ports 8443/8000 (Lima forwards Mac 443/80, B-009), Service disabled, IngressRoute CRDs skipped (Ingress provider only); internal ports: metrics 9101 (9100 is node-exporter's in M6), health/ping 9102 (avoids the common 8080). `check_4` renews a 1h Certificate (renewBefore 59m45s, cert-manager's minimum duration) to prove automatic renewal in seconds.
 - Req 3 "accept only the traffic they need" is read as traffic from other pods/networks; node-local traffic is always allowed (Kubernetes NetworkPolicy docs, Calico host→workload). Accepted (user, 2026-11-19; [ADR 0003](docs/decisions/0003-traefik-ingress.md)).
+- kube-prometheus-stack chart 92.18.0 (operator v0.94.2; 2026-11-04, newest >= 2 weeks old, 93.x is a newer major), release `kps` in `monitoring` (PSA restricted: the chart's contexts pass, read-only rootfs included), every image by digest. node-exporter runs in `node-exporter` (PSA privileged) through the subchart's `namespaceOverride`; scrape ports are the ones the kubeadm role binds to the node IP (etcd 2381, controller-manager 10257, scheduler 10259, kube-proxy 10249) plus node-exporter 9100 and Traefik 9101 (PodMonitor).
+- Operator webhook certificate: the chart's own cert-manager chain (self-signed), not `internal-ca`, whose name constraints (`DNS:local`) would reject `*.svc` names; `failurePolicy: Ignore` because the chart's own PrometheusRules are applied before the operator serves the webhook (strict mode failed the first install).
+- Footprint: Prometheus 5Gi local-path PVC, retention 3d / 3GB, memory limit 1280Mi with GOGC=50, queries capped (2 concurrent, 1.2M samples, 1m: 2 x 2 overlap x 1.2M x 100 B fits the ~500Mi heap headroom; wider ones fail with an error instead of OOM-killing it); `check_6` asserts the sum of container memory requests/limits stays under caps (1536Mi/3072Mi, role defaults) so M9's llama.cpp keeps >= 2.5 GiB. Alertmanager has no PVC (silences are lost on restart) and no receivers: alerts only need to fire in Alertmanager (PDF).
+- Grafana: admin password generated on the host by Ansible into `.secrets/grafana-admin-password` (0600, reused on rebuilds, never printed), loaded into Secret `grafana-admin` (chart `admin.existingSecret`); no anonymous access, no persistence (datasource and 27 default dashboards are provisioned), TLS Certificate `grafana-tls` from `internal-ca` with `pki_cert_duration`/`pki_cert_renew_before`, Ingress through Traefik only.
+- "Node and etcd alerts fire in Alertmanager" is read as: the chart's default node/etcd rules are loaded and healthy; the always-firing `Watchdog` reaches Alertmanager (live pipeline proof); and the alerts fire on failing input, proven by `promtool test rules` (`monitoring/files/alert-tests.yaml`, run by `check_6` in a throwaway pod against the rule files Prometheus loaded). A real node or etcd failure cannot be provoked within seconds without disrupting the cluster (`for:` is 1-20 min).
+- B-038 follow-up: `TraefikDown` (Traefik target absent/down) and `TraefikIngressNotSynced` (kube-state-metrics sees Ingresses with TLS but Traefik loaded no certificate, `traefik_tls_certs_not_after`); covers TLS Ingresses only, unit-tested with promtool.
+- `monitoring` NetworkPolicies: default-deny, DNS, then one policy per component; hostNetwork peers (API server on :6443 after DNAT, kubelet, etcd, node-exporter, Traefik, apiserver proxy) are `ipBlock` node-IP /32 (ADR 0003). `check_6` proves enforcement with a probe pod outside the namespace. `check_6` needs `jq` on the host.
+- **Accepted risk (user, 2026-11-19, B-043, deferred to M10):** heavy parallel `/api/v1/series` calls over all series can OOMKill Prometheus (query caps don't cover that path). Reason: only an admin with a port-forward or the API proxy can send them, Prometheus restarts in seconds with its TSDB intact; PromQL load is bounded (B-042). Fix at M10.
 - **Accepted risk (user, 2026-11-18, B-026):** runc stays Debian trixie's `1.1.15` (EOL upstream, no fix for the Nov-2025 container-escape CVEs 2025-31133/52565/52881; trixie has no newer build). Reason: single-user local VM running only our own workloads, which are PSA `restricted`. Revisit if trixie-security ships a fixed runc, or before any shared/production use.
 
 ## Bug details
@@ -326,3 +339,32 @@ Max 5 lines per bug (heading + up to 4 one-line bullets, ~200 chars each). Full 
 - **Root cause:** Traefik watched scratch ns verify-tmp; deleting it removed its Role, so after a restart the provider's lists were forbidden and it never synced.
 - **Fix:** watch only role-owned llm, monitoring, `ingress-check` (check_4's own ns, never deleted); stale verify-tmp Role removed; role + check_4 assert a Role/RoleBinding per watched ns, no `forbidden` in logs.
 - **Verification:** verify-tmp deleted + Traefik restarted → `make verify REQ=4 STRICT=1` 48 PASS (twice); idempotency changed=0. Runbook line + M6 Ingress-probe alert: docs pass / M6.
+
+### B-039: [sec] Grafana (Mac-facing via Traefik) can read every Secret cluster-wide, including the CA key
+- **Report** (sec M6 r1): ClusterRole `kps-grafana-clusterrole` grants secrets get/list/watch (sidecars `NAMESPACE=ALL`); `can-i list secrets -n cert-manager` as `kps-grafana` = yes; token in grafana too.
+- **Root cause:** the chart's Grafana RBAC grants configmaps and secrets (ClusterRole when sidecars search ALL namespaces); sidecars defaulted to `resource: both`.
+- **Fix:** chart RBAC off; own Role/RoleBinding (`grafana-rbac.yaml.j2`) for ConfigMaps in `monitoring`; sidecars `resource: configmap`, `searchNamespace: monitoring`.
+- **Verification:** `can-i get/list secrets` as `kps-grafana` = no (cert-manager, kube-system, monitoring, cluster-wide); check_6 asserts it; 27 dashboards, datasource healthy; `make verify REQ=6 STRICT=1` 68 PASS.
+
+### B-040: [sec] node-exporter (hostPID, host / mounted) runs without no_new_privs, drop ALL or seccomp
+- **Report** (sec M6 r1): container securityContext only `readOnlyRootFilesystem`; live `/proc/PID/status` NoNewPrivs 0, Seccomp 0, default CapBnd; host setuid sudo/su/mount under /host/root.
+- **Root cause:** the node-exporter subchart's default `containerSecurityContext` only sets `readOnlyRootFilesystem`; the pod context has no seccomp.
+- **Fix:** values set `allowPrivilegeEscalation: false`, drop ALL and seccomp RuntimeDefault (pod + container), read-only rootfs kept; host namespaces/mounts unchanged (PSA privileged).
+- **Verification:** live container context shows the fields; node-exporter target UP, 24 filesystem series; check_6 asserts them; `make verify REQ=6 STRICT=1` 69 PASS; idempotency changed=0.
+
+### B-041: [sre] Grafana undersized: 299Mi RSS at idle vs 384Mi limit, 128Mi request (OOMKill/eviction risk)
+- **Report** (sre M6 r1): `container_memory_rss` after start: grafana 299Mi (request 128Mi, limit 384Mi), each sidecar 76Mi (request 48Mi); query load adds heap.
+- **Root cause:** requests/limits were guessed, not measured; after B-039 the sidecars still use ~78Mi each and Grafana 282Mi idle (366Mi after a verify run).
+- **Fix:** grafana 320Mi/640Mi, sidecars 96Mi/160Mi, prometheus 512Mi, reloaders 24Mi, alertmanager 48Mi; check_6 asserts sums under caps in role defaults (requests 1536Mi, limits 3072Mi) instead of live MemAvailable.
+- **Verification:** requests 1256Mi, limits 2624Mi, all 10 containers sized; `make verify REQ=6 STRICT=1` 70 PASS; idempotency changed=0.
+
+### B-042: [sre] Concurrent heavy PromQL queries OOMKill Prometheus (no query sample or concurrency caps)
+- **Report** (sre M6 r3, reopened twice): 8 parallel wide `{__name__=~".+"}` ranges OOMKill Prometheus (137); caps 4 x 5M, then 4 x 1.5M at a 1Gi limit, still died (4 parallel peaked at 1002/1024Mi).
+- **Root cause:** caps not sized to memory: wide raw results cost ~85 B/sample per in-flight query, JSON encoding overlaps queued queries, and GOGC=100 floats the heap to ~2x its ~600Mi live set.
+- **Fix:** limit 1280Mi, GOGC=50, `query` concurrency 2 / maxSamples 1.2M / 1m; defaults hold 100 B/sample, overlap 2, headroom 500Mi; check_6 asserts the product, GOGC and no OOMKilled; Grafana request 384Mi.
+- **Verification:** warm pod, 8 wide at 1.18M: anon 891Mi, current 1078Mi (84%); 8 count-by 876Mi; 16 wide: anon 1072Mi, no OOM; restarts 0; 252 rules ok; verify 6 73 PASS. (1.5M reached 94%.)
+
+### B-043: [sre] Parallel `/api/v1/series` over all series OOMKills Prometheus (bypasses the query caps)
+- **Report** (sre M6 B-042 r3): 16 parallel `series?match[]={__name__=~".+"}` (3d, 147k series, 47MB each) OOMKilled Prometheus twice; 8 peaked 1255/1280Mi. `--query.*` caps skip this path.
+- **Deferred to M10** (user, 2026-11-19): accepted risk until then, see Assumptions.
+- **Direction:** bound the series/labels path (Grafana datasource `seriesLimit`, document admin-only `limit=`) and size the limit/headroom for it; add the shape to the B-042 load test.
