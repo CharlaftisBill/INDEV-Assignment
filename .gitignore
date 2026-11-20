@@ -15,6 +15,7 @@ ansible/collections/
 
 # Python / editors / OS
 .venv/
+.tools/
 __pycache__/
 .DS_Store
 .vscode/
