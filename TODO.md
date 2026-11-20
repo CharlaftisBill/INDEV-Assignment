@@ -3,7 +3,7 @@
 Live project state and bug tracker. Agents read this first and update it last (protocol in `CLAUDE.md`).
 
 ## Status
-Current milestone: **M10 — Final** · Last verified: 2026-11-20 final gate M9 (`make idempotency` changed=0; 1: 17, 2: 20, 3a: 15, 3b: 18, 4: 48, 5: 15, 6: 73, 7: 23, 8a: 35, 8b: 19, 8c: 8, 9: 17 PASS · 0 FAIL · 0 SKIP, strict) · Last SRE review: working tree 2026-11-20 — M9 r1 B-044, r2 B-045, targeted re-check (user-approved): clean
+Current milestone: **M10 — Final** · Last verified: 2026-11-20 final gate M9 (`make idempotency` changed=0; 1: 17, 2: 20, 3a: 15, 3b: 18, 4: 48, 5: 15, 6: 73, 7: 23, 8a: 35, 8b: 19, 8c: 8, 9: 17 PASS · 0 FAIL · 0 SKIP, strict) · Last SRE review: working tree 2026-11-20 — chore/make-bootstrap r2: clean
 
 ## Milestones
 - [x] M0 Scaffolding: repo layout, agentic layer (`.claude/`), Makefile, lint configs, Lima config, docs skeleton, commit tooling (`split-commits` skill, `.githooks/commit-msg`)
@@ -21,19 +21,21 @@ Current milestone: **M10 — Final** · Last verified: 2026-11-20 final gate M9 
 - [ ] M10 Final (all IDs: 1 2 3a 3b 4 5 6 7 8a 8b 8c 9): `make e2e` from a destroyed VM, full security review, docs pass (Backlog items marked "before M10" must be done first)
 
 ## Backlog
-- [ ] **Linux host support** (target: before M10). Today the host side is Mac-only; everything inside the VM is already portable.
+- [x] **Make-only bootstrap + host uninstall** (2026-11-20, `chore/make-bootstrap`, [ADR 0012](docs/decisions/0012-host-toolchain.md)). Replaces the "Host uninstall" item; only `make` is needed on the host.
+  - [x] `make doctor` (read-only, OK / MISSING / WRONG VERSION + fix); quiet subset before `make verify` and `make e2e`
+  - [x] `make deps`: pinned, sha256-checked Python 3.14, kubectl v1.35, jq, Lima 2.3.0, shellcheck in `.tools/` (pins: `host_*` in `versions.yml`); idempotent; sudo steps shown and asked
+  - [x] `make uninstall` (asks per step, `DRY_RUN=1`, `.secrets/` only with `PURGE_SECRETS=1` + B-037 warning), `scripts/hosts-entry.sh --remove`, system changes only from `.tools/system-manifest`. `PURGE_DEPS` dropped: make no longer installs Homebrew packages
+  - [x] `.claude/settings.json`: `make doctor` allowed; `make deps`, `make uninstall` ask. README "Host installation" + "Uninstall"
+  - Cross-cutting: the Makefile names directly exec'd tools by path (GNU make 3.81 ignores the exported PATH there, so `make lint`/`collections` could hit Homebrew copies). `scripts/verify.sh`: shellcheck fixes, no behaviour change (shellcheck now always runs in `make lint`)
+  - Checked on this Mac: `make lint` clean; `make deps` twice (2nd installs nothing; the sudo hosts step is re-offered while declined); fresh copy with PATH=/usr/bin:/bin → deps + lint OK; VM restarted by the repo-local `limactl`; `make verify REQ=1 STRICT=1` 17 PASS
+  - Follow-ups (M10): `.SHELLFLAGS` (`-eu -o pipefail`) is ignored by GNU make 3.81, so recipes run without pipefail on macOS; `check_9` requires 0 llama.cpp restarts and fails after any VM reboot (restartCount 2 after two restarts)
+- [ ] **Linux host support** (target: before M10). Host tooling is OS-aware since the bootstrap above; the VM config is still Mac-only.
   - [ ] `lima/k8s.yaml`: drop the hard-coded `vmType: vz` and `mountType: virtiofs` so Lima picks its default (vz on macOS, qemu on Linux)
-  - [ ] `Makefile` `deps`: detect the OS; Homebrew on macOS, distro packages / Lima release binary on Linux
-  - [ ] Port 443 on Linux: unprivileged users can't bind ports < 1024, so Lima can't forward 443. Add a Makefile preflight that checks `net.ipv4.ip_unprivileged_port_start` and prints the `sysctl` fix
-  - [ ] `scripts/hosts-entry.sh`: only flush the macOS DNS cache on macOS
-  - [ ] README + `CLAUDE.md`: list host support (tested: Apple Silicon macOS; expected to work, untested: Linux, Intel macOS; unsupported: Windows without WSL2) and Linux install steps
+  - [x] `make deps` detects OS/arch; Lima release binary on both, QEMU distro packages on Linux (asked, recorded in the manifest)
+  - [x] Port 443 on Linux: `make doctor` checks `net.ipv4.ip_unprivileged_port_start`; `make deps` offers the sysctl (asked), uninstall reverts it
+  - [x] `scripts/hosts-entry.sh`: only flush the macOS DNS cache on macOS
+  - [ ] README + `CLAUDE.md`: host support listed in README; Linux install steps once `lima/k8s.yaml` is portable
   - [ ] Test on a Linux host if one is available; otherwise keep "untested" in the docs
-- [ ] **Host uninstall** (target: before M10). One command removes everything the project adds to the host.
-  - [ ] `scripts/hosts-entry.sh --remove`: delete the `# indev-k8s` line from `/etc/hosts` (sudo) and flush the DNS cache (macOS only)
-  - [ ] `make uninstall`: VM (`limactl delete`), hosts line, `.venv/`, `.ansible/`, `ansible/collections/`, `out/`, `backups/*` (keep `.gitkeep`), `git config --unset core.hooksPath`; asks before each destructive step
-  - [ ] `.secrets/` only with an explicit flag (`PURGE_SECRETS=1`), warning that a new CA then replaces the committed `certs/ca.crt` (B-037)
-  - [ ] Homebrew `lima` / `python@3.14` only with `PURGE_DEPS=1` (may be used by other projects); Linux: print the distro commands instead
-  - [ ] `.claude/settings.json`: `make uninstall` stays an ask (never pre-approved); README "Uninstall" section listing what is and isn't removed
 
 ## Bugs
 Index of all bugs (format and rules: `bug` skill). Short rows only; the report, root cause, fix and verification
@@ -86,6 +88,8 @@ for each bug are in [Bug details](#bug-details) below.
 | B-043 | [sre] Parallel `/api/v1/series` over all series OOMKills Prometheus (bypasses the query caps) | Medium | Open | M10 | 2026-11-19 | | |
 | B-044 | [sec] Running llama-server keeps HTTPS egress to any public IP (model-download allow is pod-wide) | Medium | Solved | M9 | 2026-11-19 | 2026-11-19 | 7a4808b |
 | B-045 | [sre] Model-fetch gate trusts the PVC annotation, not the file: a lost model is never re-fetched | Medium | Solved | M9 | 2026-11-19 | 2026-11-19 | 7a4808b |
+| B-046 | [sec] `.venv` installs the latest pip and unpinned, unhashed transitive deps (only 3 top-level pins) | Medium | Solved | M10 | 2026-11-20 | 2026-11-20 | 08e4e82 |
+| B-047 | [sre] `make uninstall` never reverts the Linux sysctl: its confirm reads the manifest, not the tty | Medium | Solved | M10 | 2026-11-20 | 2026-11-20 | 7a5d91b |
 
 ## Assumptions / open questions
 - Host is an Apple Silicon Mac → VM is Debian 13 **arm64** under Lima (vz). amd64 image is listed in `lima/k8s.yaml` for Intel hosts but untested. Linux hosts are planned (Backlog), Windows is out of scope (Ansible needs WSL2).
@@ -398,3 +402,15 @@ Max 5 lines per bug (heading + up to 4 one-line bullets, ~200 chars each). Full 
 - **Root cause:** the Job gate was a PVC annotation, which survives an etcd restore or a lost/damaged file; the Job was skipped and the pod sat in `Init:Error`. Job failures were also only caught by the 900 s wait.
 - **Fix:** gate on the file (PV `hostPath.path` + sha256 `stat` on the node, annotation dropped); Job polled for Complete/Failed, fails with its message; llama.cpp pods restarted after a fetch.
 - **Verification:** model file renamed on the node (annotation matched, Init:Error): old gate skips; new role refetched, pod Ready; verify 3b/8b/9 PASS; idempotency changed=0 (role, bare).
+
+### B-046: [sec] `.venv` installs the latest pip and unpinned, unhashed transitive deps (only 3 top-level pins)
+- **Report** (sec make-bootstrap r1): `Makefile:111` `--upgrade pip` (latest); `requirements.txt` pins 3 packages, no hashes; transitive deps float, run on the host beside `.secrets/`.
+- **Root cause:** `requirements.txt` held only the 3 top-level pins and the venv recipe ran `pip install --upgrade pip`, so pip and 26 transitive packages resolved to whatever was newest.
+- **Fix:** top-level pins moved to `requirements.in`; `requirements.txt` is a pip-compile hash lock (29 pkgs, versions = the verified venv); `pip install --require-hashes --only-binary=:all:`, bundled pip, no upgrade.
+- **Verification:** venv rebuilt (pip 26.2.2, `pip check` OK); wheels hashed for macOS arm64 + Linux arm64/amd64 (PyPI); `make idempotency` changed=0; all 12 IDs strict PASS; sec re-check: resolved.
+
+### B-047: [sre] `make uninstall` never reverts the Linux sysctl: its confirm reads the manifest, not the tty
+- **Report** (sre make-bootstrap r1): `while read … done < <(awk … manifest)` takes stdin, so `confirm` skips on a real tty (pty repro); `.tools/` removal then deletes the manifest: sysctl stays at 80, unrecorded.
+- **Root cause:** the sysctl prompts ran inside `while read ... done < <(awk ... manifest)`, so `confirm` saw the manifest as stdin (no tty) and skipped; the `.tools/` step then deleted the manifest.
+- **Fix:** entries collected into an array first, prompts run outside the redirect; `step` sets `STEP_DONE`; a kept package/sysctl entry makes the `.tools/` step keep `system-manifest`.
+- **Verification:** pty driver, fake sudo, scratch copy: old script skips + deletes manifest; new: y reverts, n keeps manifest; no tty and DRY_RUN fine; lint clean; verify 1 strict PASS.

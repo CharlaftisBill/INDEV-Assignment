@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SC2329: check_<id> and helpers are called indirectly by ID. SC2181: `out=$(cmd); if [[ $? -ne 0 ]]` keeps the output for the message.
+# shellcheck disable=SC2329,SC2181
 # Requirement checks for the INDEV single-node Kubernetes assignment.
 #   scripts/verify.sh            # all requirements
 #   scripts/verify.sh 4 8c       # requirement 4 and sub-requirement 8c (3 = 3a 3b, 8 = 8a 8b 8c)
@@ -57,7 +59,7 @@ check_1() { # OS preparation, containerd, pinned packages
   local key
   for key in net.bridge.bridge-nf-call-iptables net.bridge.bridge-nf-call-ip6tables net.ipv4.ip_forward; do
     if [[ "$(node sysctl -n "$key" 2>&1)" == "1" ]]; then pass "sysctl $key = 1"; else fail "sysctl $key != 1"; fi
-    if node grep -rqE "^$key[[:space:]]*=[[:space:]]*1\$" /etc/sysctl.d/; then pass "sysctl $key persisted"; else fail "sysctl $key not persisted in /etc/sysctl.d"; fi
+    if node grep -rqE "^${key}[[:space:]]*=[[:space:]]*1\$" /etc/sysctl.d/; then pass "sysctl $key persisted"; else fail "sysctl $key not persisted in /etc/sysctl.d"; fi
   done
 
   local holds pkg; holds="$(node apt-mark showhold 2>&1)"
@@ -216,7 +218,7 @@ check_3a() { # CNI installed and healthy (M3): Calico via tigera-operator, node 
 # llm_app values from the role defaults / group_vars (single source of truth): sets the LLM_* globals used by checks 3b, 8b and 9.
 llm_vars() {
   local d="$ROOT/ansible/roles/llm_app/defaults/main.yml" main="$ROOT/ansible/group_vars/all/main.yml" vy="$ROOT/ansible/group_vars/all/versions.yml"
-  local dv; dv() { sed -n "s/^llm_app_$1:[[:space:]]*\\([^ #]*\\).*/\\1/p" "$d"; }
+  dv() { sed -n "s/^llm_app_$1:[[:space:]]*\\([^ #]*\\).*/\\1/p" "$d"; }
   LLM_NS="$(sed -n 's/^ns_llm:[[:space:]]*\([a-z-]*\).*/\1/p' "$main")"
   LLM_NAME="$(dv name)"; LLM_PORT="$(dv port)"; LLM_UID="$(dv uid)"; LLM_MODEL_DIR="$(dv model_dir)"
   LLM_MODEL_PVC="$(dv model_pvc)"; LLM_TLS_SECRET="$(dv tls_secret)"; LLM_MODEL_ALIAS="$(dv model_alias)"
@@ -466,7 +468,7 @@ check_4() { # Ingress (Traefik) + TLS from the internal CA (cert-manager) + auto
   # --- Traefik: ready, host network, non-root, no added capabilities, digest-pinned, no NodePort/LoadBalancer, default IngressClass
   ready="$(k get deployments traefik -n "$tr_ns" -o jsonpath='{.spec.replicas} {.status.readyReplicas}' 2>&1)"
   if [[ "$ready" =~ ^([1-9][0-9]*)\ \1$ ]]; then pass "Deployment traefik ready ($ready)"; else fail "Deployment traefik replicas/ready: $ready"; fi
-  local want_tr_chart="traefik-$(pinned traefik_chart_version)"
+  local want_tr_chart; want_tr_chart="traefik-$(pinned traefik_chart_version)"
   chart="$(k get deployments traefik -n "$tr_ns" -o jsonpath='{.metadata.labels.helm\.sh/chart}' 2>&1)"
   if [[ "$chart" == "$want_tr_chart" ]]; then pass "Traefik chart is the pinned $want_tr_chart"; else fail "Traefik chart '$chart' (want $want_tr_chart)"; fi
   local pod_ready; pod_ready="$(k get pods -n "$tr_ns" -l app.kubernetes.io/name=traefik -o jsonpath='{range .items[*]}{.status.phase} {.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}' 2>&1)"
@@ -510,7 +512,7 @@ check_4() { # Ingress (Traefik) + TLS from the internal CA (cert-manager) + auto
   if [[ "$forbidden" == 0 ]]; then pass "no 'forbidden' errors in the Traefik log (Ingress provider can list its namespaces)"; else fail "$forbidden 'forbidden' lines in the Traefik log (RBAC gap, provider not synced?)"; fi
   local p listen; listen="$(node ss -H -ltn 2>&1)"
   for p in "$https_port" "$http_port"; do
-    if grep -Eq "[:*]$p[[:space:]]" <<<"$listen"; then pass "node listens on :$p (Lima forwards it)"; else fail "nothing listens on :$p on the node"; fi
+    if grep -Eq "[:*]${p}[[:space:]]" <<<"$listen"; then pass "node listens on :$p (Lima forwards it)"; else fail "nothing listens on :$p on the node"; fi
   done
 
   # --- End to end through the Mac's :443/:80: non-root backend, Ingress without ingressClassName, cert from the internal CA
@@ -956,8 +958,8 @@ check_6() { # Prometheus, Grafana, node + etcd alerts in Alertmanager (M6)
 
   # --- Scrape targets: every kubeadm control-plane component, kubelet, node-exporter and the stack itself, all UP
   # A just-restarted Prometheus needs one scrape interval before every target reports: wait for that, not for a fix.
-  local targets tw; targets="$(svc_get "$ns" "$prom" api/v1/targets)"
-  for tw in $(seq 1 45); do
+  local targets; targets="$(svc_get "$ns" "$prom" api/v1/targets)"
+  for _ in $(seq 1 45); do
     jq -e '[.data.activeTargets[] | select(.health != "up")] | length == 0' >/dev/null 2>&1 <<<"$targets" && break
     sleep 2; targets="$(svc_get "$ns" "$prom" api/v1/targets)"
   done
@@ -973,8 +975,8 @@ check_6() { # Prometheus, Grafana, node + etcd alerts in Alertmanager (M6)
 
   # --- Rules: node-health, etcd-health and Traefik alerts loaded and evaluating without errors
   # Right after a Prometheus restart some groups (30d burn-rate rules) report health "unknown" until their first evaluation: wait for it.
-  local rules w; rules="$(svc_get "$ns" "$prom" api/v1/rules)"
-  for w in $(seq 1 90); do
+  local rules; rules="$(svc_get "$ns" "$prom" api/v1/rules)"
+  for _ in $(seq 1 90); do
     jq -e '[.data.groups[].rules[] | select(.health == "unknown")] | length == 0' >/dev/null 2>&1 <<<"$rules" && break
     sleep 2; rules="$(svc_get "$ns" "$prom" api/v1/rules)"
   done
@@ -1147,7 +1149,7 @@ check_7() { # scheduled etcd snapshots stored outside the cluster (M7, B-010)
   if [[ -z "$bdir" || -z "$keep" || -z "$ns" || -z "$stale" || -z "$glob" || -z "$unit" || -z "$script" || -z "$fstype" || -z "$rule" ]]; then
     fail "etcd_backup defaults or group_vars keys not found"; return 0
   fi
-  local hstat; hstat() { stat -f '%z %m' "$1" 2>/dev/null || stat -c '%s %Y' "$1" 2>/dev/null; } # size mtime (BSD, then GNU)
+  hstat() { stat -f '%z %m' "$1" 2>/dev/null || stat -c '%s %Y' "$1" 2>/dev/null; } # size mtime (BSD, then GNU)
 
   # --- Timer and unit
   if [[ "$(node systemctl is-active "$unit.timer" 2>&1)" == "active" ]]; then pass "$unit.timer is active"; else fail "$unit.timer is not active"; fi
@@ -1387,7 +1389,6 @@ check_8b() { # app workloads cannot run as root / privileged: PSA restricted on 
   done
 
   # --- the API server rejects root / privileged / host pods in the namespace (server-side dry run: nothing is created)
-  local pod_yaml
   pod_yaml() { # <name> <extra pod-spec line, may be empty> <container securityContext>
     cat <<MANIFEST
 apiVersion: v1

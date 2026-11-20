@@ -1,0 +1,6 @@
+# Top-level host Python tooling; requirements.txt is the hash lock generated from it (B-046).
+# Python 3.14: ansible-core 2.21 supports Python up to 3.14 (Homebrew builds
+# its ansible/ansible-lint on 3.15, which is unsupported, see B-001).
+ansible-core==2.21.6
+ansible-lint==26.10.1
+yamllint==1.38.0
