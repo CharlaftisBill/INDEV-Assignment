@@ -2,7 +2,7 @@
 #   make vm-up   (adds the ./backups mount with an absolute path, then starts the VM)
 # Spec from the assignment: 4 vCPU, 8 GB RAM, 40 GB disk, Debian 13 (trixie).
 ---
-vmType: vz             # Apple Virtualization.framework (Apple Silicon, macOS 13+)
+# vmType and mountType unset: Lima picks vz + virtiofs on macOS, qemu + 9p on Linux.
 cpus: 4
 memory: 8GiB
 disk: 40GiB
@@ -26,7 +26,6 @@ containerd:
 # No home-directory mount. The only mount (./backups -> /mnt/host-backups,
 # writable) is injected by the Makefile so it can use an absolute path.
 mounts: []
-mountType: virtiofs
 
 ssh:
   localPort: 0
