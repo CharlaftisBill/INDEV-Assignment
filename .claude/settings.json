@@ -10,6 +10,7 @@
   "permissions": {
     "allow": [
       "Bash(make help)",
+      "Bash(make doctor)",
       "Bash(make lint)",
       "Bash(make check)",
       "Bash(make verify)",
@@ -138,6 +139,12 @@
       "Bash(make vm-destroy)",
       "Bash(make vm-down)",
       "Bash(make e2e)",
+      "Bash(make deps*)",
+      "Bash(make uninstall*)",
+      "Bash(*host-tools.sh deps*)",
+      "Bash(*host-tools.sh uninstall*)",
+      "Bash(*hosts-entry.sh --apply*)",
+      "Bash(*hosts-entry.sh --remove*)",
       "Bash(limactl delete:*)",
       "Bash(limactl stop:*)",
       "Bash(kubectl --kubeconfig out/admin.conf delete:*)",

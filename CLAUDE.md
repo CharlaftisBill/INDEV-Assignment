@@ -22,7 +22,7 @@ The assignment is `k8s-single-node-assignment.pdf`. Project state and bugs: **`T
 - Host-forwarded ports: Mac 443, 80, 6443 only (443/80 map to Traefik's 8443/8000 in the VM). `/etc/hosts` on the Mac maps `llm.local grafana.local` to 127.0.0.1 (`scripts/hosts-entry.sh`).
 
 ## Commands
-- `make help` · `make deps` · `make tools` (pinned `.venv` on Python 3.14 + collections; all make targets use it — run ansible/ansible-lint outside make via `source .venv/bin/activate`, never Homebrew's copies) · `make vm-up` / `vm-down` / `vm-reset` (destructive) / `vm-shell`
+- `make help` · `make doctor` (read-only host check) · `make deps` (pinned Python/kubectl/jq/Lima/shellcheck into `.tools/`, `.venv`, collections; asks before sudo) · `make uninstall [DRY_RUN=1]` ([ADR 0012](docs/decisions/0012-host-toolchain.md)). All make targets use `.tools/bin` + `.venv/bin`; outside make `export PATH=$PWD/.tools/bin:$PWD/.venv/bin:$PATH`, never Homebrew's copies · `make vm-up` / `vm-down` / `vm-reset` (destructive) / `vm-shell`
 - `make provision [TAGS=role]` · `make idempotency [TAGS=role]` (fails unless `changed=0`) · `make check`
 - **Agents run one ID or role per call, unquoted, in this order**: `make verify REQ=<id> STRICT=1`, `make provision TAGS=<role>`, `make idempotency TAGS=<role>`. A set of IDs/roles = one call each, all must pass; bare `make provision`/`make idempotency` (whole playbook) are allowed too. Other forms (quoted, multi-ID, `TAGS=a,b`, reordered) prompt by design (B-020).
 - `make hooks` (enable `.githooks/`) · `make lint` · `make verify [REQ=8c STRICT=1]` (STRICT: SKIP fails) · `make smoke` (the acceptance curl) · `make e2e` (clean VM → all green)
