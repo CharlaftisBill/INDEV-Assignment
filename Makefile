@@ -106,10 +106,10 @@ hooks: ## Enable the repo's git hooks (.githooks: commit-msg, pre-commit)
 venv: $(VENV_STAMP) ## Create .venv (Python 3.14) with the tools pinned in requirements.txt
 
 # --clear: a new Python (pin bump, or the old Homebrew-based venv) gets a fresh venv.
+# requirements.txt is a full lock with hashes (B-046); pip is the one bundled with the pinned Python.
 $(VENV_STAMP): $(ROOT)/requirements.txt $(PYTHON_STAMP)
 	$(PY) -m venv --clear $(VENV)
-	$(VENV)/bin/pip install --quiet --upgrade pip
-	$(VENV)/bin/pip install --quiet -r $<
+	$(VENV)/bin/pip install --quiet --disable-pip-version-check --require-hashes --only-binary=:all: -r $<
 	@touch $@
 
 $(PYTHON_STAMP):

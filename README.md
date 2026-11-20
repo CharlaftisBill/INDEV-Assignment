@@ -33,7 +33,7 @@ Exact versions: [`ansible/group_vars/all/versions.yml`](ansible/group_vars/all/v
 ## Host installation
 
 **Prerequisite: `make`** (plus base OS tools: `curl`, `tar`, `git`, `openssl`, `sudo`). On macOS, `xcode-select --install`
-provides all of them. Tested on Apple Silicon macOS; Intel macOS is untested; Linux hosts still need the `lima/k8s.yaml` change in the [Backlog](TODO.md#backlog); Windows is out of scope.
+provides all of them. Tested on Apple Silicon macOS; Intel macOS is not supported (cryptography 50, locked in `requirements.txt`, has no macOS x86_64 wheel); Linux hosts still need the `lima/k8s.yaml` change in the [Backlog](TODO.md#backlog); Windows is out of scope.
 
 ```bash
 make doctor   # read-only: each tool and host setting is OK, MISSING or WRONG VERSION, with the fix
@@ -51,7 +51,7 @@ copies installed elsewhere (Homebrew, distro) are ignored. A second `make deps` 
 | kubectl | v1.35.10 | `.tools`, dl.k8s.io | `make verify`, cluster access (matches the cluster) |
 | jq | 1.8.2 | `.tools`, GitHub release | `make verify` (checks 3b, 6, 9) |
 | shellcheck | 0.11.0 | `.tools`, GitHub release | `make lint` |
-| ansible-core / ansible-lint / yamllint | 2.21.6 / 26.10.1 / 1.38.0 | `.venv`, [`requirements.txt`](requirements.txt) | provisioning from the host over SSH, lint |
+| ansible-core / ansible-lint / yamllint | 2.21.6 / 26.10.1 / 1.38.0 | `.venv`, [`requirements.in`](requirements.in), hash-locked in `requirements.txt` | provisioning from the host over SSH, lint |
 | Collections | kubernetes.core 6.6.0, community.crypto 3.5.1, community.general 13.5.1, ansible.posix 2.2.2 | `ansible/collections`, [`ansible/requirements.yml`](ansible/requirements.yml) | Kubernetes, crypto and system modules |
 
 Versions and checksums: `host_*` keys in [`versions.yml`](ansible/group_vars/all/versions.yml). `gh` is optional (only for PRs) and not installed.
