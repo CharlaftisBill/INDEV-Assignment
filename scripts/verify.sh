@@ -66,6 +66,11 @@ check_1() { # OS preparation, containerd, pinned packages
   for pkg in containerd runc; do
     if grep -qx "$pkg" <<<"$holds"; then pass "$pkg is held (apt-mark showhold)"; else fail "$pkg is not held"; fi
   done
+
+  local ts src; ts="$(pinned debian_snapshot_timestamp)"
+  for src in snapshot-debian snapshot-debian-security; do
+    if [[ -n "$ts" ]] && node grep -q "snapshot.debian.org/archive/.*/$ts/" "/etc/apt/sources.list.d/$src.sources" 2>/dev/null; then pass "apt source $src pinned to snapshot $ts"; else fail "apt source $src missing or not at snapshot $ts"; fi
+  done
 }
 
 # Pinned value from versions.yml (single source of truth), e.g. pinned kubernetes_version -> 1.35.10-1.1

@@ -11,6 +11,8 @@
 debian_image_build: "20261103-2651"  # cloud.debian.org/images/cloud/trixie/ dated dirs + SHA512SUMS, 2026-11-18
 
 # M1  os_prep / containerd (Debian trixie apt, held with dpkg_selections)
+# One snapshot.debian.org timestamp keeps every exact pin below installable after Debian replaces it on the live mirror.
+debian_snapshot_timestamp: "20261120T120000Z"  # snapshot.debian.org/archive/debian{,-security}/ (all pins below present), 2026-11-20
 # apt-transport-https is a transitional dummy in apt 3.x (https is built in), so it is not installed.
 os_base_packages:
   ca-certificates: "20250419+deb13u1"  # apt-cache madison (trixie-security), 2026-11-18
