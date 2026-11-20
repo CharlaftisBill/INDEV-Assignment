@@ -28,7 +28,10 @@ make deps       # installs it
 make doctor     # everything should be OK now
 ```
 
-**2. Build the cluster:**
+**2. Build the cluster.** A fresh clone has `certs/ca.crt` but not its key, so `make provision` stops in `pki`.
+Either put the original key in `.secrets/ca.key` (mode 0600), or run `rm certs/ca.crt` to create your own CA
+(then `curl --cacert certs/ca.crt` uses your new certificate).
+See [troubleshooting](docs/runbooks/troubleshooting.md#fresh-clone-fails-in-pki-cert-without-key).
 
 ```bash
 make vm-up        # create and start the VM (4 CPU, 8 GiB RAM, 40 GiB disk)
