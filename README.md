@@ -22,6 +22,7 @@ curl --cacert certs/ca.crt https://llm.local/v1/chat/completions \
 | Storage | local-path-provisioner (default StorageClass) | [0004](docs/decisions/0004-local-path-storage.md) |
 | TLS | internal root CA (host-generated) + cert-manager CA issuer | [0005](docs/decisions/0005-internal-ca-and-renewal.md) |
 | Backups | etcd snapshots → `./backups` on the host via Lima mount | [0006](docs/decisions/0006-etcd-backups-outside-cluster.md) |
+| Host toolchain | only `make` needed: pinned, sha256-checked tools in `.tools/` (`make doctor` / `deps` / `uninstall`) | [0012](docs/decisions/0012-host-toolchain.md) |
 | Agent permissions | allow-list + ask + narrow deny in `.claude/settings.json`, a guardrail, not a boundary | [0009](docs/decisions/0009-agent-permissions-guardrail.md) |
 | Workload security | Pod Security Admission `restricted` for app namespaces | [0007](docs/decisions/0007-pod-security-restricted.md) |
 | Monitoring | kube-prometheus-stack (Prometheus, Alertmanager, Grafana) | [0010](docs/decisions/0010-monitoring-stack.md) |
@@ -31,68 +32,65 @@ Exact versions: [`ansible/group_vars/all/versions.yml`](ansible/group_vars/all/v
 
 ## Host installation
 
-The host is an Apple Silicon Mac (arm64).
-
-Steps that were run to prepare it:
-
-**1. Prerequisites already present:** Homebrew, git, python3, kubectl, GitHub CLI (`gh`, used for PRs).
-
-**2. Install Lima and Python 3.14 with Homebrew** (`make deps` does steps 2–4):
+**Prerequisite: `make`** (plus base OS tools: `curl`, `tar`, `git`, `openssl`, `sudo`). On macOS, `xcode-select --install`
+provides all of them. Tested on Apple Silicon macOS; Intel macOS is untested; Linux hosts still need the `lima/k8s.yaml` change in the [Backlog](TODO.md#backlog); Windows is out of scope.
 
 ```bash
-brew install lima python@3.14
+make doctor   # read-only: each tool and host setting is OK, MISSING or WRONG VERSION, with the fix
+make deps     # installs only what is missing; prints the plan first, asks before anything that needs sudo
 ```
 
-**3. Create the pinned Python tooling and Ansible collections:**
-
-```bash
-make tools
-```
-
-This builds `.venv/` (gitignored) on Python 3.14 from [`requirements.txt`](requirements.txt) and installs the collections pinned in `ansible/requirements.yml` into `ansible/collections/` (gitignored). Every `make` target puts `.venv/bin` first on `PATH`, and so does the editor lint hook. Both steps re-run only when their requirements file changes.
+`make deps` downloads pinned, sha256-checked binaries into `.tools/` (gitignored) and builds `.venv/` on that Python
+([ADR 0012](docs/decisions/0012-host-toolchain.md)). Every `make` target puts `.tools/bin` and `.venv/bin` first on `PATH`;
+copies installed elsewhere (Homebrew, distro) are ignored. A second `make deps` installs nothing.
 
 | Tool | Version | Source | Used for |
 |---|---|---|---|
-| macOS | 26.6.2 | host OS | |
-| Lima (`limactl`) | 2.3.0 | Homebrew | creates and runs the Debian 13 VM |
-| Python | 3.14.5 | Homebrew `python@3.14` | runs the tools below |
-| ansible-core | 2.21.6 | `.venv`, pinned | provisions the VM from the Mac over SSH |
-| ansible-lint | 26.10.1 | `.venv`, pinned | lint (`make lint`, editor hook) |
-| yamllint | 1.38.0 | `.venv`, pinned | lint (`make lint`, editor hook) |
-| Collections | kubernetes.core 6.6.0, community.crypto 3.5.1, community.general 13.5.1, ansible.posix 2.2.2 | `ansible/collections`, pinned | Kubernetes, crypto and system modules |
+| Python | 3.14.10 | `.tools`, python-build-standalone | runs the tools below |
+| Lima (`limactl`) | 2.3.0 | `.tools`, release tarball | creates and runs the Debian 13 VM |
+| kubectl | v1.35.10 | `.tools`, dl.k8s.io | `make verify`, cluster access (matches the cluster) |
+| jq | 1.8.2 | `.tools`, GitHub release | `make verify` (checks 3b, 6, 9) |
+| shellcheck | 0.11.0 | `.tools`, GitHub release | `make lint` |
+| ansible-core / ansible-lint / yamllint | 2.21.6 / 26.10.1 / 1.38.0 | `.venv`, [`requirements.txt`](requirements.txt) | provisioning from the host over SSH, lint |
+| Collections | kubernetes.core 6.6.0, community.crypto 3.5.1, community.general 13.5.1, ansible.posix 2.2.2 | `ansible/collections`, [`ansible/requirements.yml`](ansible/requirements.yml) | Kubernetes, crypto and system modules |
 
-Notes from the install:
-- I first installed `ansible`, `ansible-lint` and `yamllint` with Homebrew. Homebrew builds them on Python 3.15, which ansible-core 2.21.6 does not support (ansible-lint warned about it; `ansible` runs on it silently). That's why the tools now come from a pinned venv on Python 3.14 (bug B-001 in [TODO.md](TODO.md)). The Homebrew copies can stay installed; the Makefile doesn't use them.
-- A plain `ansible-galaxy collection install` reports "Nothing to do" when another Ansible on the machine already bundles the collections (Homebrew's does), and installs nothing into the project. `make collections` uses `--force` (B-002).
-- Homebrew's Lima caveat mentions `lima-additional-guestagents`; it is only needed for non-native guest architectures (e.g. amd64 on Apple Silicon). Not needed here, the VM is arm64.
+Versions and checksums: `host_*` keys in [`versions.yml`](ansible/group_vars/all/versions.yml). `gh` is optional (only for PRs) and not installed.
 
-To use the pinned tools outside `make`, run `source .venv/bin/activate`.
+What `make deps` also does:
+- **`/etc/hosts`** (sudo, asks first): adds `127.0.0.1 llm.local grafana.local # indev-k8s`, the same as
+  `scripts/hosts-entry.sh --apply`. Grafana is then at `https://grafana.local` (user `admin`, password in
+  `.secrets/grafana-admin-password`; see the [monitoring runbook](docs/runbooks/monitoring.md)).
+- **Git hooks**: `git config core.hooksPath .githooks` (`commit-msg` enforces Conventional Commits and rejects AI
+  attribution, `pre-commit` rejects commits on `main`; [git workflow](docs/ai-workflow.md#git-workflow)).
+- **Linux only** (sudo, asks first, recorded in `.tools/system-manifest`): QEMU packages for Lima, and
+  `net.ipv4.ip_unprivileged_port_start=80` so Lima can forward ports 443 and 80.
 
-Required for `make verify REQ=6`: `brew install jq` (`check_6` fails without it; `make deps` does not install it).
+To use the pinned tools outside `make`: `export PATH=$PWD/.tools/bin:$PWD/.venv/bin:$PATH`.
 
-Optional: `brew install shellcheck` adds shell-script linting to `make lint` (skipped when it isn't installed).
+History: until 2026-11-20 `make deps` used Homebrew (`lima`, `python@3.14`). Homebrew's Ansible runs on Python 3.15,
+which ansible-core 2.21 doesn't support (B-001), and a plain `ansible-galaxy collection install` skips collections another
+Ansible already bundles (B-002, hence `--force`). Homebrew copies can stay installed; make no longer uses them.
 
-**Checked after install:** `limactl validate lima/k8s.yaml` OK, `make lint` clean (yamllint + ansible-lint `production` profile), `make check` OK.
-
-**4. Enable the repo's git hooks:**
-
-```bash
-make hooks
-```
-
-This points git at `.githooks/`, whose `commit-msg` hook enforces Conventional Commit subjects and rejects AI attribution trailers, and whose `pre-commit` hook rejects commits on `main` ([git workflow](docs/ai-workflow.md#git-workflow)).
-
-**5. Map the ingress hostnames to the VM's port-forward** (one time, needs sudo):
+## Uninstall
 
 ```bash
-scripts/hosts-entry.sh --apply
+make uninstall DRY_RUN=1   # list the steps only
+make uninstall             # asks y/N before each step
 ```
 
-This adds `127.0.0.1 llm.local grafana.local` to `/etc/hosts`. Grafana is then at `https://grafana.local` (user `admin`, password in `.secrets/grafana-admin-password`; see the [monitoring runbook](docs/runbooks/monitoring.md)).
+It removes only what `make` created: the VM (`limactl delete`), the `/etc/hosts` line (`scripts/hosts-entry.sh --remove`),
+what `.tools/system-manifest` lists (Linux packages and sysctl that `make deps` added), `.tools/`, `.venv/`, `.ansible/`,
+`ansible/collections/`, `out/` (kubeconfigs), `backups/*` (etcd snapshots, keeps `.gitkeep`), and `core.hooksPath`.
+
+- **Kept** unless `PURGE_SECRETS=1`: `.secrets/` (CA key). Without it the next provision creates a new CA, so the committed
+  `certs/ca.crt` no longer matches and must be committed and trusted again (B-037).
+- **Never touched**: tools you installed yourself (e.g. Homebrew `lima` / `python@3.14` from the old `make deps`: `brew
+  uninstall lima python@3.14` if nothing else uses them), `~/.lima/_config` and Lima's image cache (shared with other Lima VMs).
 
 ## Quick start
 
 ```bash
+make deps           # host tools (see Host installation)
 make vm-up          # create + start the Debian 13 VM (4 CPU, 8 GiB, 40 GiB)
 make provision      # run ansible/site.yml against it
 make idempotency    # second run must report changed=0
@@ -126,7 +124,7 @@ It is the cluster-admin credential: don't share or commit it. A VM rebuild needs
 ```
 ansible/            playbook (site.yml), roles, inventory, pinned versions
 lima/k8s.yaml       VM definition
-scripts/            verify.sh (requirement checks), hosts-entry.sh
+scripts/            verify.sh (requirement checks), host-tools.sh (doctor/deps/uninstall), hosts-entry.sh
 certs/ca.crt        internal CA certificate (deliverable; the key is never committed)
 docs/               architecture, requirements matrix, ADRs, runbooks, AI workflow
 backups/            etcd snapshots from the VM (gitignored)
