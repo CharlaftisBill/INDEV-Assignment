@@ -353,3 +353,10 @@ Sev: Medium · State: Solved · Found: 2026-11-20 · Solved: 2026-11-20 · Fix: 
 - **Root cause:** the sysctl prompts ran inside `while read ... done < <(awk ... manifest)`, so `confirm` saw the manifest as stdin (no tty) and skipped; the `.tools/` step then deleted the manifest.
 - **Fix:** entries collected into an array first, prompts run outside the redirect; `step` sets `STEP_DONE`; a kept package/sysctl entry makes the `.tools/` step keep `system-manifest`.
 - **Verification:** pty driver, fake sudo, scratch copy: old script skips + deletes manifest; new: y reverts, n keeps manifest; no tty and DRY_RUN fine; lint clean; verify 1 strict PASS.
+
+### B-048 · [sre] README quick start (`make provision`, `make e2e`) fails on any fresh clone in `pki`: no CA key
+Sev: Medium · State: Solved · Found: 2026-11-20 · Solved: 2026-11-20 · Fix: 3a73620
+- **Report** (sre docs-rewrite r1): `certs/ca.crt` is committed, `.secrets/ca.key` never is; `pki/tasks/ca.yml` (B-037 guard) fails; README/install.md give no step for it, only troubleshooting.md does.
+- **Root cause:** the quick start assumed the author's CA key exists; install.md even claimed a keyless provision makes a new CA, while the B-037 guard stops it.
+- **Fix:** README step 2 and install.md say what to do on a fresh clone (restore the key, or `rm certs/ca.crt` and trust the new CA), linking troubleshooting.
+- **Verification:** fresh clone: cert present, key missing (guard path); README/install.md now cover it; links resolve; `make lint` clean.

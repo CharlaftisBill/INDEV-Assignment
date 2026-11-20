@@ -3,7 +3,7 @@
 Live project state and bug tracker. Agents read this first and update it last (protocol in `CLAUDE.md`).
 
 ## Status
-Current milestone: **M10 — Final** · Last verified: 2026-11-20 final gate M9 (`make idempotency` changed=0; 1: 17, 2: 20, 3a: 15, 3b: 18, 4: 48, 5: 15, 6: 73, 7: 23, 8a: 35, 8b: 19, 8c: 8, 9: 17 PASS · 0 FAIL · 0 SKIP, strict) · Last SRE review: working tree 2026-11-20 — chore/make-bootstrap r2: clean
+Current milestone: **M10 — Final** · Last verified: 2026-11-20 final gate M9 (`make idempotency` changed=0; 1: 17, 2: 20, 3a: 15, 3b: 18, 4: 48, 5: 15, 6: 73, 7: 23, 8a: 35, 8b: 19, 8c: 8, 9: 17 PASS · 0 FAIL · 0 SKIP, strict) · Last SRE review: b9a492c 2026-11-20 — chore/docs-rewrite r1: B-048 fixed (3a73620), round 2 skipped (user: docs-only branch)
 
 ## Milestones
 - [x] M0 Scaffolding: repo layout, agentic layer (`.claude/`), Makefile, lint configs, Lima config, docs skeleton, commit tooling (`split-commits` skill, `.githooks/commit-msg`)
