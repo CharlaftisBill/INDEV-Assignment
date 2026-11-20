@@ -9,12 +9,13 @@ curl --cacert certs/ca.crt https://llm.local/v1/chat/completions \
   -d '{"messages":[{"role":"user","content":"Say hello"}]}'
 ```
 
-> **Status:** milestones M1–M9 are done and every requirement check passes. M10 (final review) is in progress.
+> **Status:** all milestones (M1–M10) are done. `make e2e` builds the cluster from a destroyed VM and every requirement check passes (313 PASS, 0 FAIL, 0 SKIP, 2026-11-20).
 > Progress: [TODO.md](TODO.md). Bugs: [bugs.md](docs/ai-workflow/bugs.md). Assumptions: [assumptions.md](docs/assumptions.md).
 
 ## Quick start
 
-You need an Apple Silicon Mac with `make`. Run `xcode-select --install` if you don't have it.
+Supported hosts: Apple Silicon Mac (tested); Linux arm64/amd64 with QEMU (config portable, untested).
+You need `make`; on a Mac run `xcode-select --install` if you don't have it.
 Details: [install guide](docs/install.md).
 
 **1. Install the tools** (into this folder only; asks before it uses `sudo`):

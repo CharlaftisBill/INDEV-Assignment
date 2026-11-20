@@ -8,6 +8,8 @@ The assignment allows Vagrant, Lima or similar.
 
 ## Decision
 Use Lima with Apple's own virtualization (`vmType: vz`) and the official Debian 13 arm64 cloud image.
+
+> **Amended (M10, 2026-11-20):** `lima/k8s.yaml` no longer sets `vmType`/`mountType`; Lima's defaults pick vz + virtiofs on macOS (same result) and QEMU + 9p on Linux (untested).
 The VM is defined in `lima/k8s.yaml`. Lima's built-in containerd is off, so Ansible installs the runtime itself.
 
 ## Details

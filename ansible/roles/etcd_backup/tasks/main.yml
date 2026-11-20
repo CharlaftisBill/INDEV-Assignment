@@ -10,9 +10,9 @@
 
 - name: Assert the backup directory is the host mount
   ansible.builtin.assert:
-    that: etcd_backup_mount.stdout | trim == etcd_backup_mount_fstype
+    that: etcd_backup_mount.stdout | trim in etcd_backup_mount_fstypes
     fail_msg: >-
-      {{ node_backup_dir }} is not a {{ etcd_backup_mount_fstype }} mount (found '{{ etcd_backup_mount.stdout | trim }}'): snapshots would
+      {{ node_backup_dir }} is not a {{ etcd_backup_mount_fstypes | join("/") }} mount (found '{{ etcd_backup_mount.stdout | trim }}'): snapshots would
       stay on the VM disk. Create the VM with 'make vm-up' (adds the ./backups mount).
     quiet: true
 

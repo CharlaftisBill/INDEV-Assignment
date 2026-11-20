@@ -48,6 +48,10 @@ monitoring_query_timeout: 1m
 monitoring_query_bytes_per_sample: 100
 monitoring_query_overlap: 2
 monitoring_query_headroom_mib: 500
+# B-043: --query.* skips /api/v1/series and the label APIs, and Prometheus 3.15 has no server-side default limit for them (no flag; only the
+# per-request `limit=`). Grafana sends this as `limit` (datasource jsonData.seriesLimit; Grafana's own default is 40000). One unbounded call over
+# ~147k series is a ~47MB answer and ~100Mi of heap (measured ~700 B/series), so 4 parallel fit the headroom and 8 do not: admin-only residual.
+monitoring_grafana_series_limit: 5000
 monitoring_resources:
   operator: {requests: {cpu: 20m, memory: 64Mi}, limits: {memory: 192Mi}}
   prometheus: {requests: {cpu: 100m, memory: 512Mi}, limits: {memory: 1280Mi}}

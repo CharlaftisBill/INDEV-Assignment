@@ -5,8 +5,7 @@ Format and rules: the `bug` skill (`.claude/skills/bug/SKILL.md`); `make lint` c
 
 ## Open
 
-- B-027 (M10, Medium) [sre] Exact Debian apt pins vanish after the next DSA/point release: clean rebuild fails
-- B-043 (M10, Medium) [sre] Parallel `/api/v1/series` over all series OOMKills Prometheus (bypasses the query caps)
+_None._
 
 ## M0 — Scaffolding
 
@@ -330,15 +329,18 @@ Sev: — · State: Solved · Found: 2026-11-17 · Solved: 2026-11-17 · Fix: 194
 - **Verification:** tools report Python 3.14.5 with no warning; `make lint` clean; second `make tools` does nothing.
 
 ### B-027 · [sre] Exact Debian apt pins vanish after the next DSA/point release: clean rebuild fails
-Sev: Medium · State: Open · Found: 2026-11-18
-- **Report** (sre M1 r1): `apt-cache madison curl`: pinned `+deb13u7` exists only in trixie-security; the next curl/containerd DSA removes it and `os_prep` fails on `make e2e` or a grader's clean VM.
-- **Direction:** add a `snapshot.debian.org` source at a pinned timestamp (trixie + trixie-security, `check-valid-until=no`) so `pkg=ver` stays installable; keep only runtime packages exact-pinned.
+Sev: Medium · State: Solved · Found: 2026-11-18 · Solved: 2026-11-20 · Fix: 063a20b
+- **Report** (sre M1 r1): `apt-cache madison curl`: pinned `+deb13u7` exists only in trixie-security; the next DSA removes it and `os_prep` fails on a clean VM.
+- **Root cause:** exact `pkg=ver` pins were only resolvable from the live mirrors, which keep just the newest version.
+- **Fix:** `os_prep` adds snapshot.debian.org sources at `debian_snapshot_timestamp` (versions.yml); live mirrors stay first, so apt falls back to the snapshot.
+- **Verification:** `apt-cache madison` lists a snapshot line for all 11 pins; idempotency changed=0; `make verify REQ=1 STRICT=1` PASS.
 
 ### B-043 · [sre] Parallel `/api/v1/series` over all series OOMKills Prometheus (bypasses the query caps)
-Sev: Medium · State: Open · Found: 2026-11-19
+Sev: Medium · State: Solved · Found: 2026-11-19 · Solved: 2026-11-20 · Fix: dcb66f1
 - **Report** (sre M6 B-042 r3): 16 parallel `series?match[]={__name__=~".+"}` (3d, 147k series, 47MB each) OOMKilled Prometheus twice; 8 peaked 1255/1280Mi. `--query.*` caps skip this path.
-- **Deferred to M10** (user, 2026-11-19): accepted risk until then, see docs/assumptions.md.
-- **Direction:** bound the series/labels path (Grafana datasource `seriesLimit`, document admin-only `limit=`) and size the limit/headroom for it; add the shape to the B-042 load test.
+- **Root cause:** `--query.*` skip the series/label APIs; Prometheus 3.15.1 has no flag or default for them (checked live), only a per-request `limit=`. ~700 B heap per series per call.
+- **Fix:** Grafana datasource `seriesLimit` 5000; unbounded admin calls are an accepted residual (4 parallel fit, 8 do not; assumptions.md); check_6 load-tests 16 limited + 4 unbounded calls.
+- **Verification:** 16 unbounded at 56k series: peak 876Mi; verify load 333 to 496Mi, 0 restarts; `make verify REQ=6 STRICT=1` 76 PASS twice; idempotency changed=0.
 
 ### B-046 · [sec] `.venv` installs the latest pip and unpinned, unhashed transitive deps (only 3 top-level pins)
 Sev: Medium · State: Solved · Found: 2026-11-20 · Solved: 2026-11-20 · Fix: 08e4e82
@@ -360,3 +362,31 @@ Sev: Medium · State: Solved · Found: 2026-11-20 · Solved: 2026-11-20 · Fix: 
 - **Root cause:** the quick start assumed the author's CA key exists; install.md even claimed a keyless provision makes a new CA, while the B-037 guard stops it.
 - **Fix:** README step 2 and install.md say what to do on a fresh clone (restore the key, or `rm certs/ca.crt` and trust the new CA), linking troubleshooting.
 - **Verification:** fresh clone: cert present, key missing (guard path); README/install.md now cover it; links resolve; `make lint` clean.
+
+### B-049 · [sre] Linux host: Lima QEMU default mount is 9p, `etcd_backup` requires `virtiofs`: provision fails
+Sev: Medium · State: Solved · Found: 2026-11-20 · Solved: 2026-11-20 · Fix: 1f16b11
+- **Report** (sre M10 r1): `lima/k8s.yaml` drops `mountType`; Lima 2.3 resolves it to `9p` on QEMU (`templates/default.yaml:113`), but `etcd_backup_mount_fstype: virtiofs` is asserted by the role, the script and check_7.
+- **Root cause:** the role hard-coded one host-mount fstype while Lima picks it per VM type.
+- **Fix:** `etcd_backup_mount_fstypes: [virtiofs, 9p]` feeds the assert, the unit env (`MOUNT_FSTYPES`, comma list) and the script; empty or any other type (ext4) is still refused (B-010); check_7 parses the list.
+- **Verification:** script run with a fake `findmnt`: 9p and virtiofs pass the guard, ext4 and empty refused; lint clean, provision + idempotency (role, whole playbook) changed=0, verify 7 strict 23 PASS.
+
+### B-050 · [sre] etcd restore runbook: member comes back on `http://localhost:2380`; rebuilt-VM path untested
+Sev: Medium · State: Solved · Found: 2026-11-20 · Solved: 2026-11-20 · Fix: d37e058
+- **Report** (sre M10 r1 drill): plain `etcdutl snapshot restore` leaves peer URL `http://localhost:2380`; rebuilt-VM restore untested, runbook said "planned for M10".
+- **Root cause:** restore ran without member flags; a rebuilt VM has a new kubeadm CA + SA key and empty PV dirs (kubelet recreates them root 0755).
+- **Fix:** runbook passes `--name/--initial-cluster/--initial-advertise-peer-urls`; rebuilt VM: chmod PV dirs, restart all pods, reissue legacy SA tokens, `make provision`.
+- **Verification:** old-VM snapshot restored after `make e2e`: peer `https://192.168.5.15:2380`, markers right, `make verify STRICT=1` all 12 IDs PASS.
+
+### B-051 · [sec] `kubectl describe secret` prints SA token values; CLAUDE.md calls it the safe check
+Sev: Medium · State: Solved · Found: 2026-11-20 · Solved: 2026-11-20 · Fix: f48b3ed
+- **Report** (orchestrator, M10 restore drill): `describe` of `kps-prometheus-token` printed the JWT into the transcript; token reissued twice (lookup on), printed one invalid.
+- **Root cause:** `.claude/settings.json` allowed `describe:*` for every kind, and `CLAUDE.md`/ADR 0009 named `describe secret` as the safe existence check.
+- **Fix:** deny `*kubectl* describe *secret*` (+ `describe -f`); `CLAUDE.md`, ADR 0009: check names with `-o name`; runbook warns.
+- **Verification:** `describe secret grafana-admin` is now refused by the harness; `verify.sh` keeps its own describe output internal.
+
+### B-052 · [sec] `describe Secret` (capitalized kind) bypasses the B-051 deny and is auto-allowed
+Sev: Medium · State: Solved · Found: 2026-11-20 · Solved: 2026-11-20 · Fix: f48b3ed
+- **Report** (security M10 r2): kubectl kinds are case-insensitive (`describe Namespace llm` works); deny `*kubectl* describe *secret*` misses `Secret`/`SECRET`, allow `describe:*` approves them unprompted.
+- **Root cause:** glob rules are case-sensitive and a blanket `describe:*` allow approved any spelling the deny missed.
+- **Fix:** `describe` allowed only for the 47 listed kinds (like `get`); deny `*ecret*`, `*ECRET*`, `-f`, `-f=`, `--filename`; stale docs fixed.
+- **Verification:** `describe Secret grafana-admin` and `describe secret …` both refused by the harness; `make lint` clean.

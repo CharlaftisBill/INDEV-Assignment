@@ -66,6 +66,11 @@ check_1() { # OS preparation, containerd, pinned packages
   for pkg in containerd runc; do
     if grep -qx "$pkg" <<<"$holds"; then pass "$pkg is held (apt-mark showhold)"; else fail "$pkg is not held"; fi
   done
+
+  local ts src; ts="$(pinned debian_snapshot_timestamp)"
+  for src in snapshot-debian snapshot-debian-security; do
+    if [[ -n "$ts" ]] && node grep -q "snapshot.debian.org/archive/.*/$ts/" "/etc/apt/sources.list.d/$src.sources" 2>/dev/null; then pass "apt source $src pinned to snapshot $ts"; else fail "apt source $src missing or not at snapshot $ts"; fi
+  done
 }
 
 # Pinned value from versions.yml (single source of truth), e.g. pinned kubernetes_version -> 1.35.10-1.1
@@ -916,6 +921,32 @@ check_6() { # Prometheus, Grafana, node + etcd alerts in Alertmanager (M6)
   local gogc want_gogc; want_gogc="$(sed -n 's/^monitoring_prometheus_gogc:[[:space:]]*\([0-9]*\).*/\1/p' "$role")"
   gogc="$(k get pod "prometheus-$rel-prometheus-0" -n "$ns" -o json 2>&1 | jq -r '.spec.containers[] | select(.name == "prometheus") | .env[]? | select(.name == "GOGC") | .value' 2>&1)"
   if [[ -n "$want_gogc" && "$gogc" == "$want_gogc" ]]; then pass "Prometheus runs with GOGC=$gogc (heap does not float up to the memory limit)"; else fail "Prometheus GOGC '$gogc' (want '$want_gogc')"; fi
+  # B-043: the series API skips the --query.* caps. Grafana's path (`limit=seriesLimit`) must stay bounded under 16 parallel calls; unbounded admin calls
+  # are the accepted residual (assumptions.md), so only 4 run in parallel, the most that fits the headroom at ~147k series (~100Mi each; 8 OOM-killed).
+  local sl sr0 sr1 sstart send surl sdir i n_lim n_unb sbad=""
+  sl="$(sed -n 's/^monitoring_grafana_series_limit:[[:space:]]*\([0-9]*\).*/\1/p' "$role")"
+  if [[ -z "$sl" ]]; then fail "monitoring_grafana_series_limit not found in the monitoring role defaults"; else
+    sr0="$(k get pod "prometheus-$rel-prometheus-0" -n "$ns" -o jsonpath='{.status.containerStatuses[?(@.name=="prometheus")].restartCount}' 2>&1)"
+    send="$(date +%s)"; sstart=$((send - 259200))
+    surl="/api/v1/namespaces/$ns/services/$prom/proxy/api/v1/series?start=$sstart&end=$send&match%5B%5D=%7B__name__%3D~%22.%2B%22%7D"
+    sdir="$(mktemp -d)"
+    for i in $(seq 1 16); do k get --raw "$surl&limit=$sl" >"$sdir/lim$i" 2>&1 & done
+    wait
+    for i in $(seq 1 4); do k get --raw "$surl" >"$sdir/unb$i" 2>&1 & done
+    wait
+    for i in $(seq 1 16); do
+      n_lim="$(jq -r 'if .status == "success" then (.data | length) else "err" end' "$sdir/lim$i" 2>/dev/null)"
+      if [[ ! "$n_lim" =~ ^[0-9]+$ || "$n_lim" -gt "$sl" ]]; then sbad+=" lim$i=${n_lim:-unparsable}"; fi
+    done
+    for i in $(seq 1 4); do
+      n_unb="$(jq -r 'if .status == "success" then (.data | length) else "err" end' "$sdir/unb$i" 2>/dev/null)"
+      if [[ ! "$n_unb" =~ ^[0-9]+$ ]]; then sbad+=" unb$i=${n_unb:-unparsable}"; fi
+    done
+    rm -rf "$sdir"
+    if [[ -z "$sbad" ]]; then pass "16 parallel series calls with limit=$sl and 4 unbounded all succeeded (every limited answer <= $sl series)"; else fail "series load test:$sbad"; fi
+    sr1="$(k get pod "prometheus-$rel-prometheus-0" -n "$ns" -o jsonpath='{.status.containerStatuses[?(@.name=="prometheus")].restartCount}' 2>&1)"
+    if [[ "$sr0" =~ ^[0-9]+$ && "$sr0" == "$sr1" ]]; then pass "Prometheus survived the series load test (restartCount $sr1, no OOM kill)"; else fail "Prometheus restarted during the series load test (restartCount $sr0 -> $sr1)"; fi
+  fi
   local restarts; restarts="$(k get pod "prometheus-$rel-prometheus-0" -n "$ns" -o jsonpath='{.status.containerStatuses[?(@.name=="prometheus")].lastState.terminated.reason}' 2>&1)"
   if [[ "$restarts" != "OOMKilled" ]]; then pass "Prometheus container was not OOMKilled"; else fail "Prometheus container last state: OOMKilled (raise the limit or lower the query caps)"; fi
   # Budget (B-041): every container has a memory request and limit, and the sums stay under the caps that leave room for llama.cpp (M9)
@@ -1069,6 +1100,8 @@ MANIFEST
     if [[ "$code" == "200" ]]; then pass "admin login with the generated password works"; else fail "admin login -> $code"; fi
     resp="$(grafana_get /api/datasources/uid/prometheus/health "$pw")"; code="${resp##*$'\n'}"; body="${resp%$'\n'*}"
     if [[ "$code" == "200" && "$(jq -r '.status' 2>/dev/null <<<"$body")" == "OK" ]]; then pass "Grafana's Prometheus datasource is healthy"; else fail "datasource health ($code): ${body:0:200}"; fi
+    resp="$(grafana_get /api/datasources/uid/prometheus "$pw")"; code="${resp##*$'\n'}"; body="${resp%$'\n'*}"
+    if [[ "$code" == "200" && "$(jq -r '.jsonData.seriesLimit' 2>/dev/null <<<"$body")" == "$sl" ]]; then pass "Grafana's Prometheus datasource caps series/label lookups (seriesLimit $sl)"; else fail "datasource seriesLimit ($code): '$(jq -r '.jsonData.seriesLimit' 2>/dev/null <<<"$body")' (want $sl)"; fi
     resp="$(grafana_get '/api/search?type=dash-db' "$pw")"; code="${resp##*$'\n'}"; body="${resp%$'\n'*}"
     n="$(jq 'length' 2>/dev/null <<<"$body")"
     if [[ "$code" == "200" && "$n" =~ ^[1-9][0-9]*$ ]]; then pass "$n default dashboards provisioned"; else fail "dashboards ($code): ${body:0:200}"; fi
@@ -1144,7 +1177,7 @@ check_7() { # scheduled etcd snapshots stored outside the cluster (M7, B-010)
   glob="$(sed -n 's/^etcd_backup_snapshot_glob:[[:space:]]*"\([^"]*\)".*/\1/p' "$role")"
   unit="$(sed -n 's/^etcd_backup_unit:[[:space:]]*\([a-z-]*\).*/\1/p' "$role")"
   script="$(sed -n 's/^etcd_backup_script:[[:space:]]*\([^[:space:]#]*\).*/\1/p' "$role")"
-  fstype="$(sed -n 's/^etcd_backup_mount_fstype:[[:space:]]*\([a-z0-9]*\).*/\1/p' "$role")"
+  fstype="$(sed -n 's/^etcd_backup_mount_fstypes:[[:space:]]*\[\(.*\)\].*/\1/p' "$role" | tr -d ' ')" # comma-separated
   rule="$(sed -n 's/^etcd_backup_rule_name:[[:space:]]*\([a-z-]*\).*/\1/p' "$role")"
   if [[ -z "$bdir" || -z "$keep" || -z "$ns" || -z "$stale" || -z "$glob" || -z "$unit" || -z "$script" || -z "$fstype" || -z "$rule" ]]; then
     fail "etcd_backup defaults or group_vars keys not found"; return 0
@@ -1160,11 +1193,11 @@ check_7() { # scheduled etcd snapshots stored outside the cluster (M7, B-010)
 
   # --- B-010: the node directory is the host mount, and the script refuses to write anywhere else
   local fs; fs="$(node findmnt -n -o FSTYPE -M "$bdir" 2>&1)"
-  if [[ "$fs" == "$fstype" ]]; then pass "$bdir on the node is a $fstype mountpoint"; else fail "$bdir on the node: '$fs' (want a $fstype mountpoint)"; fi
+  if [[ -n "$fs" && ",$fstype," == *",$fs,"* ]]; then pass "$bdir on the node is a $fs mountpoint (allowed: $fstype)"; else fail "$bdir on the node: '$fs' (want a mountpoint of: $fstype)"; fi
   local out rc
-  out="$(node env BACKUP_DIR=/var/tmp KEEP=1 TEXTFILE_DIR=/var/tmp METRICS_FILE=check7.prom MOUNT_FSTYPE="$fstype" ENDPOINT=x PKI_DIR=x SNAPSHOT_GLOB="$glob" "$script" 2>&1)"; rc=$?
+  out="$(node env BACKUP_DIR=/var/tmp KEEP=1 TEXTFILE_DIR=/var/tmp METRICS_FILE=check7.prom MOUNT_FSTYPES="$fstype" ENDPOINT=x PKI_DIR=x SNAPSHOT_GLOB="$glob" "$script" 2>&1)"; rc=$?
   if [[ $rc -ne 0 && "$out" == *"refusing to write"* ]] && ! node sh -c 'ls /var/tmp/etcd-snapshot-* /var/tmp/.etcd-snapshot-* /var/tmp/check7.prom' >/dev/null 2>&1; then
-    pass "the script refuses to write to a directory that is not the $fstype mount (nothing written to the VM disk)"
+    pass "the script refuses to write to a directory that is not a host mount (nothing written to the VM disk)"
   else fail "the script did not refuse a non-mount directory (rc=$rc): ${out:0:200}"; fi
 
   # --- etcdctl/etcdutl match the pinned version and the etcd kubeadm runs
@@ -1512,8 +1545,12 @@ check_9() { # llama.cpp over TLS, model cached across restarts
   out="$(k get deployments "$LLM_NAME" -n "$ns" -o jsonpath='{.spec.replicas} {.status.readyReplicas} {.spec.template.spec.containers[0].image}' 2>&1)"
   if [[ "$out" == "1 1 $LLM_IMAGE" ]]; then pass "Deployment $LLM_NAME: 1/1 ready, image $LLM_IMAGE"; else fail "Deployment: $out"; fi
   pod="$(llm_pod)"
-  out="$(k get pod "$pod" -n "$ns" -o jsonpath='{.status.phase} {.status.containerStatuses[0].ready} {.status.containerStatuses[0].restartCount} {.spec.containers[0].startupProbe.httpGet.path} {.spec.containers[0].readinessProbe.httpGet.path} {.spec.containers[0].livenessProbe.httpGet.path} {.spec.containers[0].resources.requests.memory} {.spec.containers[0].resources.limits.memory} {.spec.containers[0].resources.requests.cpu} {.spec.containers[0].resources.limits.cpu}' 2>&1)"
-  if [[ "$out" =~ ^Running\ true\ 0\ /health\ /health\ /health\ [0-9]+Mi\ [0-9]+Mi\ [0-9]+\ [0-9]+$ ]]; then pass "pod $pod Running, 0 restarts, /health startup+readiness+liveness probes, CPU and memory requests+limits ($out)"; else fail "pod state: $out"; fi
+  out="$(k get pod "$pod" -n "$ns" -o jsonpath='{.status.phase} {.status.containerStatuses[0].ready} {.status.containerStatuses[0].restartCount} {.spec.containers[0].startupProbe.httpGet.path} {.spec.containers[0].readinessProbe.httpGet.path} {.spec.containers[0].livenessProbe.httpGet.path} {.spec.containers[0].resources.requests.memory} {.spec.containers[0].resources.limits.memory} {.spec.containers[0].resources.requests.cpu} {.spec.containers[0].resources.limits.cpu} {.status.containerStatuses[0].lastState.terminated.reason}' 2>&1)"
+  # Only crash restarts fail: a VM reboot leaves reason Unknown (container lost with the node), not Error/OOMKilled.
+  if [[ "$out" =~ ^Running\ true\ ([0-9]+)\ /health\ /health\ /health\ [0-9]+Mi\ [0-9]+Mi\ [0-9]+\ [0-9]+\ ?(.*)$ ]] \
+    && { [[ "${BASH_REMATCH[1]}" == 0 ]] || [[ "${BASH_REMATCH[2]}" == Unknown ]]; }; then
+    pass "pod $pod Running, ${BASH_REMATCH[1]} restarts (none from a crash), /health startup+readiness+liveness probes, CPU and memory requests+limits ($out)"
+  else fail "pod state (restarts must be 0 or from a node restart): $out"; fi
   out="$(k get pvc "$LLM_MODEL_PVC" -n "$ns" -o jsonpath='{.status.phase} {.spec.storageClassName}' 2>&1)"
   if [[ "$out" == "Bound local-path" ]]; then pass "model PVC $LLM_MODEL_PVC is Bound on the default StorageClass ($out)"; else fail "model PVC: $out"; fi
 

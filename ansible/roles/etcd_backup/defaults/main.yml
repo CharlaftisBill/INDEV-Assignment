@@ -12,8 +12,8 @@ etcd_backup_unit: etcd-backup
 etcd_backup_endpoint: https://127.0.0.1:2379
 etcd_backup_pki_dir: /etc/kubernetes/pki/etcd
 
-# B-010: the script refuses to write unless the backup dir is itself a mount of this filesystem type (the Lima mount of ./backups).
-etcd_backup_mount_fstype: virtiofs
+# B-010/B-049: the script refuses to write unless the backup dir is itself a mount of one of these types (Lima: virtiofs on vz, 9p on QEMU).
+etcd_backup_mount_fstypes: [virtiofs, 9p]
 etcd_backup_snapshot_glob: "etcd-snapshot-*.db"
 etcd_backup_metrics_file: etcd_backup.prom
 

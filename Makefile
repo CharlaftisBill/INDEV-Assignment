@@ -3,8 +3,9 @@
 
 # Internal variables are `override` so `make <target> VAR=...` on the command line
 # cannot replace them (they are pasted into shell recipe lines; B-019).
-override SHELL        := /bin/bash
-override .SHELLFLAGS  := -eu -o pipefail -c
+# Strict flags (-eu -o pipefail) live in the wrapper: make 3.81 ignores .SHELLFLAGS.
+override SHELL        := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))/scripts/make-shell.sh
+override .SHELLFLAGS  := -c
 .DEFAULT_GOAL := help
 
 override ROOT         := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
@@ -131,7 +132,7 @@ $(COLLECTIONS_STAMP): $(ANSIBLE_DIR)/requirements.yml | $(VENV_STAMP)
 .PHONY: vm-up
 vm-up: ## Create (if missing) and start the Lima VM
 	@mkdir -p $(BACKUP_DIR)
-	@if ! $(LIMACTL) list --quiet | grep -qx '$(VM)'; then \
+	@if ! $(LIMACTL) list --quiet | grep -x '$(VM)' >/dev/null; then \
 	  $(LIMACTL) create --tty=false --name=$(VM) \
 	    --set '.mounts=[{"location":"$(BACKUP_DIR)","mountPoint":"/mnt/host-backups","writable":true}]' \
 	    $(LIMA_CONFIG); \
@@ -161,7 +162,7 @@ provision: tools ## Run site.yml (TAGS=os_prep,containerd to limit)
 .PHONY: idempotency
 idempotency: tools ## Re-run site.yml and fail unless changed=0
 	cd $(ANSIBLE_DIR) && ansible-playbook site.yml $(if $(TAGS),--tags $(TAGS),) $(ANSIBLE_ARGS) \
-	  | tee /dev/stderr | grep -Eq 'changed=0 +unreachable=0 +failed=0'
+	  | tee /dev/stderr | grep -E 'changed=0 +unreachable=0 +failed=0' >/dev/null
 
 .PHONY: ping
 ping: tools ## Check Ansible can reach the VM (fixed command; safe to auto-allow)

@@ -14,10 +14,10 @@ Never print the password into logs or chat. Copy it to the clipboard without sho
 pbcopy < .secrets/grafana-admin-password
 ```
 
-Check that the Secret exists (shows no values):
+Check that the Secret exists (name only, no values):
 
 ```bash
-kubectl --kubeconfig out/admin.conf describe secret grafana-admin -n monitoring
+kubectl --kubeconfig out/admin.conf get secrets -n monitoring -o name | grep grafana-admin
 ```
 
 ## Change the password

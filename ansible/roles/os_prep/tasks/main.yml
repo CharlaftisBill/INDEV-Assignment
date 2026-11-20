@@ -46,12 +46,27 @@
     state: present
   loop: "{{ os_prep_sysctls | dict2items }}"
 
+# Live mirrors stay first; apt falls back to the snapshot for versions Debian has since replaced.
+- name: Add the Debian snapshot sources (pinned timestamp)
+  ansible.builtin.deb822_repository:
+    name: "{{ item.name }}"
+    types: [deb]
+    uris: ["https://snapshot.debian.org/archive/{{ item.archive }}/{{ debian_snapshot_timestamp }}/"]
+    suites: "{{ item.suites }}"
+    components: [main]
+    signed_by: /usr/share/keyrings/debian-archive-keyring.gpg
+    check_valid_until: false
+  loop:
+    - { name: snapshot-debian, archive: debian, suites: [trixie, trixie-updates] }
+    - { name: snapshot-debian-security, archive: debian-security, suites: [trixie-security] }
+  register: os_prep_snapshot_repos
+
 - name: Install base packages at pinned versions
   ansible.builtin.apt:
     name: "{{ item.key }}={{ item.value }}"
     state: present
     update_cache: true
-    cache_valid_time: 86400
+    cache_valid_time: "{{ 0 if os_prep_snapshot_repos is changed else 86400 }}"
   loop: "{{ os_base_packages | dict2items }}"
 
 - name: Hold base packages

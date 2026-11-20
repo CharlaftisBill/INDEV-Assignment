@@ -2,12 +2,12 @@
 # Managed by Ansible (etcd_backup role). Snapshot etcd into BACKUP_DIR, verify it, prune by count, publish metrics.
 set -euo pipefail
 
-: "${BACKUP_DIR:?}" "${KEEP:?}" "${TEXTFILE_DIR:?}" "${METRICS_FILE:?}" "${MOUNT_FSTYPE:?}" "${ENDPOINT:?}" "${PKI_DIR:?}" "${SNAPSHOT_GLOB:?}"
+: "${BACKUP_DIR:?}" "${KEEP:?}" "${TEXTFILE_DIR:?}" "${METRICS_FILE:?}" "${MOUNT_FSTYPES:?}" "${ENDPOINT:?}" "${PKI_DIR:?}" "${SNAPSHOT_GLOB:?}"
 
 # B-010: without the mount the snapshot would land on the VM disk and die with the VM.
 fstype="$(findmnt -n -o FSTYPE -M "$BACKUP_DIR" || true)"
-if [[ "$fstype" != "$MOUNT_FSTYPE" ]]; then
-  echo "refusing to write: $BACKUP_DIR is not a $MOUNT_FSTYPE mountpoint (found '${fstype:-none}')" >&2
+if [[ -z "$fstype" || ",$MOUNT_FSTYPES," != *",$fstype,"* ]]; then
+  echo "refusing to write: $BACKUP_DIR is not a mountpoint of type ${MOUNT_FSTYPES} (found '${fstype:-none}')" >&2
   exit 1
 fi
 

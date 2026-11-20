@@ -56,4 +56,4 @@ And nothing could undo what the project installed.
 - A running VM's Lima process runs from `.tools/`. Uninstall deletes the VM before `.tools/`, and warns if you keep the VM.
 - Not removed by uninstall: Homebrew `lima` and `python@3.14` from the old `make deps`, `~/.lima/_config`, Lima's
   image cache (other VMs share them).
-- Linux paths (QEMU, sysctl, `lima/k8s.yaml` without `vz` and virtiofs) are untested; see the Linux Backlog item.
+- Linux paths (QEMU, sysctl, `lima/k8s.yaml` without `vz` and virtiofs) are untested; see [install](../install.md#linux-untested).

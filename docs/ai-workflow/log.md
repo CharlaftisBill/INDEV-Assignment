@@ -83,6 +83,15 @@ review before a PR found B-021 and B-022 in that fix; both fixed on their own br
   prompt). Round 2 clean; all 12 IDs pass strict.
 - A fake-`limactl` test showed GNU make 3.81 ignores the exported `PATH` for some lines ([ADR 0012](../decisions/0012-host-toolchain.md)).
 
+## M10 — Final (2026-11-20)
+
+- `review-loop` 2 rounds. r1: `sre-reviewer` B-049 (virtiofs-only assert) and B-050 (restore runbook untested on a
+  rebuilt VM), `security-reviewer` clean. r2: sre clean, security B-052 (`describe Secret` case bypass).
+- B-051 came from the orchestrator in the restore drill: an agent printed a service-account token with `describe secret`.
+  The token was rotated and the guardrail tightened ([ADR 0009](../decisions/0009-agent-permissions-guardrail.md)).
+- Disruptive tests (kubelet, containerd, pod delete, VM reboot, both restore drills) and `make e2e` from a destroyed VM
+  passed: 313 PASS, 0 FAIL, 0 SKIP.
+
 ## Docs rewrite (2026-11-20)
 
 - The user asked for smaller, simpler docs, one topic per file. README and `docs/` rewritten; `ai-workflow.md` and

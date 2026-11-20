@@ -5,13 +5,21 @@ except one line in `/etc/hosts`, and `make deps` asks before it adds it.
 
 ## What you need
 
-- An **Apple Silicon Mac**.
-- `make`, `curl`, `tar`, `git`, `openssl` and `sudo`. `xcode-select --install` gives you all of them.
+- An **Apple Silicon Mac** (tested), or a Linux host (arm64 or amd64, see [Linux](#linux-untested)).
+- `make`, `curl`, `tar`, `git`, `openssl` and `sudo`. `xcode-select --install` gives you all of them on a Mac.
 
 Not supported:
 - **Intel Macs.** A locked Python package (cryptography 50) has no Intel macOS build.
-- **Linux** needs a change to `lima/k8s.yaml` first ([Backlog](../TODO.md#backlog)).
 - **Windows.**
+
+### Linux (untested)
+
+`lima/k8s.yaml` sets no VM type or mount type, so Lima picks QEMU with 9p on Linux (vz with virtiofs on macOS).
+The config is portable, but no Linux host was available, so this path is **untested**. On Linux, `make deps`
+asks for sudo to:
+- install QEMU packages for Lima;
+- set `net.ipv4.ip_unprivileged_port_start=80` so Lima can forward 443 and 80. This lowers the limit **host-wide**
+  for every user. It is asked first and reverted by `make uninstall`.
 
 ## Install
 
