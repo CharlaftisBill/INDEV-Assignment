@@ -11,7 +11,7 @@ Environment=BACKUP_DIR={{ node_backup_dir }}
 Environment=KEEP={{ etcd_backup_retention }}
 Environment=TEXTFILE_DIR={{ node_textfile_dir }}
 Environment=METRICS_FILE={{ etcd_backup_metrics_file }}
-Environment=MOUNT_FSTYPE={{ etcd_backup_mount_fstype }}
+Environment=MOUNT_FSTYPES={{ etcd_backup_mount_fstypes | join(",") }}
 Environment=ENDPOINT={{ etcd_backup_endpoint }}
 Environment=PKI_DIR={{ etcd_backup_pki_dir }}
 Environment=SNAPSHOT_GLOB={{ etcd_backup_snapshot_glob }}

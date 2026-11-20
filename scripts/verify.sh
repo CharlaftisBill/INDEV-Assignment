@@ -1177,7 +1177,7 @@ check_7() { # scheduled etcd snapshots stored outside the cluster (M7, B-010)
   glob="$(sed -n 's/^etcd_backup_snapshot_glob:[[:space:]]*"\([^"]*\)".*/\1/p' "$role")"
   unit="$(sed -n 's/^etcd_backup_unit:[[:space:]]*\([a-z-]*\).*/\1/p' "$role")"
   script="$(sed -n 's/^etcd_backup_script:[[:space:]]*\([^[:space:]#]*\).*/\1/p' "$role")"
-  fstype="$(sed -n 's/^etcd_backup_mount_fstype:[[:space:]]*\([a-z0-9]*\).*/\1/p' "$role")"
+  fstype="$(sed -n 's/^etcd_backup_mount_fstypes:[[:space:]]*\[\(.*\)\].*/\1/p' "$role" | tr -d ' ')" # comma-separated
   rule="$(sed -n 's/^etcd_backup_rule_name:[[:space:]]*\([a-z-]*\).*/\1/p' "$role")"
   if [[ -z "$bdir" || -z "$keep" || -z "$ns" || -z "$stale" || -z "$glob" || -z "$unit" || -z "$script" || -z "$fstype" || -z "$rule" ]]; then
     fail "etcd_backup defaults or group_vars keys not found"; return 0
@@ -1193,11 +1193,11 @@ check_7() { # scheduled etcd snapshots stored outside the cluster (M7, B-010)
 
   # --- B-010: the node directory is the host mount, and the script refuses to write anywhere else
   local fs; fs="$(node findmnt -n -o FSTYPE -M "$bdir" 2>&1)"
-  if [[ "$fs" == "$fstype" ]]; then pass "$bdir on the node is a $fstype mountpoint"; else fail "$bdir on the node: '$fs' (want a $fstype mountpoint)"; fi
+  if [[ -n "$fs" && ",$fstype," == *",$fs,"* ]]; then pass "$bdir on the node is a $fs mountpoint (allowed: $fstype)"; else fail "$bdir on the node: '$fs' (want a mountpoint of: $fstype)"; fi
   local out rc
-  out="$(node env BACKUP_DIR=/var/tmp KEEP=1 TEXTFILE_DIR=/var/tmp METRICS_FILE=check7.prom MOUNT_FSTYPE="$fstype" ENDPOINT=x PKI_DIR=x SNAPSHOT_GLOB="$glob" "$script" 2>&1)"; rc=$?
+  out="$(node env BACKUP_DIR=/var/tmp KEEP=1 TEXTFILE_DIR=/var/tmp METRICS_FILE=check7.prom MOUNT_FSTYPES="$fstype" ENDPOINT=x PKI_DIR=x SNAPSHOT_GLOB="$glob" "$script" 2>&1)"; rc=$?
   if [[ $rc -ne 0 && "$out" == *"refusing to write"* ]] && ! node sh -c 'ls /var/tmp/etcd-snapshot-* /var/tmp/.etcd-snapshot-* /var/tmp/check7.prom' >/dev/null 2>&1; then
-    pass "the script refuses to write to a directory that is not the $fstype mount (nothing written to the VM disk)"
+    pass "the script refuses to write to a directory that is not a host mount (nothing written to the VM disk)"
   else fail "the script did not refuse a non-mount directory (rc=$rc): ${out:0:200}"; fi
 
   # --- etcdctl/etcdutl match the pinned version and the etcd kubeadm runs
