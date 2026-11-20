@@ -9,7 +9,35 @@ curl --cacert certs/ca.crt https://llm.local/v1/chat/completions \
   -d '{"messages":[{"role":"user","content":"Say hello"}]}'
 ```
 
-> **Status:** scaffolding done (M0). Progress, open bugs and assumptions are tracked in [TODO.md](TODO.md).
+> **Status:** M1–M9 done, all requirement checks pass (strict); M10 (final review) in progress. Progress, open bugs and assumptions are tracked in [TODO.md](TODO.md).
+
+## Quick start
+
+Needs only `make` on an Apple Silicon Mac; `xcode-select --install` provides it with `git`, `curl`, `tar` and
+`openssl` ([details](#host-installation)).
+
+**Install** (nothing system-wide except the `/etc/hosts` line, which asks first):
+
+```bash
+git clone https://github.com/CharlaftisBill/INDEV-Assignment.git
+cd INDEV-Assignment
+make doctor         # read-only: what is OK / MISSING / WRONG VERSION, with the fix
+make deps           # pinned, sha256-checked tools into .tools/ and .venv/, git hooks; asks before sudo
+make doctor         # all required items OK
+```
+
+**Build and check the cluster:**
+
+```bash
+make vm-up          # create + start the Debian 13 VM (4 CPU, 8 GiB, 40 GiB)
+make provision      # run ansible/site.yml against it
+make idempotency    # second run must report changed=0
+make verify         # requirement checks (scripts/verify.sh)
+make smoke          # the acceptance curl above
+```
+
+`make e2e` runs all of it from a freshly recreated VM, `make uninstall` removes
+what make installed ([Uninstall](#uninstall)), and `make help` lists every target.
 
 ## Stack
 
@@ -86,19 +114,6 @@ what `.tools/system-manifest` lists (Linux packages and sysctl that `make deps` 
   `certs/ca.crt` no longer matches and must be committed and trusted again (B-037).
 - **Never touched**: tools you installed yourself (e.g. Homebrew `lima` / `python@3.14` from the old `make deps`: `brew
   uninstall lima python@3.14` if nothing else uses them), `~/.lima/_config` and Lima's image cache (shared with other Lima VMs).
-
-## Quick start
-
-```bash
-make deps           # host tools (see Host installation)
-make vm-up          # create + start the Debian 13 VM (4 CPU, 8 GiB, 40 GiB)
-make provision      # run ansible/site.yml against it
-make idempotency    # second run must report changed=0
-make verify         # requirement checks (scripts/verify.sh)
-make smoke          # the acceptance curl above
-```
-
-`make e2e` runs all of it from a freshly recreated VM. `make help` lists every target.
 
 ## Talking to the cluster
 
