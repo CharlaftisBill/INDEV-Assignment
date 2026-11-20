@@ -116,3 +116,34 @@ llm_model_sha256: "74a4da8c9fdbcd15bd1f6d01d621410d31c6fc00986f5eb687824e7b93d7a
 llm_model_size_bytes: 491400032  # HF x-linked-size, 2026-11-19
 # Pod Security Standards version the app namespace is pinned to (matches the cluster minor), kubernetes_version above.
 pod_security_version: "v1.35"  # kubernetes_version 1.35.10, 2026-11-19
+#
+# Host toolchain (the Mac or Linux host, not the VM): `make deps` downloads these into .tools/ and checks the sha256 (ADR 0012).
+# scripts/host-tools.sh reads them with awk: keep every host_* entry flat, on one line, as `key: "value"`.
+# Platforms: <os>_<arch> with os darwin|linux and arch arm64|amd64.
+host_python_version: "3.14.10"  # github.com/astral-sh/python-build-standalone release 20261026 (newest >= 2 weeks), install_only_stripped, 2026-11-20
+host_python_build: "20261026"   # same release; ansible-core 2.21 supports up to Python 3.14 (B-001)
+host_python_sha256_darwin_arm64: "95eb8c87d16af37c54e9765e31d8c56c0d8ffa9968ea0f704f73a9b83f84e9f9"  # release SHA256SUMS, 2026-11-20
+host_python_sha256_darwin_amd64: "2fd8becd48cf0ff5f0a15df3c0db7cae7aa708dcaacf901bd30d6cdd6229370b"  # release SHA256SUMS, 2026-11-20
+host_python_sha256_linux_arm64: "90f48337bc3dd4ae6eda81e001e4c981236d403b6b5a07778bbdf94ee423dc00"   # release SHA256SUMS (gnu), 2026-11-20
+host_python_sha256_linux_amd64: "4d3c16c59ed0802a3d1d34d8bce504b15ceeaff39d62dadecc6a9fa803412aed"   # release SHA256SUMS (gnu), 2026-11-20
+host_kubectl_version: "v1.35.10"  # dl.k8s.io/release/stable-1.35.txt, matches kubernetes_version (cluster), 2026-11-20
+host_kubectl_sha256_darwin_arm64: "77ec066f3404edb81760865c9cd812d03c25e9a89aa0349fd3c1aa60bd5fb068"  # dl.k8s.io/.../kubectl.sha256, 2026-11-20
+host_kubectl_sha256_darwin_amd64: "4787e20d9029871845d8a57bf56f533870f5d98d9cf3b82b6f5e2ad5eaeee3a3"  # dl.k8s.io/.../kubectl.sha256, 2026-11-20
+host_kubectl_sha256_linux_arm64: "283f1be6a46b3695b625e25030106b8ffe18bd0d3a900f5b65c259ca407f04f5"   # dl.k8s.io/.../kubectl.sha256, 2026-11-20
+host_kubectl_sha256_linux_amd64: "c49a28f1f4efc4d475ed05f47f2ce8e563bf7bef69ed77fe1b924ea6d83b6327"   # dl.k8s.io/.../kubectl.sha256, 2026-11-20
+host_jq_version: "1.8.2"  # gh release list jqlang/jq (2026-06-20), 2026-11-20
+host_jq_sha256_darwin_arm64: "2d75340ba57a4b4b4c8708a21c2dc8e958a48aaa8bba13b27f77f6e4c0eca07e"  # release sha256sum.txt, 2026-11-20
+host_jq_sha256_darwin_amd64: "e94b266e3c26690550006abe63152b782280f4e14374accdf04cbde844f00bc0"  # release sha256sum.txt, 2026-11-20
+host_jq_sha256_linux_arm64: "8b85c817833814ddca00a144c33705546355afccf0cf39b188f3cdb48b852309"   # release sha256sum.txt, 2026-11-20
+host_jq_sha256_linux_amd64: "b1c22172dd303f3be49e935aa56aa48a8b7a46e0bc838b4997d3bb451495870f"   # release sha256sum.txt, 2026-11-20
+# Same version as the Homebrew Lima that created the existing VM (~/.lima/k8s/lima-version), so the VM keeps working.
+host_lima_version: "2.3.0"  # gh release list lima-vm/lima (2026-11-06, 14 days), 2026-11-20
+host_lima_sha256_darwin_arm64: "b7af444bd8f91d3c307477e562f2cf3bd7595d62b9429185e4fa841563578cfc"  # release SHA256SUMS, 2026-11-20
+host_lima_sha256_darwin_amd64: "d58bc7d6b8158d638720d8c8fdb17eb58527dfead6a29a5b60f48a35ee4a65a6"  # release SHA256SUMS, 2026-11-20
+host_lima_sha256_linux_arm64: "7e295d243d9b9439fa05628500daff4371a6861cc7e995ac4af4a0781f736cc6"   # release SHA256SUMS, 2026-11-20
+host_lima_sha256_linux_amd64: "cc8ba97f1c801b899f7c9eda9919dfc4ce4fa2c140c53e5add15aa2d0a1936f9"   # release SHA256SUMS, 2026-11-20
+host_shellcheck_version: "0.11.0"  # gh release list koalaman/shellcheck (2025-08-04), 2026-11-20
+host_shellcheck_sha256_darwin_arm64: "339b930feb1ea764467013cc1f72d09cd6b869ebf1013296ba9055ab2ffbd26f"  # GitHub asset digest = shasum of download, 2026-11-20
+host_shellcheck_sha256_darwin_amd64: "c2c15e08df0e8fbc374c335b230a7ee958c313fa5714817a59aa59f1aa594f51"  # GitHub asset digest = shasum of download, 2026-11-20
+host_shellcheck_sha256_linux_arm64: "68a8133197a50beb8803f8d42f9908d1af1c5540d4bb05fdfca8c1fa47decefc"   # GitHub asset digest = shasum of download, 2026-11-20
+host_shellcheck_sha256_linux_amd64: "b7af85e41cc99489dcc21d66c6d5f3685138f06d34651e6d34b42ec6d54fe6f6"   # GitHub asset digest = shasum of download, 2026-11-20
