@@ -921,6 +921,32 @@ check_6() { # Prometheus, Grafana, node + etcd alerts in Alertmanager (M6)
   local gogc want_gogc; want_gogc="$(sed -n 's/^monitoring_prometheus_gogc:[[:space:]]*\([0-9]*\).*/\1/p' "$role")"
   gogc="$(k get pod "prometheus-$rel-prometheus-0" -n "$ns" -o json 2>&1 | jq -r '.spec.containers[] | select(.name == "prometheus") | .env[]? | select(.name == "GOGC") | .value' 2>&1)"
   if [[ -n "$want_gogc" && "$gogc" == "$want_gogc" ]]; then pass "Prometheus runs with GOGC=$gogc (heap does not float up to the memory limit)"; else fail "Prometheus GOGC '$gogc' (want '$want_gogc')"; fi
+  # B-043: the series API skips the --query.* caps. Grafana's path (`limit=seriesLimit`) must stay bounded under 16 parallel calls; unbounded admin calls
+  # are the accepted residual (assumptions.md), so only 4 run in parallel, the most that fits the headroom at ~147k series (~100Mi each; 8 OOM-killed).
+  local sl sr0 sr1 sstart send surl sdir i n_lim n_unb sbad=""
+  sl="$(sed -n 's/^monitoring_grafana_series_limit:[[:space:]]*\([0-9]*\).*/\1/p' "$role")"
+  if [[ -z "$sl" ]]; then fail "monitoring_grafana_series_limit not found in the monitoring role defaults"; else
+    sr0="$(k get pod "prometheus-$rel-prometheus-0" -n "$ns" -o jsonpath='{.status.containerStatuses[?(@.name=="prometheus")].restartCount}' 2>&1)"
+    send="$(date +%s)"; sstart=$((send - 259200))
+    surl="/api/v1/namespaces/$ns/services/$prom/proxy/api/v1/series?start=$sstart&end=$send&match%5B%5D=%7B__name__%3D~%22.%2B%22%7D"
+    sdir="$(mktemp -d)"
+    for i in $(seq 1 16); do k get --raw "$surl&limit=$sl" >"$sdir/lim$i" 2>&1 & done
+    wait
+    for i in $(seq 1 4); do k get --raw "$surl" >"$sdir/unb$i" 2>&1 & done
+    wait
+    for i in $(seq 1 16); do
+      n_lim="$(jq -r 'if .status == "success" then (.data | length) else "err" end' "$sdir/lim$i" 2>/dev/null)"
+      if [[ ! "$n_lim" =~ ^[0-9]+$ || "$n_lim" -gt "$sl" ]]; then sbad+=" lim$i=${n_lim:-unparsable}"; fi
+    done
+    for i in $(seq 1 4); do
+      n_unb="$(jq -r 'if .status == "success" then (.data | length) else "err" end' "$sdir/unb$i" 2>/dev/null)"
+      if [[ ! "$n_unb" =~ ^[0-9]+$ ]]; then sbad+=" unb$i=${n_unb:-unparsable}"; fi
+    done
+    rm -rf "$sdir"
+    if [[ -z "$sbad" ]]; then pass "16 parallel series calls with limit=$sl and 4 unbounded all succeeded (every limited answer <= $sl series)"; else fail "series load test:$sbad"; fi
+    sr1="$(k get pod "prometheus-$rel-prometheus-0" -n "$ns" -o jsonpath='{.status.containerStatuses[?(@.name=="prometheus")].restartCount}' 2>&1)"
+    if [[ "$sr0" =~ ^[0-9]+$ && "$sr0" == "$sr1" ]]; then pass "Prometheus survived the series load test (restartCount $sr1, no OOM kill)"; else fail "Prometheus restarted during the series load test (restartCount $sr0 -> $sr1)"; fi
+  fi
   local restarts; restarts="$(k get pod "prometheus-$rel-prometheus-0" -n "$ns" -o jsonpath='{.status.containerStatuses[?(@.name=="prometheus")].lastState.terminated.reason}' 2>&1)"
   if [[ "$restarts" != "OOMKilled" ]]; then pass "Prometheus container was not OOMKilled"; else fail "Prometheus container last state: OOMKilled (raise the limit or lower the query caps)"; fi
   # Budget (B-041): every container has a memory request and limit, and the sums stay under the caps that leave room for llama.cpp (M9)
@@ -1074,6 +1100,8 @@ MANIFEST
     if [[ "$code" == "200" ]]; then pass "admin login with the generated password works"; else fail "admin login -> $code"; fi
     resp="$(grafana_get /api/datasources/uid/prometheus/health "$pw")"; code="${resp##*$'\n'}"; body="${resp%$'\n'*}"
     if [[ "$code" == "200" && "$(jq -r '.status' 2>/dev/null <<<"$body")" == "OK" ]]; then pass "Grafana's Prometheus datasource is healthy"; else fail "datasource health ($code): ${body:0:200}"; fi
+    resp="$(grafana_get /api/datasources/uid/prometheus "$pw")"; code="${resp##*$'\n'}"; body="${resp%$'\n'*}"
+    if [[ "$code" == "200" && "$(jq -r '.jsonData.seriesLimit' 2>/dev/null <<<"$body")" == "$sl" ]]; then pass "Grafana's Prometheus datasource caps series/label lookups (seriesLimit $sl)"; else fail "datasource seriesLimit ($code): '$(jq -r '.jsonData.seriesLimit' 2>/dev/null <<<"$body")' (want $sl)"; fi
     resp="$(grafana_get '/api/search?type=dash-db' "$pw")"; code="${resp##*$'\n'}"; body="${resp%$'\n'*}"
     n="$(jq 'length' 2>/dev/null <<<"$body")"
     if [[ "$code" == "200" && "$n" =~ ^[1-9][0-9]*$ ]]; then pass "$n default dashboards provisioned"; else fail "dashboards ($code): ${body:0:200}"; fi

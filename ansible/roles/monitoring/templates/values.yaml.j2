@@ -118,6 +118,9 @@ grafana:
       searchNamespace: {{ monitoring_namespace }}
     datasources:
       resource: configmap
+      # B-043: Grafana passes this as `limit` to the series/label APIs, which the --query.* caps do not cover.
+      extraJsonData:
+        seriesLimit: {{ monitoring_grafana_series_limit }}
     resources: {{ monitoring_resources.grafana_sidecar | to_json }}
   resources: {{ monitoring_resources.grafana | to_json }}
   admin:
