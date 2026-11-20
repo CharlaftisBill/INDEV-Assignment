@@ -3,17 +3,18 @@
 Each requirement from the assignment: where it is built and how it is checked.
 Run one check with `make verify REQ=<id> STRICT=1` (`STRICT=1` turns SKIP into FAIL).
 The checks are `check_<id>` in [`scripts/verify.sh`](../scripts/verify.sh); `3` and `8` run all their parts.
-Status mirrors [TODO.md](../TODO.md).
+Status mirrors [TODO.md](../TODO.md). Final run (M10, 2026-11-20): `make e2e` from a destroyed VM, 313 PASS · 0 FAIL · 0 SKIP.
+Disruptive tests (kubelet restart, containerd restart, pod deletion, VM reboot) passed, then all 12 IDs passed again.
 
 | ID | Requirement | Role | Checks | Milestone | Status |
 |---|---|---|---|---|---|
-| [1](#1-os-and-container-runtime) | OS prep, containerd, pinned packages | `os_prep`, `containerd` | 17 | M1 | Done |
+| [1](#1-os-and-container-runtime) | OS prep, containerd, pinned packages | `os_prep`, `containerd` | 19 | M1 | Done |
 | [2](#2-kubeadm-single-node) | kubeadm, one node runs everything | `kubeadm` | 20 | M2 | Done |
 | [3a](#3a-network-plugin) | CNI installed and healthy | `cni_calico` | 15 | M3 | Done |
 | [3b](#3b-app-network-policy) | App pods accept only needed traffic | `llm_app` | 18 | M9 | Done |
 | [4](#4-ingress-and-tls) | Ingress + internal CA, auto renewal | `pki`, `ingress_traefik` | 48 | M5 | Done |
 | [5](#5-default-storageclass) | Default StorageClass | `storage` | 15 | M4 | Done |
-| [6](#6-monitoring-and-alerts) | Prometheus + Grafana, node and etcd alerts | `monitoring` | 73 | M6 | Done |
+| [6](#6-monitoring-and-alerts) | Prometheus + Grafana, node and etcd alerts | `monitoring` | 76 | M6 | Done |
 | [7](#7-etcd-backups) | Scheduled etcd snapshots outside the cluster | `etcd_backup` | 23 | M7 | Done |
 | [8a](#8a-read-only-operator) | Read-only operator role + kubeconfig | `hardening` | 35 | M8 | Done |
 | [8b](#8b-no-root-app-pods) | App pods not root, not privileged | `kubeadm`, `llm_app` | 19 | M2, M9 | Done |
@@ -32,7 +33,7 @@ Status mirrors [TODO.md](../TODO.md).
   config ([control plane notes](architecture.md#control-plane-notes)). Control-plane taint removed. `out/admin.conf`
   for the Mac. `init` never runs over an existing cluster (B-029, [runbook](runbooks/troubleshooting.md#lost-adminconf)).
 - **Checked:** `/readyz` from the Mac over verified TLS; one Ready node at the pinned version, no blocking taint;
-  packages held; every kube-system pod healthy.
+  packages held; every kube-system pod healthy. After kubelet restart, containerd restart and VM reboot it stays healthy.
 
 ## 3a. Network plugin
 
@@ -69,14 +70,16 @@ Status mirrors [TODO.md](../TODO.md).
   ([ADR 0010](decisions/0010-monitoring-stack.md)).
 - **Checked** (needs `jq`): pods ready and pinned; memory budget and query limits; 19 targets up, etcd too;
   `Watchdog` in Alertmanager; `promtool` tests fire node, etcd and Traefik alerts.
-  Real alerts: manual [demo](runbooks/alert-demo.md).
+  Real alerts: manual [demo](runbooks/alert-demo.md). Still passes after the disruptive tests.
+  Accepted residual: unbounded `/series` calls by an admin ([assumptions](assumptions.md), B-043).
 
 ## 7. etcd backups
 
 - **Built:** a systemd timer snapshots etcd every 30 minutes into `./backups` on the Mac
   ([ADR 0006](decisions/0006-etcd-backups-outside-cluster.md), [restore](runbooks/etcd-restore.md)).
 - **Checked:** timer settings; the folder is the Mac mount; a valid snapshot exists; Mac and node see the same files;
-  metrics fresh; `EtcdBackupStale` loaded. Full restore test planned for M10.
+  metrics fresh; `EtcdBackupStale` loaded. The mount type may be `virtiofs` (vz) or `9p` (QEMU).
+  Restore tested by hand on the same VM and on a rebuilt VM (2026-11-20): see the [runbook](runbooks/etcd-restore.md).
 
 ## 8a. Read-only operator
 
@@ -105,5 +108,6 @@ Status mirrors [TODO.md](../TODO.md).
   missing or its hash is wrong; an init container checks the hash before start. Ingress at `llm.local` with a
   certificate from our CA ([ADR 0008](decisions/0008-model-caching.md)).
 - **Checked:** pinned image and model hash; a chat answer over TLS, verified with `certs/ca.crt`; a deleted pod comes
-  back Ready without a new download. `make smoke` is the acceptance curl.
+  back Ready without a new download. A llama.cpp restart passes only when its last termination reason is `Unknown`
+  (node restart); a crash fails. `make smoke` is the acceptance curl.
   Recovery: [troubleshooting](runbooks/troubleshooting.md#model-missing-or-corrupt).

@@ -54,6 +54,6 @@ and ready-made node, etcd and kubelet alerts and dashboards. All 8 images pinned
 ## Consequences
 - A query over more than 1.2M samples fails with "too many samples". Raise the limits together
   ([runbook](../runbooks/prometheus-memory.md)).
-- `/api/v1/series` is not covered by the query limits (B-043, accepted risk, deferred to M10).
+- `/api/v1/series` and the label APIs are not covered by the query limits and Prometheus has no server-side cap for them (B-043): Grafana is capped with `seriesLimit`; unbounded admin calls are an accepted risk (see assumptions).
 - Only 3 days of metrics; they are not backed up.
 - The Grafana password exists only on the Mac and in the Secret.

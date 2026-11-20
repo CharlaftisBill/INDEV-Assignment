@@ -13,7 +13,7 @@ the API server or scheduler is broken. Snapshots go to `/mnt/host-backups`, whic
 
 ## Details
 - Runs every 30 minutes (`etcd_backup_schedule`). `Persistent=true` catches up missed runs after a reboot.
-- The unit needs the mount (`RequiresMountsFor`). The role checks it is a virtiofs mount, and the script refuses to
+- The unit needs the mount (`RequiresMountsFor`). The role checks it is a virtiofs or 9p mount, and the script refuses to
   write anywhere else. Snapshots must never land on the VM disk (B-010). `check_7` compares Mac and node listings.
 - `etcdctl snapshot save` with kubeadm's `healthcheck-client` certificate, then `etcdutl snapshot status` to check
   it. Written under a temp name and renamed, so a half-written file never has the final name.
@@ -24,8 +24,8 @@ the API server or scheduler is broken. Snapshots go to `/mnt/host-backups`, whic
   when the last success is older than an hour (2× the schedule) or the metric is missing, for 5 minutes.
 - **Cross-role**: node-exporter had no textfile collector, so the `monitoring` role got one extra argument that reuses
   its existing read-only host mount. Nothing else in its security settings changed.
-- Ansible's mount facts skip virtiofs, so the mount check uses `findmnt`. The type `virtiofs` is assumed
-  (`etcd_backup_mount_fstype`); a Linux host may need another.
+- Ansible's mount facts skip virtiofs, so the mount check uses `findmnt`. Accepted types are
+  `etcd_backup_mount_fstypes: [virtiofs, 9p]` (vz on macOS, QEMU on Linux). Any other type, such as ext4, is refused.
 
 ## Alternatives
 | Option | Why not |

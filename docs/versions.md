@@ -26,8 +26,9 @@ Notes:
   Moving past 1.35 needs containerd 2.x. containerd's release notes recommend 1.7.28+ for 1.35; Debian's 1.7.24 is
   used as is. kubelet logs `RuntimeConfig not implemented` and uses its own `cgroupDriver: systemd`; this is expected.
 - **containerd 1.7** uses config `version = 2`. Its pause image is set to kubeadm's (`pause_image_tag`).
-- **Debian keeps only the newest point release**, so an exact apt pin can stop installing after an update.
-  Bump it with `pin-version` (B-027).
+- **Debian keeps only the newest point release**, so `os_prep` also adds `snapshot.debian.org` sources at one pinned
+  timestamp (`debian_snapshot_timestamp`). The live mirrors stay first (faster); apt falls back to the snapshot for a
+  version the mirror no longer has. Packages from `pkgs.k8s.io` are unaffected (B-027).
 - **`apt-transport-https`** is not installed: it is an empty package; apt 3.x has HTTPS built in.
 - **python3-kubernetes** comes from Debian, not a pip venv. A venv needs `python3.13-venv`, whose version changes
   with every Python security update, and pip would pull unpinned dependencies.

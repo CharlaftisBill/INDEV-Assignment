@@ -15,7 +15,7 @@ The rules match **command text**, and there is always another way to write the s
 Treat the rules as a **guardrail against accidents**, not as protection against a determined attacker.
 Build them in layers that fail safe:
 
-1. **Instructions**: `CLAUDE.md` says never read secrets; use `kubectl describe secret` to check one exists.
+1. **Instructions**: `CLAUDE.md` says never read secrets; list Secret names (`-o name`) to check one exists; `describe secret` is denied because it prints service-account tokens (B-051).
    This is the layer that really applies.
 2. **Allow-list**: auto-approve only fixed, known-safe commands: listed `kubectl get <kind>`, exact `make` commands
    with no wildcard (`make verify`, `make provision TAGS=<role>`, `make verify REQ=<id> STRICT=1`), `make ping`,

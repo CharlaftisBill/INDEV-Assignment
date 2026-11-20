@@ -24,6 +24,12 @@ Today: 2 queries × 2 overlap × 1.2M samples × 100 B ≈ 458 MiB ≤ 500 MiB.
   pushed memory to 95% of the limit.
 - `monitoring_query_max_samples` must stay above the largest rule window (about 0.85M samples).
 
+## Series and label APIs
+
+`--query.*` does not cover `/api/v1/series` or the label APIs, and Prometheus 3.15 has no server-side default for their `limit=`.
+Grafana sends `monitoring_grafana_series_limit` (5000) as `limit`. An unbounded call (admin only) costs about 700 B of heap per
+series: ~100 MiB at 147k series, so 4 in parallel fit and 8 can OOM-kill Prometheus. Always pass `limit=` when calling it by hand.
+
 ## Raise the limits
 
 Raising `monitoring_query_max_samples` or concurrency needs a bigger
