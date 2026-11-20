@@ -3,7 +3,7 @@
 Live project state and bug tracker. Agents read this first and update it last (protocol in `CLAUDE.md`).
 
 ## Status
-Current milestone: **M10 — Final** · Last verified: 2026-11-20 final gate M9 (`make idempotency` changed=0; 1: 17, 2: 20, 3a: 15, 3b: 18, 4: 48, 5: 15, 6: 73, 7: 23, 8a: 35, 8b: 19, 8c: 8, 9: 17 PASS · 0 FAIL · 0 SKIP, strict) · Last SRE review: b9a492c 2026-11-20 — chore/docs-rewrite r1: B-048 fixed (3a73620), round 2 skipped (user: docs-only branch)
+Current milestone: **Done (M1–M10)** · Last verified: 2026-11-20 M10 final gate (`make e2e` from a destroyed VM 313 PASS; after the review fixes: `make idempotency` changed=0; 1: 19, 2: 20, 3a: 15, 3b: 18, 4: 48, 5: 15, 6: 76, 7: 23, 8a: 35, 8b: 19, 8c: 8, 9: 17 PASS · 0 FAIL · 0 SKIP, strict) · Last SRE review: working tree 2026-11-20 — M10 full r1+r2 (disruptive: reboot, kubelet/containerd restart, etcd restore same + rebuilt VM); clean after B-052 (user accepted)
 
 ## Milestones
 - [x] M0 Scaffolding: repo layout, agentic layer (`.claude/`), Makefile, lint configs, Lima config, docs skeleton, commit tooling (`split-commits` skill, `.githooks/commit-msg`)
@@ -18,7 +18,7 @@ Current milestone: **M10 — Final** · Last verified: 2026-11-20 final gate M9 
 - [x] M7 `etcd_backup`: systemd timer → host `./backups`, staleness alert (req 7)
 - [x] M8 `hardening`: operator read-only role + kubeconfig (req 8a)
 - [x] M9 `llm_app`: llama.cpp + model cache + NetworkPolicies + PSA-restricted namespace + TLS ingress (req 9, 3b, 8b)
-- [ ] M10 Final (all IDs: 1 2 3a 3b 4 5 6 7 8a 8b 8c 9): `make e2e` from a destroyed VM, full security review, docs pass (Backlog items marked "before M10" must be done first)
+- [x] M10 Final (all IDs: 1 2 3a 3b 4 5 6 7 8a 8b 8c 9): `make e2e` from a destroyed VM, full security review, docs pass (Backlog items marked "before M10" must be done first)
 
 ## Backlog
 - [x] **Docs rewrite** (2026-11-20, `chore/docs-rewrite`): README + `docs/` in simple language, one topic per file ([index](docs/README.md)). New: `install.md`, `usage.md`, `versions.md`, `docs/ai-workflow/` (split), runbooks `grafana`/`alert-demo`/`prometheus-memory` (split from `monitoring.md`). Paths fixed in `CLAUDE.md`, `docs-writer`, `review-loop`, `fix-next-bug`, `pin-version`.
@@ -30,14 +30,14 @@ Current milestone: **M10 — Final** · Last verified: 2026-11-20 final gate M9 
   - [x] `.claude/settings.json`: `make doctor` allowed; `make deps`, `make uninstall` ask. README "Host installation" + "Uninstall"
   - Cross-cutting: the Makefile names directly exec'd tools by path (GNU make 3.81 ignores the exported PATH there, so `make lint`/`collections` could hit Homebrew copies). `scripts/verify.sh`: shellcheck fixes, no behaviour change (shellcheck now always runs in `make lint`)
   - Checked on this Mac: `make lint` clean; `make deps` twice (2nd installs nothing; the sudo hosts step is re-offered while declined); fresh copy with PATH=/usr/bin:/bin → deps + lint OK; VM restarted by the repo-local `limactl`; `make verify REQ=1 STRICT=1` 17 PASS
-  - Follow-ups (M10): `.SHELLFLAGS` (`-eu -o pipefail`) is ignored by GNU make 3.81, so recipes run without pipefail on macOS; `check_9` requires 0 llama.cpp restarts and fails after any VM reboot (restartCount 2 after two restarts)
-- [ ] **Linux host support** (target: before M10). Host tooling is OS-aware since the bootstrap above; the VM config is still Mac-only.
-  - [ ] `lima/k8s.yaml`: drop the hard-coded `vmType: vz` and `mountType: virtiofs` so Lima picks its default (vz on macOS, qemu on Linux)
+  - [x] Follow-ups (M10, `feat/m10-final`): recipes run via `scripts/make-shell.sh` (`-eu -o pipefail` on make 3.81 too; `.SHELLFLAGS` alone was ignored); `check_9` accepts llama.cpp restarts only with last reason `Unknown` (node restart), crashes still fail
+- [x] **Linux host support** (target: before M10). Host tooling is OS-aware since the bootstrap above; the VM config is portable since M10; Linux is untested.
+  - [x] `lima/k8s.yaml`: drop the hard-coded `vmType: vz` and `mountType: virtiofs` so Lima picks its default (vz on macOS, qemu on Linux)
   - [x] `make deps` detects OS/arch; Lima release binary on both, QEMU distro packages on Linux (asked, recorded in the manifest)
   - [x] Port 443 on Linux: `make doctor` checks `net.ipv4.ip_unprivileged_port_start`; `make deps` offers the sysctl (asked), uninstall reverts it
   - [x] `scripts/hosts-entry.sh`: only flush the macOS DNS cache on macOS
-  - [ ] README + `CLAUDE.md`: host support listed in README; Linux install steps once `lima/k8s.yaml` is portable
-  - [ ] Test on a Linux host if one is available; otherwise keep "untested" in the docs
+  - [x] README + `CLAUDE.md`: host support listed in README; Linux install steps once `lima/k8s.yaml` is portable
+  - [x] Test on a Linux host if one is available; otherwise keep "untested" in the docs (no Linux host: docs say "untested")
 
 ## Bugs
 All bugs, Open and Solved, are in [docs/ai-workflow/bugs.md](docs/ai-workflow/bugs.md) (format: `bug` skill).
