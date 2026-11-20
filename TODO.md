@@ -3,7 +3,7 @@
 Live project state and bug tracker. Agents read this first and update it last (protocol in `CLAUDE.md`).
 
 ## Status
-Current milestone: **M10 — Final** · Last verified: 2026-11-20 final gate M9 (`make idempotency` changed=0; 1: 17, 2: 20, 3a: 15, 3b: 18, 4: 48, 5: 15, 6: 73, 7: 23, 8a: 35, 8b: 19, 8c: 8, 9: 17 PASS · 0 FAIL · 0 SKIP, strict) · Last SRE review: working tree 2026-11-20 — M9 r1 B-044, r2 B-045, targeted re-check (user-approved): clean
+Current milestone: **M10 — Final** · Last verified: 2026-11-20 final gate M9 (`make idempotency` changed=0; 1: 17, 2: 20, 3a: 15, 3b: 18, 4: 48, 5: 15, 6: 73, 7: 23, 8a: 35, 8b: 19, 8c: 8, 9: 17 PASS · 0 FAIL · 0 SKIP, strict) · Last SRE review: 5b01fe7 2026-11-20 — chore/make-bootstrap r1: 1 new bug (B-047)
 
 ## Milestones
 - [x] M0 Scaffolding: repo layout, agentic layer (`.claude/`), Makefile, lint configs, Lima config, docs skeleton, commit tooling (`split-commits` skill, `.githooks/commit-msg`)
@@ -88,6 +88,8 @@ for each bug are in [Bug details](#bug-details) below.
 | B-043 | [sre] Parallel `/api/v1/series` over all series OOMKills Prometheus (bypasses the query caps) | Medium | Open | M10 | 2026-11-19 | | |
 | B-044 | [sec] Running llama-server keeps HTTPS egress to any public IP (model-download allow is pod-wide) | Medium | Solved | M9 | 2026-11-19 | 2026-11-19 | 7a4808b |
 | B-045 | [sre] Model-fetch gate trusts the PVC annotation, not the file: a lost model is never re-fetched | Medium | Solved | M9 | 2026-11-19 | 2026-11-19 | 7a4808b |
+| B-046 | [sec] `.venv` installs the latest pip and unpinned, unhashed transitive deps (only 3 top-level pins) | Medium | Solved | M10 | 2026-11-20 | 2026-11-20 | 08e4e82 |
+| B-047 | [sre] `make uninstall` never reverts the Linux sysctl: its confirm reads the manifest, not the tty | Medium | Open | M10 | 2026-11-20 | | |
 
 ## Assumptions / open questions
 - Host is an Apple Silicon Mac → VM is Debian 13 **arm64** under Lima (vz). amd64 image is listed in `lima/k8s.yaml` for Intel hosts but untested. Linux hosts are planned (Backlog), Windows is out of scope (Ansible needs WSL2).
@@ -400,3 +402,13 @@ Max 5 lines per bug (heading + up to 4 one-line bullets, ~200 chars each). Full 
 - **Root cause:** the Job gate was a PVC annotation, which survives an etcd restore or a lost/damaged file; the Job was skipped and the pod sat in `Init:Error`. Job failures were also only caught by the 900 s wait.
 - **Fix:** gate on the file (PV `hostPath.path` + sha256 `stat` on the node, annotation dropped); Job polled for Complete/Failed, fails with its message; llama.cpp pods restarted after a fetch.
 - **Verification:** model file renamed on the node (annotation matched, Init:Error): old gate skips; new role refetched, pod Ready; verify 3b/8b/9 PASS; idempotency changed=0 (role, bare).
+
+### B-046: [sec] `.venv` installs the latest pip and unpinned, unhashed transitive deps (only 3 top-level pins)
+- **Report** (sec make-bootstrap r1): `Makefile:111` `--upgrade pip` (latest); `requirements.txt` pins 3 packages, no hashes; transitive deps float, run on the host beside `.secrets/`.
+- **Root cause:** `requirements.txt` held only the 3 top-level pins and the venv recipe ran `pip install --upgrade pip`, so pip and 26 transitive packages resolved to whatever was newest.
+- **Fix:** top-level pins moved to `requirements.in`; `requirements.txt` is a pip-compile hash lock (29 pkgs, versions = the verified venv); `pip install --require-hashes --only-binary=:all:`, bundled pip, no upgrade.
+- **Verification:** venv rebuilt (pip 26.2.2, `pip check` OK); wheels hashed for macOS arm64 + Linux arm64/amd64 (PyPI); `make idempotency` changed=0; all 12 IDs strict PASS; sec re-check: resolved.
+
+### B-047: [sre] `make uninstall` never reverts the Linux sysctl: its confirm reads the manifest, not the tty
+- **Report** (sre make-bootstrap r1): `while read … done < <(awk … manifest)` takes stdin, so `confirm` skips on a real tty (pty repro); `.tools/` removal then deletes the manifest: sysctl stays at 80, unrecorded.
+- **Direction:** read the sysctl entries before the loop (or `read -u 3` / `confirm </dev/tty`); keep the manifest (or refuse `.tools/` removal) while kept system entries remain.
