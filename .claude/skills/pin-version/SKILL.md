@@ -30,4 +30,4 @@ Never `latest`, never a floating tag (`:server`, `:v1`), never an unpinned apt i
 
 ## After pinning
 - Comment = source + date. Mention notable constraints (e.g. "max k8s 1.xx per Calico docs").
-- If the docs table in `docs/architecture.md` lists the component, the docs-writer agent will sync it; mention the bump in your report.
+- If `docs/versions.md` lists the component, the docs-writer agent will sync it; mention the bump in your report.

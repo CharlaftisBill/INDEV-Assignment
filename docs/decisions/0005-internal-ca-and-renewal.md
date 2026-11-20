@@ -3,19 +3,33 @@
 Status: Accepted · Date: 2026-11-19
 
 ## Context
-Requirement 4: certificates from an internal CA we create, renewed automatically. The CA certificate is a deliverable in the git repo, and the reviewer's `curl --cacert ca.crt` must keep working if the VM is rebuilt.
+Requirement 4: TLS certificates from our own CA, renewed automatically. The CA certificate is committed to git,
+and `curl --cacert certs/ca.crt` must keep working after the VM is rebuilt.
 
 ## Decision
-- Ansible creates the root CA **on the host** with `community.crypto` (EC P-256, 10-year validity, `basicConstraints CA:TRUE, pathlen:0`). Key in `.secrets/ca.key` (gitignored, mode 0600), certificate in `certs/ca.crt` (committed). Generated once, reused on every run (`ansible/roles/pki/tasks/ca.yml`).
-- **Name constraints** (critical, B-035): permitted `DNS:local`, excluded all IPv4 and IPv6. A leaked CA key can only mint `*.local` names. They apply only when a CA is created; changing them needs a new CA.
-- **Fresh clone** (B-037): `ca.crt` without `.secrets/ca.key` fails instead of creating an unrelated key; the key/cert public keys must match (assert).
-- The key pair is loaded into Secret `internal-ca-key-pair` in `cert-manager`, backing ClusterIssuer `internal-ca` (type `ca`).
-- Leaf certificates are `Certificate` resources; defaults `duration` 2160h, `renewBefore` 720h (`group_vars/all/main.yml`). `check_4` demonstrates renewal with a 1h certificate (`renewBefore` 59m45s, cert-manager's minimum duration): the revision increments and Traefik serves the new leaf without a restart.
+Ansible creates the root CA **on the Mac**, once, and reuses it on every run (`ansible/roles/pki/tasks/ca.yml`).
+cert-manager signs and renews all leaf certificates with it.
 
-## Alternatives considered
-- **CA created inside the cluster** (cert-manager self-signed issuer → CA): a VM rebuild creates a new CA and the committed `ca.crt` stops matching.
-- **Intermediate CA in cluster, root offline**: better practice for production; noted as an improvement, adds a step for little value here.
+## Details
+- **CA**: CN `INDEV internal CA`, EC P-256, valid 10 years, `CA:TRUE, pathlen:0`. Key in `.secrets/ca.key` (mode 0600, gitignored).
+  Certificate in `certs/ca.crt` (committed).
+- **Name limits** (critical, B-035): the CA may sign only `*.local` names, and no IP addresses. A leaked key can't
+  sign for real domains. The limits are set only when a CA is created; changing them needs a new CA.
+- **Fresh clone** (B-037): `certs/ca.crt` without `.secrets/ca.key` stops the run instead of making a new key.
+  The role also checks that key and certificate belong together.
+- **In the cluster**: the key pair goes into Secret `internal-ca-key-pair` in `cert-manager`. ClusterIssuer
+  `internal-ca` uses it.
+- **cert-manager**: namespace `restricted`. Its `startupapicheck` Job is off; the role waits for the Deployments and
+  retries the ClusterIssuer instead. The `acmesolver` image is pinned but unused (no ACME).
+- **Leaf certificates**: valid 90 days (2160h), renewed 30 days (720h) before expiry (`group_vars/all/main.yml`).
+  `check_4` proves renewal with a 1-hour certificate: it renews, and Traefik serves the new one without a restart.
+
+## Alternatives
+| Option | Why not |
+|---|---|
+| CA made inside the cluster | A VM rebuild makes a new CA; the committed `ca.crt` stops matching |
+| Offline root + intermediate CA in the cluster | Better for production; an extra step with little value here |
 
 ## Consequences
-- Stable trust anchor across rebuilds; rotation procedure in `docs/runbooks/ca-rotation.md`.
-- The CA key exists on the host and in a cluster Secret; access to the `cert-manager` namespace secrets is effectively CA access.
+- The trust anchor stays the same across rebuilds. Rotation: [runbook](../runbooks/ca-rotation.md).
+- The CA key is on the Mac and in a cluster Secret. Whoever can read Secrets in `cert-manager` holds the CA.

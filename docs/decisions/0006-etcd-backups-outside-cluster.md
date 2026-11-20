@@ -1,24 +1,41 @@
-# 0006 — etcd snapshots stored on the host
+# 0006 — etcd snapshots stored on the Mac
 
 Status: Accepted · Date: 2026-11-17
 
 ## Context
-Requirement 7: scheduled etcd snapshots, stored outside the cluster. On a single node, anything on the VM disk is lost with the VM.
+Requirement 7: scheduled etcd snapshots, stored outside the cluster. With one node, anything on the VM disk is
+lost with the VM.
 
 ## Decision
-Role `etcd_backup`. A systemd timer on the node (not a Kubernetes CronJob, so backups run when the API or scheduler is unhealthy):
+Role `etcd_backup` installs a **systemd timer on the node**, not a Kubernetes CronJob. So backups still run when
+the API server or scheduler is broken. Snapshots go to `/mnt/host-backups`, which is `./backups` on the Mac
+(Lima virtiofs mount).
 
-- Every 30 min (`etcd_backup_schedule`), `Persistent=true`. The oneshot unit has `RequiresMountsFor=/mnt/host-backups`, the Lima virtiofs mount of `./backups` on the Mac.
-- `etcdctl snapshot save` with kubeadm's `healthcheck-client` cert, checked with `etcdutl snapshot status`, written to a temp name and renamed (no partial file under the final name). Count-based pruning keeps 48.
-- etcdctl/etcdutl v3.6.6 (same as kubeadm's etcd 3.6.6-0), sha256 pinned in `versions.yml`.
-- Metrics through the node-exporter textfile collector; PrometheusRule `EtcdBackupStale` fires when the metric is absent or older than 3600 s for 5 min.
-- B-010: snapshots must never land on the VM disk. The role asserts the directory is a virtiofs mountpoint, the unit requires the mount, and the script refuses to write otherwise. `check_7` compares host and node listings.
+## Details
+- Runs every 30 minutes (`etcd_backup_schedule`). `Persistent=true` catches up missed runs after a reboot.
+- The unit needs the mount (`RequiresMountsFor`). The role checks it is a virtiofs mount, and the script refuses to
+  write anywhere else. Snapshots must never land on the VM disk (B-010). `check_7` compares Mac and node listings.
+- `etcdctl snapshot save` with kubeadm's `healthcheck-client` certificate, then `etcdutl snapshot status` to check
+  it. Written under a temp name and renamed, so a half-written file never has the final name.
+- Keeps the newest 48 snapshots. Files are mode 0600 and, through virtiofs, owned by the Mac user.
+- The script is `/usr/local/sbin/etcd-backup`, run as root. The role takes one snapshot when none exists yet.
+- etcdctl and etcdutl v3.6.6, the same version as kubeadm's etcd.
+- Writes metrics (last success, size, count) for node-exporter's textfile collector. Alert `EtcdBackupStale` fires
+  when the last success is older than an hour (2× the schedule) or the metric is missing, for 5 minutes.
+- **Cross-role**: node-exporter had no textfile collector, so the `monitoring` role got one extra argument that reuses
+  its existing read-only host mount. Nothing else in its security settings changed.
+- Ansible's mount facts skip virtiofs, so the mount check uses `findmnt`. The type `virtiofs` is assumed
+  (`etcd_backup_mount_fstype`); a Linux host may need another.
 
-## Alternatives considered
-- **CronJob with hostPath**: depends on a healthy cluster; still on the VM disk unless combined with the mount.
-- **MinIO / S3 on the host**: closer to production, but adds a host service for no extra guarantee here.
+## Alternatives
+| Option | Why not |
+|---|---|
+| CronJob with hostPath | Needs a healthy cluster; still on the VM disk without the mount |
+| MinIO or S3 on the Mac | Closer to production, but one more service for no extra safety here |
 
 ## Consequences
-- Snapshots survive `make vm-reset`; restore: [runbook](../runbooks/etcd-restore.md).
-- Snapshots contain Secrets in plain form; `./backups` is gitignored and sensitive.
-- Accepted Lows (not logged): unarchived binaries owned by uid 1000; a killed run can leave a `.part`/`.tmp` file (the script deletes leftovers older than 60 min, not the trap); `KEEP` not validated; stale threshold fixed, not derived from the schedule; retention by count only (48 snapshots, about 1.8 GB on the Mac).
+- Snapshots survive `make vm-reset`. Restore: [runbook](../runbooks/etcd-restore.md).
+- Snapshots contain every Secret in plain form. `./backups` is gitignored; treat it as secret.
+- Accepted Low risks: binaries owned by uid 1000; a killed run can leave a temp file (cleaned after 60 minutes);
+  `KEEP` is not validated; the stale threshold is fixed, not derived from the schedule; retention by count only
+  (48 snapshots, about 1.8 GB on the Mac).

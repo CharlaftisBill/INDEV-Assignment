@@ -15,7 +15,7 @@ Arguments (optional):
 - `max-rounds=<n>`: **at most 2** (the user's limit; default 2). A lower value is allowed, never a higher one.
 
 ## 0. Baseline
-- Read `TODO.md`. Note the HEAD hash, the in-scope Open bugs (part of this loop) and the deferred ones (later milestones; not worked here).
+- Read the `TODO.md` Status line and the `## Open` list in `docs/ai-workflow/bugs.md`. Note the HEAD hash, the in-scope Open bugs (part of this loop) and the deferred ones (later milestones; not worked here).
 - Bugs that `fix-next-bug` has already given up on (their **Fix** column holds the marker `[stuck rN]`) are **skipped** by the loop and listed at the end.
 
 ## Each round (n = 1 … max-rounds)
@@ -40,7 +40,7 @@ Stop the loop when **both** hold:
 ### C. Fix
 While there are in-scope, Open, non-stuck bugs: run the **fix-next-bug** skill (one bug per call; it filters to in-scope bugs,
 then orders `[sec]` → Sev Critical → Sev High → rest, oldest first).
-- If `fix-next-bug` leaves a bug Open after its 3 attempts, put the marker `[stuck rN]` (N = round) in that bug's Fix column, add a one-line **Stuck:** bullet to its details entry, and move on.
+- If `fix-next-bug` leaves a bug Open after its 3 attempts, put the marker `[stuck rN]` (N = round) in that bug's Fix field (`Fix: [stuck rN]` on its meta line), add a one-line **Stuck:** bullet to its entry, and move on.
 - Don't batch fixes for several bugs into one change; each fix is verified on its own, on its own `fix/b-nnn-*` branch
   (fix-next-bug creates it and merges it back into the branch under review once the user approves the commit).
 
@@ -56,5 +56,5 @@ Report a table per round: `round · review verdict · bugs opened · bugs solved
 Then: final verify result (`make verify` score), remaining in-scope Open/stuck bugs, **deferred bugs by milestone**
 (so they're visible, not forgotten), Low findings worth knowing.
 Update the `TODO.md` Status line (`Last SRE review: <hash or working tree> <date> — clean` once clean).
-Add one line to `docs/ai-workflow.md` for the current milestone: rounds, bugs found/fixed, anything notable.
+Add one line to `docs/ai-workflow/log.md` for the current milestone: rounds, bugs found/fixed, anything notable.
 Offer to commit with the `split-commits` skill (fix commits per bug, then `chore(todo)`). No AI attribution trailers.
