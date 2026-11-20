@@ -156,3 +156,7 @@ per project: the plugin stays available elsewhere.
 ### M6 — Monitoring (2026-11-19)
 - `review-loop` 2 rounds + one targeted re-check. R1: `security-reviewer` opened B-039 (Grafana credentials/RBAC) and B-040 (node-exporter hardening); `sre-reviewer` opened B-041 (memory budget). R2: `sre-reviewer` opened B-042 (Prometheus OOM under wide queries); targeted re-checks reopened it twice (5M, then 4 × 1.5M with a 60 B/sample model), fixed on attempt 3 (2 × 1.2M, 1280Mi limit, `GOGC=50`). The third re-check opened B-043 (`/api/v1/series` bypasses the query caps).
 - Human decisions: targeted re-checks beyond the 2-round cap and attempt 3's plan were user-approved; B-043 deferred to M10 as an accepted risk; the SRE reviewer's real alert demo (etcd and node) became a runbook ([ADR 0010](decisions/0010-monitoring-stack.md)).
+
+### Host bootstrap — `make doctor` / `deps` / `uninstall` (2026-11-20, before M10)
+- Built in a side session started by the M9 session. `review-loop` 2 rounds: R1 `security-reviewer` opened B-046 (venv not hash-locked), `sre-reviewer` opened B-047 (uninstall's sysctl prompt read the manifest, found with a pty repro); R2 both clean, all 12 IDs strict PASS.
+- Enabling shellcheck surfaced old `verify.sh` findings, and a fake-`limactl` test showed GNU make 3.81 ignores the exported PATH for directly exec'd lines.
