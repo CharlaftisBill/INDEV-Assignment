@@ -79,7 +79,7 @@ make uninstall             # asks y/N before each step
 ```
 
 It removes only what `make` created: the VM (`limactl delete`), the `/etc/hosts` line (`scripts/hosts-entry.sh --remove`),
-what `.tools/system-manifest` lists (Linux packages and sysctl that `make deps` added), `.tools/`, `.venv/`, `.ansible/`,
+what `.tools/system-manifest` lists (Linux packages and sysctl that `make deps` added; if you keep one, the manifest stays), `.tools/`, `.venv/`, `.ansible/`,
 `ansible/collections/`, `out/` (kubeconfigs), `backups/*` (etcd snapshots, keeps `.gitkeep`), and `core.hooksPath`.
 
 - **Kept** unless `PURGE_SECRETS=1`: `.secrets/` (CA key). Without it the next provision creates a new CA, so the committed

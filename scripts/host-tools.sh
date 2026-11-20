@@ -276,14 +276,17 @@ cmd_deps() {
 # ---------------------------------------------------------------- uninstall
 DRY_RUN="${DRY_RUN:-0}"
 PURGE_SECRETS="${PURGE_SECRETS:-0}"
-step() {  # step "what" "shown command" function [args]: print, then ask (or only print with DRY_RUN=1)
+STEP_DONE=0
+step() {  # step "what" "shown command" function [args]: print, then ask (or only print with DRY_RUN=1); sets STEP_DONE
   local what="$1" shown="$2"; shift 2
+  STEP_DONE=0
   echo "- $what"
   echo "    \$ $shown"
   if [[ "$DRY_RUN" == 1 ]]; then return 0; fi
-  if confirm "Remove?"; then "$@"; echo "    done"; else echo "    kept"; fi
+  if confirm "Remove?"; then "$@"; STEP_DONE=1; echo "    done"; else echo "    kept"; fi
 }
 rm_path() { rm -rf -- "${ROOT:?}/${1:?}"; }
+rm_tools_keep_manifest() { find "${ROOT:?}/.tools" -mindepth 1 -maxdepth 1 ! -name system-manifest -exec rm -rf -- {} +; }
 rm_backups() { find "$ROOT/backups" -mindepth 1 ! -name .gitkeep -exec rm -rf -- {} +; }
 unset_hooks() { git -C "$ROOT" config --unset core.hooksPath; }
 delete_vm() { "$(limactl_bin)" delete --force "$VM"; }
@@ -298,17 +301,24 @@ cmd_uninstall() {
   if hosts_ok; then step "/etc/hosts line '$HOSTS_MARKER' (sudo)" "scripts/hosts-entry.sh --remove" "$ROOT/scripts/hosts-entry.sh" --remove
   else echo "- /etc/hosts line: not present"; fi
 
+  local kept_system=0  # a system change the user keeps: its manifest record must survive the .tools/ step (B-047)
   if [[ -f "$MANIFEST" ]]; then  # system-wide changes recorded by make deps (Linux)
     local mgr pkgs=""
     for mgr in apt-get dnf; do
       pkgs="$(awk -v m="$mgr" '$1 == "pkg" && $2 == m {printf "%s ", $3}' "$MANIFEST")"
+      [[ -n "$pkgs" ]] || continue
       # shellcheck disable=SC2086  # package list
-      [[ -z "$pkgs" ]] || step "system packages installed by make deps (sudo)" "sudo $mgr remove -y $pkgs" remove_pkgs "$mgr" $pkgs
+      step "system packages installed by make deps (sudo)" "sudo $mgr remove -y $pkgs" remove_pkgs "$mgr" $pkgs
+      [[ "$STEP_DONE" == 1 || "$DRY_RUN" == 1 ]] || kept_system=1
     done
-    local key prev
-    while read -r _ key prev; do
+    # Collect first, prompt after: a prompt inside `while read ... < manifest` reads the manifest, not the tty.
+    local entries=() line key prev
+    while IFS= read -r line; do [[ -z "$line" ]] || entries+=("$line"); done < <(awk '$1 == "sysctl" {print $2, $3}' "$MANIFEST")
+    for line in ${entries[@]+"${entries[@]}"}; do
+      key="${line%% *}"; prev="${line#* }"
       step "kernel setting $key (back to $prev, sudo)" "sudo rm -f $SYSCTL_FILE && sudo sysctl -w $key=$prev" revert_sysctl "$key" "$prev"
-    done < <(awk '$1 == "sysctl"' "$MANIFEST")
+      [[ "$STEP_DONE" == 1 || "$DRY_RUN" == 1 ]] || kept_system=1
+    done
   fi
 
   local p
@@ -317,7 +327,12 @@ cmd_uninstall() {
       case "$p" in
         .tools)
           [[ "$(vm_status)" == absent || "$DRY_RUN" == 1 ]] || echo "  note: VM '$VM' is kept; without .tools/ its limactl is gone (make deps brings it back)"
-          step ".tools/: repo-local Python, kubectl, jq, Lima, shellcheck (and the install manifest)" "rm -rf .tools" rm_path .tools ;;
+          if [[ "$kept_system" == 1 ]]; then
+            step ".tools/: repo-local Python, kubectl, jq, Lima, shellcheck (keeps system-manifest: it lists the system changes kept above)" \
+              "find .tools -mindepth 1 -maxdepth 1 ! -name system-manifest -exec rm -rf {} +" rm_tools_keep_manifest
+          else
+            step ".tools/: repo-local Python, kubectl, jq, Lima, shellcheck (and the install manifest)" "rm -rf .tools" rm_path .tools
+          fi ;;
         out) step "out/: admin and operator kubeconfigs" "rm -rf out" rm_path out ;;
         *) step "$p/" "rm -rf $p" rm_path "$p" ;;
       esac
