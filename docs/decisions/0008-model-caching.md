@@ -1,26 +1,44 @@
-# 0008 — Model caching for llama.cpp
+# 0008 — Keeping the llama.cpp model across restarts
 
 Status: Accepted · Date: 2026-11-17
 
 ## Context
-Requirement 9: a pod restart must not download the model again. Application pods should have no egress (requirement 3).
+Requirement 9: restarting the pod must not download the model again.
+Requirement 3: app pods should have no outbound access.
 
 ## Decision
-- The model (Qwen2.5-0.5B-Instruct Q4_K_M, HF commit + sha256 pinned in `versions.yml`) lives on a 2Gi PVC from the default StorageClass.
-- Ansible decides whether to fetch by hashing the file on the node (`stat` sha256 of the PV hostPath). Absent or wrong hash runs a one-shot Job (label `component=model-fetch`). Ansible polls it to Complete/Failed (fail-fast), deletes it, and restarts the server pods.
-- Only the Job label gets egress: DNS + TCP 443 to public IPs (RFC1918, 169.254/16, 100.64/10 excluded). The server has no egress at all.
-- The server mounts the PVC read-only; an init container `verify-model` checks the sha256 and fails closed (`Init:Error`).
-- Recovery from a lost or corrupt model, or a failed fetch: re-run `make provision TAGS=llm_app` ([troubleshooting](../runbooks/troubleshooting.md#model-missing-or-corrupt-llm-pod-pending-or-init-error)).
+The model lives on a 2 GiB volume. A separate one-time Job downloads it, and only when needed.
+The server pod never has outbound access.
 
-## Alternatives considered
-- **initContainer download**: needs egress on the serving pod; runs on every pod start (even if it skips the download).
-- **Bake the model into an image**: needs a registry and a build step; image pulls are not the point of the exercise.
-- **hostPath cache**: violates PSA `restricted`.
-- **Annotation or marker as the fetch gate** (first version, B-045): can say "fetched" while the file is gone or corrupt. The file hash cannot.
-- **Egress for the whole pod** (first version, B-044): the serving pod would keep outbound access forever.
+## Details
+- Model: Qwen2.5-0.5B-Instruct Q4_K_M. Hugging Face commit and sha256 are pinned in `versions.yml`.
+- **When to download**: Ansible hashes the model file on the node. If it is missing or the hash is wrong, Ansible runs
+  the Job (label `component=model-fetch`), waits for it to finish or fail, deletes it, and restarts the server.
+- **Network**: only pods with the Job's label get DNS and HTTPS (TCP 443) to public IPs. Private ranges
+  (RFC1918, 169.254/16, 100.64/10) stay blocked. Any public IP, because Hugging Face's CDN addresses change and
+  NetworkPolicy can't match hostnames.
+- **Server**: one Deployment, 1 replica, `Recreate`. CPU 1 (request = limit), memory 768Mi request / 1536Mi limit,
+  2 slots × 2048 context. `--no-slots` hides the `/slots` endpoint, `--no-webui` the web UI; no metrics endpoint, so Prometheus doesn't scrape it.
+  It mounts the volume read-only. Init container `verify-model` checks the hash and stops on a mismatch (`Init:Error`).
+- The Job and the init container reuse the llama.cpp image (it has curl and sha256sum), so there is no second image.
+- A healthy re-run only hashes the file (about 2 s) and changes nothing. A deleted volume claim leaves the pod Pending
+  until the next provision.
+- **Recovery** from a lost or broken model, or a failed download: `make provision TAGS=llm_app`
+  ([troubleshooting](../runbooks/troubleshooting.md#model-missing-or-corrupt)).
+
+## Alternatives
+| Option | Why not |
+|---|---|
+| Download in an init container | The server pod needs outbound access; runs on every start |
+| Model inside the image | Needs a registry and a build step |
+| hostPath folder | Not allowed under `restricted` |
+| Annotation or marker file decides when to download (first version, B-045) | Can say "done" while the file is gone; the hash can't |
+| Outbound access for the whole pod (first version, B-044) | The server would keep it forever |
 
 ## Consequences
-- Restarting or deleting the pod reuses the PVC; no Job runs. Verified in `check_9`.
-- `make vm-reset` deletes the PVC, so the model is downloaded once per fresh VM.
-- Egress exists only while a fetch Job runs.
-- Accepted Lows: anyone who can create pods in `llm` could copy the Job label to gain egress (admins and controllers only today); the pod delete after a re-fetch does not wait (theoretical rollout race); a failed Job and its logs are removed after 1h.
+- Restarting or deleting the pod reuses the volume; no Job runs. `check_9` tests this.
+- `make vm-reset` deletes the volume, so each fresh VM downloads the model once.
+- Outbound access exists only while the Job runs.
+- Accepted Low risks: anyone who can create pods in `llm` could copy the Job label to get outbound access (today only
+  admins and controllers); the pod restart after a download does not wait for the rollout; a failed Job and its logs
+  are deleted after 1 hour.

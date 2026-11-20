@@ -1,32 +1,59 @@
-# 0010 — Monitoring stack (kube-prometheus-stack)
+# 0010 — Monitoring with kube-prometheus-stack
 
 Status: Accepted · Date: 2026-11-19
 
 ## Context
-Requirement 6: Prometheus + Grafana, with node and etcd health alerts visible in Alertmanager. The VM has ~7.7 GiB; the llama.cpp pod (M9) needs >= 2.5 GiB and the base cluster ~2 GiB, so the stack gets ~3 GiB.
+Requirement 6: Prometheus and Grafana, with node and etcd health alerts that reach Alertmanager.
+The VM has about 7.7 GiB of RAM. The llama.cpp pod needs at least 2.5 GiB and the base cluster about 2 GiB,
+so monitoring gets about 3 GiB.
 
 ## Decision
-- **kube-prometheus-stack 92.18.0** (operator v0.94.2), Helm release `kps` in `monitoring`, 8 images pinned by multi-arch digest (`versions.yml`). Ships the default node/etcd/kubelet rules and dashboards.
-- **node-exporter in its own namespace** `node-exporter`: it needs hostNetwork/hostPID/hostPath, so PSA `privileged`. Everything else stays PSA `restricted` ([ADR 0007](0007-pod-security-restricted.md)). The exporter still has no privilege escalation, drops ALL caps, uses seccomp RuntimeDefault and a read-only rootfs (B-040).
-- **Webhook certificate** from the chart's own self-signed cert-manager chain, not `internal-ca`: that CA is name-constrained to `.local` ([ADR 0005](0005-internal-ca-and-renewal.md)) and the webhook uses `*.svc` names. `failurePolicy: Ignore`, because the chart's rules are applied before the operator serves.
-- **Scrape targets** (19 UP): apiserver, kubelet, etcd (plain HTTP :2381), controller-manager, scheduler, kube-proxy, node-exporter, kube-state-metrics, Traefik (PodMonitor :9101). Components are bound to the node IP by the `kubeadm` role.
-- **Custom alerts** `TraefikDown`, `TraefikIngressNotSynced` (follow-up to B-038).
-- **Grafana** at `https://grafana.local` through Traefik, certificate from `internal-ca`. Admin password generated on the host into `.secrets/grafana-admin-password`, loaded into Secret `grafana-admin`, never printed (B-039). Anonymous access off; its ServiceAccount reads only ConfigMaps in `monitoring`.
-- **NetworkPolicies**: default-deny plus one per component.
-- **Sizing**: requests 1536Mi / limits 3072Mi caps (2880Mi used), asserted by `check_6` (B-041). Prometheus: 5Gi local-path PVC, retention 3d / 3GB, 1280Mi limit (GOMEMLIMIT ~1152Mi), `GOGC=50`, query caps 2 concurrent x 1.2M samples, 1m timeout (B-042). Rationale: ~600Mi idle heap leaves ~500Mi for queries; a wide raw result costs ~85 B per sample, and queued queries overlap the running ones, so concurrency x 2 x samples x 100 B must fit it; numbers in `ansible/roles/monitoring/defaults/main.yml`.
-- **Alert proof**: `check_6` shows rules loaded and healthy, `Watchdog` active in Alertmanager, and `promtool` unit tests (`files/alert-tests.yaml`) firing `KubeNodeNotReady`, `NodeFilesystemAlmostOutOfSpace`, `etcdNoLeader`, `etcdInsufficientMembers`, `etcdMembersDown` and both Traefik alerts. Breaking a real node or etcd in an automated check would be disruptive, so the real firing is a reversible manual demo: [runbook](../runbooks/monitoring.md#real-alert-demo). It was run during the SRE review: `etcdInsufficientMembers` and `NodeNetworkInterfaceFlapping` both reached Alertmanager.
+kube-prometheus-stack (Helm release `kps` in namespace `monitoring`). It ships Prometheus, Alertmanager, Grafana,
+and ready-made node, etcd and kubelet alerts and dashboards. All 8 images pinned by digest.
 
-## Alternatives considered
+## Details
+- **node-exporter** runs in its own namespace `node-exporter`, labelled `privileged`, because it needs host network,
+  host processes and host folders. Everything else stays `restricted` ([ADR 0007](0007-pod-security-restricted.md)).
+  The exporter still has no privilege escalation, no capabilities, `RuntimeDefault` seccomp and a read-only root (B-040).
+- **Webhook certificate**: from the chart's own self-signed chain. Our CA can't sign it: it only signs `*.local`
+  names ([ADR 0005](0005-internal-ca-and-renewal.md)), and the webhook uses `*.svc`. `failurePolicy: Ignore`, because
+  the chart applies its rules before the operator is up.
+- **Scrape targets** (19 up): API server, kubelet, etcd (HTTP on 2381), controller-manager, scheduler, kube-proxy,
+  node-exporter, kube-state-metrics, Traefik (9101). The `kubeadm` role makes them listen on the node IP.
+- **Extra alerts** (after B-038): `TraefikDown` (Traefik target down or missing) and `TraefikIngressNotSynced`
+  (Ingresses with TLS exist, but Traefik loaded no certificate). The second covers TLS Ingresses only.
+- **Pod Security**: `monitoring` is `restricted`; the chart's settings pass, read-only root included.
+- **Grafana**: `https://grafana.local` through Traefik, certificate from our CA. The admin password is generated on the
+  Mac in `.secrets/grafana-admin-password`, stored in Secret `grafana-admin`, never printed (B-039). No anonymous
+  access. Its service account reads only ConfigMaps in `monitoring`. No storage: the data source and 27 default
+  dashboards are provisioned. Use: [runbook](../runbooks/grafana.md).
+- **NetworkPolicies**: deny all, DNS, then one policy per component. Host-network peers (API server, kubelet, etcd,
+  node-exporter, Traefik) are allowed by node IP /32 ([ADR 0003](0003-traefik-ingress.md)). `check_6` proves the
+  policies work with a probe pod from outside the namespace.
+- **Alertmanager**: no receivers (alerts only need to reach Alertmanager) and no volume, so silences are lost on restart.
+- **Memory**: all monitoring pods together request at most 1536 MiB and are limited to 3072 MiB (2880 used); `check_6`
+  asserts this (B-041). Prometheus: 1280 MiB limit, `GOGC=50`, at most 2 queries at once and 1.2M samples per
+  query, 1 minute timeout (B-042). Why these numbers: [runbook](../runbooks/prometheus-memory.md).
+- **Storage**: Prometheus keeps 3 days or 3 GB on a 5 GiB volume.
+- **Alert proof**: `check_6` shows rules loaded, the always-on `Watchdog` alert in Alertmanager, and `promtool` unit
+  tests (`files/alert-tests.yaml`) that fire `KubeNodeNotReady`, `NodeFilesystemAlmostOutOfSpace`, `etcdNoLeader`,
+  `etcdInsufficientMembers`, `etcdMembersDown` and both Traefik alerts. Breaking a real node or etcd in an automatic
+  check would be disruptive, so firing real alerts is a manual [demo](../runbooks/alert-demo.md). The SRE review ran
+  it: `etcdInsufficientMembers` and `NodeNetworkInterfaceFlapping` both reached Alertmanager.
+
+## Alternatives
 | Option | Why not |
 |---|---|
-| Hand-written Prometheus/Grafana manifests | Rules, dashboards and ServiceMonitors would be ours to maintain |
-| Separate prometheus + grafana charts | Loses the operator CRDs and the bundled node/etcd rules |
-| node-exporter in `monitoring` | Forces the whole namespace to PSA `privileged` |
-| Webhook cert from `internal-ca` | Name constraint `.local` rejects `*.svc` names |
-| Alert proof by unit tests only | Does not show delivery to Alertmanager; demo added |
-| Larger Prometheus limit, no query caps | Starves the llama.cpp pod; one wide query could OOM Prometheus |
+| Hand-written Prometheus and Grafana manifests | We would maintain all rules, dashboards and scrape configs |
+| Separate Prometheus and Grafana charts | Loses the operator and its bundled node and etcd rules |
+| node-exporter in `monitoring` | The whole namespace would have to be `privileged` |
+| Webhook certificate from our CA | Our CA can't sign `*.svc` names |
+| Unit tests only as alert proof | Doesn't show alerts reaching Alertmanager; the demo adds that |
+| Bigger Prometheus limit, no query limits | Leaves no room for llama.cpp; one wide query could still crash Prometheus |
 
 ## Consequences
-- Queries over more than 1.2M samples fail with "too many samples"; raise caps with the limits together ([runbook](../runbooks/monitoring.md#series-grew-raise-query-caps-and-limits)).
-- Retention is short (3d); metrics are not a backup target.
-- The Grafana password lives only on the host and in the Secret.
+- A query over more than 1.2M samples fails with "too many samples". Raise the limits together
+  ([runbook](../runbooks/prometheus-memory.md)).
+- `/api/v1/series` is not covered by the query limits (B-043, accepted risk, deferred to M10).
+- Only 3 days of metrics; they are not backed up.
+- The Grafana password exists only on the Mac and in the Secret.

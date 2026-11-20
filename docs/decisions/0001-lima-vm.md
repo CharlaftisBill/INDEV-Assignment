@@ -3,18 +3,26 @@
 Status: Accepted (M1) · Date: 2026-11-17
 
 ## Context
-The assignment needs one Debian 13 VM (4 vCPU, 8 GB, 40 GB) created with Vagrant, Lima or similar. The host is an Apple Silicon Mac.
+We need one Debian 13 VM (4 vCPU, 8 GB RAM, 40 GB disk) on an Apple Silicon Mac.
+The assignment allows Vagrant, Lima or similar.
 
 ## Decision
-Use Lima with `vmType: vz` (Apple Virtualization.framework) and the official Debian 13 arm64 genericcloud image. The VM is defined in `lima/k8s.yaml`; Lima's built-in containerd is disabled so Ansible owns the runtime.
+Use Lima with Apple's own virtualization (`vmType: vz`) and the official Debian 13 arm64 cloud image.
+The VM is defined in `lima/k8s.yaml`. Lima's built-in containerd is off, so Ansible installs the runtime itself.
 
-## Alternatives considered
-- **Vagrant**: on Apple Silicon it needs a third-party provider (vagrant-qemu, or paid VMware/Parallels) and arm64 Debian 13 boxes are scarce.
-- **UTM / plain QEMU**: no declarative config or SSH/port-forward integration out of the box.
+## Details
+- The image is a fixed, dated build checked by sha512 (never `latest`), so every rebuild is the same.
+- Lima forwards only TCP 443, 80 and 6443. A catch-all ignore rule stops it from forwarding any other port the VM
+  opens, including loopback and UDP ports (B-025, B-028).
+
+## Alternatives
+| Option | Why not |
+|---|---|
+| Vagrant | Needs a third-party provider on Apple Silicon; few arm64 Debian 13 boxes |
+| UTM or plain QEMU | No config file, no built-in SSH or port forwarding |
 
 ## Consequences
-- Native speed on arm64, one YAML file, SSH config generated for Ansible, port forwarding and host mounts built in.
-- Lima forwards ports by watching listening sockets in the guest, so ingress must bind 443 directly (see 0003).
-- The image is a dated build (`debian_image_build`) pinned by sha512, not `latest`, so rebuilds are reproducible.
-- Only TCP 443/80/6443 are forwarded. A catch-all ignore rule (`guestIP 0.0.0.0`, `guestIPMustBeZero: false`, `proto: any`) stops Lima auto-forwarding other guest listeners, including loopback and UDP (B-025, B-028).
-- Intel hosts would use the amd64 image entry; untested.
+- Fast (native arm64), one YAML file, SSH config for Ansible, port forwarding and folder sharing built in.
+- Lima forwards a port only when a process listens on it in the VM. So the ingress must listen on a real port
+  ([ADR 0003](0003-traefik-ingress.md)).
+- Intel hosts would need the amd64 image. Not tested.
