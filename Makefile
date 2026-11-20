@@ -21,6 +21,7 @@ ANSIBLE_ARGS ?=
 STRICT       ?=
 DRY_RUN      ?= 0
 PURGE_SECRETS ?= 0
+YES          ?= 0
 
 override ANSIBLE_CONFIG := $(ANSIBLE_DIR)/ansible.cfg
 export ANSIBLE_CONFIG
@@ -37,7 +38,7 @@ override PYTHON_STAMP := $(TOOLS)/python/.installed
 override VENV         := $(ROOT)/.venv
 override VENV_STAMP   := $(VENV)/.installed
 override PATH         := $(TOOLS)/bin:$(VENV)/bin:$(PATH)
-export PATH VM DRY_RUN PURGE_SECRETS
+export PATH VM DRY_RUN PURGE_SECRETS YES
 # GNU make 3.81 (macOS) execs a recipe line without shell characters using its own, original PATH,
 # so tools run that way are named by path; scripts and lines run by the shell see the PATH above.
 override LIMACTL      := $(TOOLS)/bin/limactl
@@ -48,7 +49,7 @@ override LIMACTL      := $(TOOLS)/bin/limactl
 # so a `$(shell ...)` or `;` payload is rejected before any shell runs. Helpers are `override`
 # so the command line cannot redefine them. Not covered (make expands them before reading this
 # file): `VAR:=$(shell ...)`, `--eval`, `-f`; hence only exact `make` commands are pre-approved (ADR 0009).
-override USER_VARS := VM TAGS REQ ANSIBLE_ARGS STRICT PYTHON DRY_RUN PURGE_SECRETS
+override USER_VARS := VM TAGS REQ ANSIBLE_ARGS STRICT PYTHON DRY_RUN PURGE_SECRETS YES
 override _cmdline_vars := $(foreach v,$(.VARIABLES),$(if $(filter command line,$(origin $(v))),$(v)))
 $(if $(filter-out $(USER_VARS),$(_cmdline_vars)),$(error Only these variables can be set: $(USER_VARS); got: $(filter-out $(USER_VARS),$(_cmdline_vars))))
 # Destructive targets run alone, so they can't ride along with a harmless one (`make verify vm-destroy`).
@@ -70,6 +71,7 @@ $(call check_chars,TAGS,$(_lower) $(_digit) _ $(comma),role names separated by c
 $(call check_chars,STRICT,0 1,0 or 1)
 $(call check_chars,DRY_RUN,0 1,0 or 1)
 $(call check_chars,PURGE_SECRETS,0 1,0 or 1)
+$(call check_chars,YES,0 1,0 or 1)
 $(call check_chars,VM,$(_lower) $(_digit) -,a Lima instance name)
 $(call check_chars,PYTHON,$(_lower) $(_digit) . / - _,a python executable name or path)
 $(call check_chars,ANSIBLE_ARGS,$(_lower) $(_upper) $(_digit) - _ = . / : $(comma) +,ansible-playbook flags without quotes or shell characters)
@@ -92,7 +94,7 @@ deps: ## Install only what is missing: pinned tools into .tools/, venv, collecti
 	@[ "$$(git config --get core.hooksPath)" = .githooks ] || $(MAKE) --no-print-directory hooks
 
 .PHONY: uninstall
-uninstall: ## Remove what make installed, asking per step (DRY_RUN=1 lists only; PURGE_SECRETS=1 also .secrets/)
+uninstall: ## Remove what make installed, asking per step (DRY_RUN=1 lists only; YES=1 no prompts; PURGE_SECRETS=1 also .secrets/)
 	@$(HOST_TOOLS) uninstall
 
 .PHONY: tools

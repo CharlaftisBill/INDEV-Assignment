@@ -35,7 +35,8 @@ Nothing could undo what the project installs on the host.
    its previous value) go to `.tools/system-manifest`. `make uninstall` reverts only what it lists, so tools the user
    installed themselves are never touched.
 7. **`make uninstall`** asks before each step (VM, hosts line, manifest entries, `.tools/`, `.venv/`, `.ansible/`,
-   `ansible/collections/`, `out/`, `backups/*` keeping `.gitkeep`, `core.hooksPath`); `DRY_RUN=1` lists only. A kept
+   `ansible/collections/`, `out/`, `backups/*` keeping `.gitkeep`, `core.hooksPath`); `DRY_RUN=1` lists only, `YES=1`
+   answers yes to every step (no prompts; `.secrets/` still needs `PURGE_SECRETS=1`). A kept
    system entry keeps `.tools/system-manifest` (B-047).
    `.secrets/` only with `PURGE_SECRETS=1`, with the B-037 warning (a new CA replaces the committed `certs/ca.crt`).
 8. **Lima 2.3.0**, the version that created the existing VM (`~/.lima/k8s/lima-version`): the VM was restarted

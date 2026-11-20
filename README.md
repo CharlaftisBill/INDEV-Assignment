@@ -30,8 +30,18 @@ make doctor         # all required items OK
 
 ```bash
 make vm-up          # create + start the Debian 13 VM (4 CPU, 8 GiB, 40 GiB)
+limactl list        # verify that vm is running
+
 make provision      # run ansible/site.yml against it
-make idempotency    # second run must report changed=0
+                    # a second `make provision` will change nothing
+# optional
+make idempotency    # second run must report changed=0, it is made for test purposes as fails on change != 0
+
+# Check the health of K8S & Deployments
+kubectl --kubeconfig out/admin.conf get nodes
+kubectl --kubeconfig out/admin.conf get all -A
+
+# auto verification
 make verify         # requirement checks (scripts/verify.sh)
 make smoke          # the acceptance curl above
 ```
@@ -104,6 +114,7 @@ Ansible already bundles (B-002, hence `--force`). Homebrew copies can stay insta
 ```bash
 make uninstall DRY_RUN=1   # list the steps only
 make uninstall             # asks y/N before each step
+make uninstall YES=1       # every step without asking (sudo may still ask for your password)
 ```
 
 It removes only what `make` created: the VM (`limactl delete`), the `/etc/hosts` line (`scripts/hosts-entry.sh --remove`),
