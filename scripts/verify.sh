@@ -1545,8 +1545,12 @@ check_9() { # llama.cpp over TLS, model cached across restarts
   out="$(k get deployments "$LLM_NAME" -n "$ns" -o jsonpath='{.spec.replicas} {.status.readyReplicas} {.spec.template.spec.containers[0].image}' 2>&1)"
   if [[ "$out" == "1 1 $LLM_IMAGE" ]]; then pass "Deployment $LLM_NAME: 1/1 ready, image $LLM_IMAGE"; else fail "Deployment: $out"; fi
   pod="$(llm_pod)"
-  out="$(k get pod "$pod" -n "$ns" -o jsonpath='{.status.phase} {.status.containerStatuses[0].ready} {.status.containerStatuses[0].restartCount} {.spec.containers[0].startupProbe.httpGet.path} {.spec.containers[0].readinessProbe.httpGet.path} {.spec.containers[0].livenessProbe.httpGet.path} {.spec.containers[0].resources.requests.memory} {.spec.containers[0].resources.limits.memory} {.spec.containers[0].resources.requests.cpu} {.spec.containers[0].resources.limits.cpu}' 2>&1)"
-  if [[ "$out" =~ ^Running\ true\ 0\ /health\ /health\ /health\ [0-9]+Mi\ [0-9]+Mi\ [0-9]+\ [0-9]+$ ]]; then pass "pod $pod Running, 0 restarts, /health startup+readiness+liveness probes, CPU and memory requests+limits ($out)"; else fail "pod state: $out"; fi
+  out="$(k get pod "$pod" -n "$ns" -o jsonpath='{.status.phase} {.status.containerStatuses[0].ready} {.status.containerStatuses[0].restartCount} {.spec.containers[0].startupProbe.httpGet.path} {.spec.containers[0].readinessProbe.httpGet.path} {.spec.containers[0].livenessProbe.httpGet.path} {.spec.containers[0].resources.requests.memory} {.spec.containers[0].resources.limits.memory} {.spec.containers[0].resources.requests.cpu} {.spec.containers[0].resources.limits.cpu} {.status.containerStatuses[0].lastState.terminated.reason}' 2>&1)"
+  # Only crash restarts fail: a VM reboot leaves reason Unknown (container lost with the node), not Error/OOMKilled.
+  if [[ "$out" =~ ^Running\ true\ ([0-9]+)\ /health\ /health\ /health\ [0-9]+Mi\ [0-9]+Mi\ [0-9]+\ [0-9]+\ ?(.*)$ ]] \
+    && { [[ "${BASH_REMATCH[1]}" == 0 ]] || [[ "${BASH_REMATCH[2]}" == Unknown ]]; }; then
+    pass "pod $pod Running, ${BASH_REMATCH[1]} restarts (none from a crash), /health startup+readiness+liveness probes, CPU and memory requests+limits ($out)"
+  else fail "pod state (restarts must be 0 or from a node restart): $out"; fi
   out="$(k get pvc "$LLM_MODEL_PVC" -n "$ns" -o jsonpath='{.status.phase} {.spec.storageClassName}' 2>&1)"
   if [[ "$out" == "Bound local-path" ]]; then pass "model PVC $LLM_MODEL_PVC is Bound on the default StorageClass ($out)"; else fail "model PVC: $out"; fi
 
