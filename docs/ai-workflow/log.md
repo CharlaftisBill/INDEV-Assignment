@@ -86,4 +86,6 @@ review before a PR found B-021 and B-022 in that fix; both fixed on their own br
 ## Docs rewrite (2026-11-20)
 
 - The user asked for smaller, simpler docs, one topic per file. README and `docs/` rewritten; `ai-workflow.md` and
-  the monitoring runbook split.
+  the monitoring runbook split. Bugs moved to [bugs.md](bugs.md), assumptions to `docs/assumptions.md`.
+- `review-loop` r1: `sre-reviewer` opened B-048 (README quick start fails on a fresh clone: no CA key), fixed;
+  `security-reviewer` clean. Lows not folded and round 2 skipped (user: docs-only branch).

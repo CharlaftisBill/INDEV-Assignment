@@ -72,8 +72,9 @@ It removes only what `make` created:
 - `out/` (kubeconfigs) and `backups/*` (etcd snapshots; `.gitkeep` stays);
 - the `core.hooksPath` git setting.
 
-**Kept** unless you add `PURGE_SECRETS=1`: `.secrets/` (the CA key). Without that key, the next provision makes a
-new CA. Then the committed `certs/ca.crt` no longer matches, and you must commit and trust the new one (B-037).
+**Kept** unless you add `PURGE_SECRETS=1`: `.secrets/` (the CA key). Without that key, the next provision stops (B-037)
+until you restore the key or delete `certs/ca.crt` to create a new CA (then commit and trust the new one). See
+[troubleshooting](runbooks/troubleshooting.md#fresh-clone-fails-in-pki-cert-without-key).
 
 **Never touched**: tools you installed yourself, `~/.lima/_config`, and Lima's image cache (other VMs share them).
 Older versions of `make deps` used Homebrew `lima` and `python@3.14`. Remove them with
