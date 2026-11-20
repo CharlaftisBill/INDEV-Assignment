@@ -13,8 +13,9 @@ Nothing could undo what the project installs on the host.
 1. **Repo-local, pinned, sha256-checked binaries** in gitignored `.tools/`, downloaded by `scripts/host-tools.sh`:
    Python 3.14 (python-build-standalone `install_only_stripped`, relocatable), kubectl (cluster minor, v1.35.x),
    jq, Lima (release tarball; `.tools/bin/limactl` is a symlink, Lima finds `share/lima` through the real path) and
-   shellcheck. `.venv` (ansible-core, ansible-lint, yamllint) is built on that Python. The Makefile puts `.tools/bin`
-   and `.venv/bin` first on `PATH`.
+   shellcheck. `.venv` (ansible-core, ansible-lint, yamllint) is built on that Python from `requirements.txt`, a full
+   lock with hashes (`--require-hashes --only-binary=:all:`, the Python's bundled pip; top-level pins in
+   `requirements.in`, B-046). The Makefile puts `.tools/bin` and `.venv/bin` first on `PATH`.
    - GNU make 3.81 (macOS) execs a recipe line that has no shell characters with its *own* original `PATH`, ignoring
      the exported one, so such lines name the tool by path (`$(LIMACTL)`, `$(VENV)/bin/yamllint`). Before this, `make
      lint` and `make collections` could run Homebrew's yamllint / ansible-galaxy.
@@ -23,6 +24,7 @@ Nothing could undo what the project installs on the host.
    is needed before Python exists. Ansible loads them as unused vars; harmless.
 3. **Host assumptions**: `make` plus base OS tools (`curl`, `tar`, `git`, `openssl`, `sudo`). On macOS the Xcode
    Command Line Tools provide them. OS and CPU are detected (macOS/Linux, arm64/amd64). Windows is out of scope.
+   Intel macOS is not supported: the locked cryptography 50 has no macOS x86_64 wheel, and building it needs Rust.
 4. **`make doctor`** is read-only and prints OK / MISSING / WRONG VERSION with the fix for each tool and host setting
    (`/etc/hosts` entry, port 443 forwarding, QEMU on Linux, VM state); it ignores system copies and says so.
    `make verify` (`preflight vm`) and `make e2e` (`preflight hosts`) run a quiet subset that prints only problems.
