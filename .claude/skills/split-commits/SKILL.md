@@ -44,7 +44,7 @@ Group changes by **concern**, not by directory. Default buckets for this repo, i
 | 5 | `test(verify)` / `feat(scripts)` | `scripts/` — a `check_N` goes with its role when it was written for it |
 | 6 | `feat(agent)` | `CLAUDE.md`, `.claude/` (agents, skills, hooks, settings) |
 | 7 | `docs` | `README.md`, `docs/` — goes with the code commit when it documents only that change, otherwise separate |
-| 8 | `chore(todo)` | `TODO.md` state (milestone ticks, bug hashes) — always **last**, see step 4 |
+| 8 | `chore(todo)` | `TODO.md` state (milestone ticks) and `docs/ai-workflow/bugs.md` (bug states, hashes) — always **last**, see step 4 |
 
 Guidelines:
 - Code + its config + its verify check + its ADR status flip = one commit, when they are one change.
@@ -73,8 +73,8 @@ EOF
 ```
 Message rules: Conventional Commits, imperative mood, body explains *why*. No trailers of any kind.
 
-**TODO.md bug hashes:** bugs marked Solved with `uncommitted` reference the commit that fixed them. Commit the fix first,
-take its short hash (`git log -1 --format=%h -- <fixed file>`), replace `uncommitted` in that bug's Fix column in `TODO.md`, then include `TODO.md` in the last commit.
+**Bug hashes:** bugs marked Solved with `uncommitted` reference the commit that fixed them. Commit the fix first,
+take its short hash (`git log -1 --format=%h -- <fixed file>`), replace `uncommitted` in that bug's Fix field in `docs/ai-workflow/bugs.md`, then include it (and `TODO.md`) in the last commit.
 
 ## 5. Verify and report
 ```bash
@@ -86,7 +86,7 @@ Report the commit list (hash + subject) and anything you left uncommitted on pur
 Then offer the next git step (each needs the user's yes): a `fix/` branch cut from a milestone branch → `git switch <parent>`,
 `git merge --no-ff <branch>`, `git branch -d <branch>`; any other branch → **review gate**, then `git push -u origin <branch>` and
 `gh pr create --base main` (title = the main commit subject, body = short summary + req/bug IDs, no AI attribution).
-Remind the user to merge with **Create a merge commit** (squash/rebase changes the hashes in `TODO.md`).
+Remind the user to merge with **Create a merge commit** (squash/rebase changes the hashes in `docs/ai-workflow/bugs.md`).
 
 **Review gate (before every push for a PR):** ask the user whether to run the `review-loop` skill on the branch first
 (scope `main...HEAD`), and say what already reviewed it. Skip the question only when a review-loop round or targeted re-check

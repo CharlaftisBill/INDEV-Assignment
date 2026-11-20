@@ -8,7 +8,7 @@ description: Run one milestone (M1-M10 in TODO.md) end to end - implement, provi
 Argument: a milestone ID (`M5`) or "next". If "next", take the first unchecked milestone in `TODO.md`.
 
 ## 0. Load state
-- Read `TODO.md`: the milestone line, the Status line, and every **Open** bug for this milestone or an earlier one (in scope; later ones are deferred).
+- Read `TODO.md` (the milestone line, the Status line) and, in `docs/ai-workflow/bugs.md`, every **Open** bug for this milestone or an earlier one (in scope; later ones are deferred).
 - Read the matching rows in `docs/requirements-matrix.md`.
 - Check the VM is running: `limactl list`. If not, use the `vm-lifecycle` skill (`make vm-up`).
 - Branch: `git switch main && git pull --ff-only`, then `git switch -c feat/m<n>-<slug>` (slug from the milestone line,

@@ -1,19 +1,19 @@
 ---
 name: fix-next-bug
-description: Fix one Open bug from TODO.md (next in scope, or a given B-NNN) - reproduce, root cause, fix via the right agent, verify, mark Solved. Use for "fix the next bug", "fix B-004", or after a verify/review run opened bugs.
+description: Fix one Open bug from docs/ai-workflow/bugs.md (next in scope, or a given B-NNN) - reproduce, root cause, fix via the right agent, verify, mark Solved. Use for "fix the next bug", "fix B-004", or after a verify/review run opened bugs.
 ---
 
 # Fix the next open bug
 
 Argument (optional): a bug ID (`B-004`). Without it, select the next bug as below.
-Works on **one** bug per run. Read `TODO.md` first.
+Works on **one** bug per run. Read the `TODO.md` Status line and the `## Open` list in `docs/ai-workflow/bugs.md` first.
 
 ## 1. Select
 If a bug ID was given as argument, take it (if it is not Open, say so and stop) and skip the rest of this step.
 
-Otherwise, from the `## Bugs` table in `TODO.md`:
-1. **Filter first.** Keep rows with State `Open` whose milestone is the **current** milestone (Status line) or an earlier one
-   (compare the numbers: M0 < M1 < … < M10). Drop rows whose **Fix** column contains the marker `[stuck` (the `review-loop` skill
+Otherwise, from `docs/ai-workflow/bugs.md` (`## Open` list, then each bug's meta line):
+1. **Filter first.** Keep Open bugs whose milestone is the **current** milestone (Status line) or an earlier one
+   (compare the numbers: M0 < M1 < … < M10). Drop bugs whose **Fix** field contains the marker `[stuck` (the `review-loop` skill
    appends `[stuck rN]` to bugs this skill gave up on; match the bracketed marker, not the plain word, which bug
    descriptions may use).
    Open bugs for **later** milestones are **deferred**: they wait until their milestone becomes current, because the code they
@@ -35,7 +35,7 @@ Commit or stash nothing on your own: if the working tree has unrelated uncommitt
 `git switch -c fix/b-nnn-<slug>`. Note the parent; step 6 merges back into it.
 
 ## 2. Reproduce before touching anything
-- Re-read the bug's details entry in `TODO.md` (Report: evidence, suggested direction).
+- Re-read the bug's entry in `docs/ai-workflow/bugs.md` (Report: evidence, suggested direction).
 - Reproduce the symptom with a concrete command: the failing `make verify REQ=<id> STRICT=1` check, `make lint`, `make idempotency TAGS=<role>`,
   a `kubectl`/`limactl shell` inspection, or a small test case. Record the command and its output.
 - If it no longer reproduces: don't mark it Solved on a guess. Find which change fixed it (`git log -S`, `git log -- <path>`);
@@ -45,7 +45,7 @@ Commit or stash nothing on your own: if the working tree has unrelated uncommitt
 
 ## 3. Root cause
 Find the cause, not just the symptom: read the role/template/script involved, compare with what the check expects,
-and look for the same mistake elsewhere (grep). Write the cause in one sentence; it goes into the bug's details entry (**Root cause**).
+and look for the same mistake elsewhere (grep). Write the cause in one sentence; it goes into the bug's entry (**Root cause**).
 
 ## 4. Fix (smallest change that removes the cause)
 Route by where the cause lives:
@@ -74,9 +74,9 @@ All of these must pass before the bug can be Solved:
 If verification fails after 3 attempts: put what you learned in its one-line **Direction** (entry stays ≤ 5 lines), leave it **Open**, and stop with a summary.
 
 ## 6. Close
-- Mark the bug Solved with the `bug` skill: table row Solved + today + `uncommitted` in Fix; details entry: **Direction** replaced by one line each of **Root cause**, **Fix**, **Verification**.
+- Mark the bug Solved with the `bug` skill: meta line `State: Solved` + `Solved: <today>` + `Fix: uncommitted`, line removed from `## Open`; **Direction** replaced by one line each of **Root cause**, **Fix**, **Verification**.
 - If the fix changes behaviour that is documented, make sure the docs were updated (docs-writer).
-- Add one line to the current milestone's entry in `docs/ai-workflow.md` if the bug was found by an agent or hook
+- Add one line to the current milestone's entry in `docs/ai-workflow/log.md` if the bug was found by an agent or hook
   (it's evidence of the workflow catching something).
 - Report: bug ID, root cause, files changed, verification commands and results.
 - Commit with the `split-commits` skill (`fix(<scope>): <summary> (B-NNN)`, then `chore(todo)` with the hash) when the user approves.

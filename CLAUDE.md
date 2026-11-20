@@ -2,7 +2,7 @@
 
 Build a single-node kubeadm cluster on a local Debian 13 VM **with Ansible, from a clean VM**,
 ending in a llama.cpp server reachable at `https://llm.local` over TLS from the Mac.
-The assignment is `k8s-single-node-assignment.pdf`. Project state and bugs: **`TODO.md` (read it first, update it last).**
+The assignment is `k8s-single-node-assignment.pdf`. Project state: **`TODO.md`**; bugs: **`docs/ai-workflow/bugs.md`** (read both first, update them last).
 
 ## Requirements (details + verification in `docs/requirements-matrix.md`; check IDs `1 2 3a 3b 4 5 6 7 8a 8b 8c 9`)
 1. OS prep, containerd runtime, **pinned** package versions
@@ -38,25 +38,25 @@ The assignment is `k8s-single-node-assignment.pdf`. Project state and bugs: **`T
   - **deny**: reading `.secrets/`, `out/`, `backups/`, node `*.conf`/`pki/*.key`, `kubectl config view --raw`.
 - **Workload security**: everything in `app_namespaces` must pass PSA `restricted`: `runAsNonRoot`, `allowPrivilegeEscalation: false`, drop ALL caps, `seccompProfile: RuntimeDefault`, prefer `readOnlyRootFilesystem`. Every app namespace starts with default-deny ingress+egress NetworkPolicies.
 - **Commits**: only through the `split-commits` skill, which groups changes into focused Conventional Commits (`feat(kubeadm): ...`). **Never add `Co-Authored-By: Claude`, "Generated with Claude Code" or any AI attribution** to commits or PRs; `.githooks/commit-msg` rejects them (enable with `make hooks`). Never `git add -A`, never push without asking.
-- **Branches**: never commit on `main` (`.githooks/pre-commit` rejects it). One branch per milestone (`feat/m<n>-<slug>`), per bug (`fix/b-nnn-<slug>`), or other tooling/docs work (`chore/<slug>`), cut from an up-to-date `main`; a bug in code that exists only on a milestone branch branches from that branch and merges back `--no-ff`. Before every PR, ask the user whether to run `review-loop` on the branch (review gate, `split-commits` step 5). Finished branches go to `main` by GitHub PR, merged by the user with a merge commit (no squash/rebase: `TODO.md` records hashes). Details: [ai-workflow](docs/ai-workflow.md#git-workflow).
+- **Branches**: never commit on `main` (`.githooks/pre-commit` rejects it). One branch per milestone (`feat/m<n>-<slug>`), per bug (`fix/b-nnn-<slug>`), or other tooling/docs work (`chore/<slug>`), cut from an up-to-date `main`; a bug in code that exists only on a milestone branch branches from that branch and merges back `--no-ff`. Before every PR, ask the user whether to run `review-loop` on the branch (review gate, `split-commits` step 5). Finished branches go to `main` by GitHub PR, merged by the user with a merge commit (no squash/rebase: `docs/ai-workflow/bugs.md` records hashes). Details: [git workflow](docs/ai-workflow/git-workflow.md).
 - **Scope**: one role/milestone at a time. Don't touch roles outside the current milestone without logging why in `TODO.md`.
 - **Concise output**: commit messages, docs, comments and agent reports use the fewest words that stay clear. No restating the task, no repeating what another doc says (link it), comments only for a non-obvious why.
 
-## TODO.md protocol
-- Read `TODO.md` before starting; update the Status line, milestone checkboxes and Bugs table before finishing.
+## TODO.md and bugs protocol
+- Read `TODO.md` and the `## Open` list in `docs/ai-workflow/bugs.md` before starting; update the Status line, milestone checkboxes and bugs before finishing.
 - Bug states are only **Open** or **Solved**. IDs are sequential `B-NNN`, never reused or deleted.
-- Format (defined in the `bug` skill, checked by `make lint`): a compact index table (`ID | Title | Sev | State | Milestone | Found | Solved | Fix`, titles ≤ ~100 chars, no evidence in cells) plus a `## Bug details` entry per bug of **at most 5 lines** (heading + one-line Report, Direction or Root cause/Fix/Verification).
-- A bug becomes **Solved** only with the fixing commit hash (or `uncommitted` until committed) in the Fix column and a passing check.
-- Verifier/reviewer agents (`k8s-verifier`, `sre-reviewer`, `security-reviewer`) only *open* bugs; review findings set the Sev column and only Critical/High/Medium are logged. Fixes go through the `fix-next-bug` skill (one bug per run, reproduce → root cause → fix → verify). Use the `bug` skill to keep the table format.
+- Format (defined in the `bug` skill, checked by `make lint`): an `## Open` list, then one `## M<n>` section per milestone with a block per bug: `### B-NNN · <title>` (≤ ~100 chars), a meta line (`Sev · State · Found · Solved · Fix`) and **at most 4** one-line bullets (Report, Direction or Root cause/Fix/Verification).
+- A bug becomes **Solved** only with the fixing commit hash (or `uncommitted` until committed) in its Fix field and a passing check.
+- Verifier/reviewer agents (`k8s-verifier`, `sre-reviewer`, `security-reviewer`) only *open* bugs; review findings set the Sev column and only Critical/High/Medium are logged. Fixes go through the `fix-next-bug` skill (one bug per run, reproduce → root cause → fix → verify). Use the `bug` skill to keep the format.
 - A milestone can't be ticked while Open bugs exist for it or an earlier milestone. Open bugs for later milestones are *deferred*: tracked, not worked, until their milestone becomes current.
-- Assumptions made where the PDF is unclear go under "Assumptions" in `TODO.md`.
+- Assumptions made where the PDF is unclear, and risks the user accepts, go in `docs/assumptions.md`; implementation details go in the ADRs.
 
 ## Definition of done (per milestone)
 `make lint` clean → `make provision TAGS=<role>` OK → `make idempotency TAGS=<role>` (per role) and bare `make idempotency` (whole playbook) `changed=0` → `make verify REQ=<id> STRICT=1` for each ID in the milestone line PASS (no SKIP) →
 `review-loop` clean (SRE review + tests, plus security review for reqs 3, 4, 8, 9, fixes re-reviewed until no new bugs) → docs/ADR + requirements matrix updated → `TODO.md` updated → commits via `split-commits` (user approves commits).
 
 ## Agents and skills
-- Agents in `.claude/agents/`, skills in `.claude/skills/` (overview, models and effort: [docs/ai-workflow.md](docs/ai-workflow.md)). `review-loop` runs **max 2 rounds**, then asks the user.
+- Agents in `.claude/agents/`, skills in `.claude/skills/` (overview: [docs/ai-workflow](docs/ai-workflow/README.md), models and effort: [cost](docs/ai-workflow/cost.md)). `review-loop` runs **max 2 rounds**, then asks the user.
 - Reviews are diff-scoped by default; a whole-repo review only at M10 or when the user asks (`full`).
 - Model per agent is set in its frontmatter; override with the Agent tool's `model` only when a task clearly needs it (e.g. opus for a hard role).
 - A PostToolUse hook lints every YAML file the agent edits (`.claude/hooks/lint-changed.sh`); fix what it reports before moving on.

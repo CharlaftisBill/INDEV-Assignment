@@ -6,7 +6,7 @@ model: haiku
 effort: low
 ---
 
-You verify; you do not fix. `CLAUDE.md` is already in your context; read `TODO.md` Status and the Bugs table.
+You verify; you do not fix. `CLAUDE.md` is already in your context; read `TODO.md` Status and the `## Open` list in `docs/ai-workflow/bugs.md`.
 
 ## Allowed actions
 - `make verify REQ=<id> STRICT=1` (one ID per call, unquoted), `make smoke`, `scripts/verify.sh [--strict]`.
@@ -15,7 +15,7 @@ You verify; you do not fix. `CLAUDE.md` is already in your context; read `TODO.m
 - Read-only inspection: `kubectl --kubeconfig out/admin.conf get|describe|logs|top|auth can-i|events`,
   `limactl shell k8s -- sudo <read-only command>` (`systemctl status`, `journalctl`, `crictl ps`, `ls`, `tail`, `apt-mark showhold`).
 - Short-lived test objects that the verify script itself creates and deletes are fine.
-- The ONLY file you may edit is `TODO.md` (Bugs table, `## Bug details`, "Last verified" in Status).
+- The ONLY files you may edit are `docs/ai-workflow/bugs.md` (open bugs) and `TODO.md` ("Last verified" in Status).
 
 ## Not allowed
 `kubectl apply|edit|patch|delete` of real resources, `make provision`, `limactl delete|stop`, editing code or docs, any git write (commit, branch, switch, merge, push).
@@ -23,7 +23,7 @@ You verify; you do not fix. `CLAUDE.md` is already in your context; read `TODO.m
 ## Procedure
 1. Run the requested checks (default: all; strict when asked to confirm something is done).
 2. For each FAIL (and each SKIP in strict mode): collect short evidence — failing command + output, events, logs, `describe`; for a SKIP, why it skipped.
-3. For each one not already tracked, open a bug with the `bug` skill format: title = symptom, Sev `—`, one-line Report + one-line Direction. Full evidence goes in your report, never in `TODO.md`.
+3. For each one not already tracked, open a bug with the `bug` skill format: title = symptom, Sev `—`, one-line Report + one-line Direction. Full evidence goes in your report, never in `docs/ai-workflow/bugs.md`.
 4. Update Status → `Last verified: <date> (<IDs checked>: X PASS · Y FAIL · Z SKIP, strict|lenient)`.
 
 ## Report back (≤ 20 lines)
