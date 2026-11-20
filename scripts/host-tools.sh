@@ -3,7 +3,7 @@
 #   scripts/host-tools.sh doctor              read-only report; exit 1 if anything required is missing
 #   scripts/host-tools.sh preflight [vm|hosts] quiet doctor subset: only problems, exit 1 if any
 #   scripts/host-tools.sh deps                install what is missing (pinned, sha256-checked) into .tools/
-#   scripts/host-tools.sh uninstall           remove what make installed, asking per step (DRY_RUN=1, PURGE_SECRETS=1)
+#   scripts/host-tools.sh uninstall           remove what make installed, asking per step (DRY_RUN=1, YES=1, PURGE_SECRETS=1)
 # Pins: host_* keys in ansible/group_vars/all/versions.yml. Runs on macOS /bin/bash 3.2.
 set -euo pipefail
 
@@ -276,14 +276,15 @@ cmd_deps() {
 # ---------------------------------------------------------------- uninstall
 DRY_RUN="${DRY_RUN:-0}"
 PURGE_SECRETS="${PURGE_SECRETS:-0}"
+YES="${YES:-0}"  # answer yes to every step (no prompts); sudo may still ask for a password
 STEP_DONE=0
-step() {  # step "what" "shown command" function [args]: print, then ask (or only print with DRY_RUN=1); sets STEP_DONE
+step() {  # step "what" "shown command" function [args]: print, then ask (only print with DRY_RUN=1, no ask with YES=1); sets STEP_DONE
   local what="$1" shown="$2"; shift 2
   STEP_DONE=0
   echo "- $what"
   echo "    \$ $shown"
   if [[ "$DRY_RUN" == 1 ]]; then return 0; fi
-  if confirm "Remove?"; then "$@"; STEP_DONE=1; echo "    done"; else echo "    kept"; fi
+  if [[ "$YES" == 1 ]] || confirm "Remove?"; then "$@"; STEP_DONE=1; echo "    done"; else echo "    kept"; fi
 }
 rm_path() { rm -rf -- "${ROOT:?}/${1:?}"; }
 rm_tools_keep_manifest() { find "${ROOT:?}/.tools" -mindepth 1 -maxdepth 1 ! -name system-manifest -exec rm -rf -- {} +; }
@@ -294,7 +295,9 @@ remove_pkgs() { local mgr="$1"; shift; sudo "$mgr" remove -y "$@"; }
 revert_sysctl() { sudo rm -f "$SYSCTL_FILE"; sudo sysctl -w "$1=$2" >/dev/null; }
 
 cmd_uninstall() {
-  [[ "$DRY_RUN" == 1 ]] && echo "DRY_RUN=1: listing the steps only, nothing is removed." || echo "Each step asks first (y/N)."
+  if [[ "$DRY_RUN" == 1 ]]; then echo "DRY_RUN=1: listing the steps only, nothing is removed."
+  elif [[ "$YES" == 1 ]]; then echo "YES=1: removing every step below without asking."
+  else echo "Each step asks first (y/N)."; fi
   local st; st="$(vm_status)"
   if [[ "$st" != absent ]]; then step "Lima VM '$VM' ($st): the whole cluster, its disk and etcd" "limactl delete --force $VM" delete_vm
   else echo "- VM '$VM': not present"; fi
