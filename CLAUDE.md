@@ -16,7 +16,7 @@ The assignment is `k8s-single-node-assignment.pdf`. Project state: **`TODO.md`**
 9. llama.cpp + Qwen2.5-0.5B-Instruct GGUF Q4 on CPU, via ingress/TLS, no model re-download on pod restart
 
 ## Environment
-- Host: Apple Silicon Mac. VM: Lima instance `k8s` (`lima/k8s.yaml`, vz, arm64, Debian 13, 4 CPU / 8 GiB / 40 GiB).
+- Host: Apple Silicon Mac. VM: Lima instance `k8s` (`lima/k8s.yaml`, Lima default VM type: vz on macOS, arm64, Debian 13, 4 CPU / 8 GiB / 40 GiB).
 - Ansible runs **on the Mac** and pushes over SSH (`ansible/ansible.cfg` uses `~/.lima/k8s/ssh.config`, host alias `lima-k8s`).
 - Shell in VM: `limactl shell k8s`. Admin kubeconfig (after M2): `out/admin.conf` → `kubectl --kubeconfig out/admin.conf ...`.
 - Host-forwarded ports: Mac 443, 80, 6443 only (443/80 map to Traefik's 8443/8000 in the VM). `/etc/hosts` on the Mac maps `llm.local grafana.local` to 127.0.0.1 (`scripts/hosts-entry.sh`).
@@ -32,7 +32,7 @@ The assignment is `k8s-single-node-assignment.pdf`. Project state: **`TODO.md`**
 - **Ansible style**: FQCN modules (`ansible.builtin.*`, `kubernetes.core.*`); prefer modules over `command`/`shell`; when unavoidable, set `creates:`/`removes:` or `changed_when:`. Templates in `roles/<r>/templates/`, defaults in `defaults/main.yml`. Each role has a tag equal to its name in `site.yml`.
 - **Idempotency**: a second `make provision` must report `changed=0`. Not optional.
 - **Kubernetes objects** are applied with `kubernetes.core.k8s` / `kubernetes.core.helm` from Ansible, never by hand. Manual `kubectl` is for inspection only.
-- **Secrets**: CA key in `.secrets/`, kubeconfigs in `out/`, etcd snapshots (which contain every Secret) in `backups/`; all gitignored, only `certs/ca.crt` is committed. **Never read secret material**; to check a Secret exists use `kubectl describe secret`. `.claude/settings.json` backs this up (deny > ask > allow; a guardrail, not a boundary: [ADR 0009](docs/decisions/0009-agent-permissions-guardrail.md)):
+- **Secrets**: CA key in `.secrets/`, kubeconfigs in `out/`, etcd snapshots (which contain every Secret) in `backups/`; all gitignored, only `certs/ca.crt` is committed. **Never read secret material**; to check a Secret exists list names only (`get secrets -n <ns> -o name`); `describe secret` is denied (prints service-account tokens, B-051). `.claude/settings.json` backs this up (deny > ask > allow; a guardrail, not a boundary: [ADR 0009](docs/decisions/0009-agent-permissions-guardrail.md)):
   - **allow**: exact `make` commands only (`make verify REQ=8c STRICT=1`, `make provision TAGS=os_prep`: one unquoted ID or role; other forms prompt). `kubectl --kubeconfig out/admin.conf get <kind>` for listed kinds only (no Secrets). **Put the kind right after `get`** (`get pods -n llm`), else it prompts. Operator kubeconfig: `auth can-i` only. `limactl`, `git`, `gh` broadly allowed (user's choice), minus the asks below.
   - **ask**: unlisted/comma-separated kinds, `--raw`, extra `--kubeconfig`/`--context`/`--user`/`--token`/`KUBECONFIG=`, shell metacharacters on a `limactl shell` line, anything under `/etc/kubernetes/pki/` or `.secrets/`; destructive or outward git/gh/limactl (commit, push, reset, merge, switch, checkout, restore, rebase, clean, `branch -D`, `gh pr create/merge`, `gh api/repo/release/auth`, VM delete/stop/factory-reset, `rm -`/`kubeadm reset` in `limactl shell`).
   - **deny**: reading `.secrets/`, `out/`, `backups/`, node `*.conf`/`pki/*.key`, `kubectl config view --raw`.
