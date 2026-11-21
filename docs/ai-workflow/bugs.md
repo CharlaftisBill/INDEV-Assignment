@@ -404,3 +404,10 @@ Sev: Medium · State: Solved · Found: 2026-11-21 · Solved: 2026-11-21 · Fix: 
 - **Root cause:** plain `etcdutl snapshot restore` resets the revision below what watchers hold; drill: kube-proxy kept a deleted Service's rules > 5 min.
 - **Fix:** runbook restores with `--bump-revision 1000000000 --mark-compacted` (all watchers re-list); `check_4` scans only 15 min of Traefik log (restore leaves a one-off "forbidden").
 - **Verification:** same-VM drill with the flags: kube-proxy dropped both stale rules in ~10 s; `make provision` changed=0; 12 IDs strict PASS.
+
+### B-055 · [sre] `make chat` fails every turn once history exceeds the 2048-token slot; hint blames the VM
+Sev: Medium · State: Solved · Found: 2026-11-21 · Solved: 2026-11-21 · Fix: 70b141e
+- **Report** (sre r1): 4 essay prompts, then every message gets `curl: (56) ... error: 400` (`exceed_context_size_error`, n_ctx 2048 = 4096/`--parallel 2`); last reply cut silently; hint blames the VM.
+- **Root cause:** `chat.sh` resent the whole history every turn and `--fail` dropped the server's error body, so one overflow broke every later turn.
+- **Fix:** `--fail-with-body`; on `exceed_context_size_error` drop the oldest exchange and retry; print `error.message` (or curl's); note `finish_reason: length`.
+- **Verification:** 3 long turns then short ones: trimmed and answered; a 2600-word message gets a clear note; 404/refused show the cause; REQ=9 strict PASS.

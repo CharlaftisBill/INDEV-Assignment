@@ -101,3 +101,6 @@ review before a PR found B-021 and B-022 in that fix; both fixed on their own br
 - 2026-11-21, `chore/persist-kubeadm-pki` (kubeadm PKI kept across rebuilds): rebuilt-VM drill found B-053 (kubelet
   keeps pre-restore pods). `review-loop` r1: `sre-reviewer` opened B-054 (every watcher stale after a same-VM
   restore), reproduced and fixed with `--bump-revision --mark-compacted`; `security-reviewer` clean (3 Lows).
+- 2026-11-21, `chore/monitoring-ui-port-forward` (`make monitoring-ui`, `make chat`, brief .pdf → .md): `review-loop` r1:
+  `sre-reviewer` opened B-055 (`make chat` dead after the 2048-token context fills), fixed on `fix/b-055-*` (trim oldest
+  exchange, show the server's error); `security-reviewer` clean (Lows: control chars, body in `ps`, both folded in). r2: both clean.
