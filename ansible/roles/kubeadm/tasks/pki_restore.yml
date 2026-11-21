@@ -1,0 +1,59 @@
+---
+# Needs kubeadm_existing (init.yml). Key material never reaches the output (no_log).
+- name: Create the host directories for the cluster PKI
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0700"
+  loop:
+    - "{{ host_secrets_dir }}"
+    - "{{ kubeadm_host_pki_dir }}"
+    - "{{ kubeadm_host_pki_dir }}/etcd"
+  delegate_to: localhost
+  become: false
+
+- name: Look for the host copy of the cluster PKI
+  ansible.builtin.stat:
+    path: "{{ kubeadm_host_pki_dir }}/{{ item }}"
+  loop: "{{ kubeadm_persisted_pki }}"
+  register: kubeadm_host_pki
+  delegate_to: localhost
+  become: false
+
+- name: Note whether the host copy is complete
+  ansible.builtin.set_fact:
+    kubeadm_host_pki_complete: "{{ kubeadm_host_pki.results | selectattr('stat.exists') | list | length == kubeadm_persisted_pki | length }}"
+    kubeadm_control_plane_exists: "{{ kubeadm_existing.results | selectattr('stat.exists') | list | length > 0 }}"
+
+# Half a CA set would make kubeadm mint the rest and silently split the trust chain.
+- name: Refuse a partial host copy of the cluster PKI
+  ansible.builtin.assert:
+    that: kubeadm_host_pki_complete or (kubeadm_host_pki.results | selectattr('stat.exists') | list | length == 0)
+    fail_msg: >-
+      {{ kubeadm_host_pki_dir }} lacks some of {{ kubeadm_persisted_pki | join(', ') }}: restore the missing files,
+      or move the folder away so the next init creates new CAs.
+    quiet: true
+
+- name: Create the node PKI directories for the host copy
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+    owner: root
+    group: root
+  loop:
+    - "{{ kubeadm_pki_dir }}"
+    - "{{ kubeadm_pki_dir }}/etcd"
+  when: kubeadm_host_pki_complete and not kubeadm_control_plane_exists
+
+# kubeadm init then reuses these CAs and SA keys and only issues new leaf certificates.
+- name: Restore the cluster CAs and ServiceAccount key pair before kubeadm init
+  ansible.builtin.copy:
+    src: "{{ kubeadm_host_pki_dir }}/{{ item }}"
+    dest: "{{ kubeadm_pki_dir }}/{{ item }}"
+    mode: "{{ '0644' if item is search('\\.crt$') else '0600' }}"
+    owner: root
+    group: root
+  loop: "{{ kubeadm_persisted_pki }}"
+  no_log: true
+  when: kubeadm_host_pki_complete and not kubeadm_control_plane_exists

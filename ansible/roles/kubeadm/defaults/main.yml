@@ -21,6 +21,20 @@ kubeadm_audit_log_maxbackup: 5    # rotated files kept
 kubeadm_audit_log_maxsize: 100    # MB per file
 kubeadm_admission_dir: /etc/kubernetes/admission
 
+# Cluster CAs + ServiceAccount key pair, kept on the host (gitignored) so a rebuilt VM reuses them:
+# restored before kubeadm init, saved after the first init (ADR 0006: snapshot restore on a new VM).
+kubeadm_pki_dir: /etc/kubernetes/pki
+kubeadm_host_pki_dir: "{{ host_secrets_dir }}/kubeadm-pki"
+kubeadm_persisted_pki:
+  - ca.crt
+  - ca.key
+  - front-proxy-ca.crt
+  - front-proxy-ca.key
+  - etcd/ca.crt
+  - etcd/ca.key
+  - sa.key
+  - sa.pub
+
 # Out-of-VM copy of the admin kubeconfig (gitignored), server rewritten to the Lima forward.
 kubeadm_host_admin_conf: "{{ host_out_dir }}/admin.conf"
 kubeadm_host_api_server: "https://127.0.0.1:{{ kubeadm_api_port }}"

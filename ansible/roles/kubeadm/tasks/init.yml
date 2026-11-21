@@ -59,6 +59,9 @@
     - not kubeadm_existing.results[0].stat.exists
     - kubeadm_existing.results[1].stat.exists or kubeadm_existing.results[2].stat.exists
 
+- name: Restore the cluster PKI from the host
+  ansible.builtin.import_tasks: pki_restore.yml
+
 - name: Initialise the control plane
   block:
     - name: Run kubeadm init
@@ -75,6 +78,9 @@
     - name: Fail after resetting kubeadm init
       ansible.builtin.fail:
         msg: "kubeadm init failed and was reset: {{ kubeadm_init.stderr | default('') }}"
+
+- name: Save the cluster PKI on the host
+  ansible.builtin.import_tasks: pki_save.yml
 
 # Audit policy / admission config changed after init: restart the API server before using it.
 - name: Apply pending API server restarts

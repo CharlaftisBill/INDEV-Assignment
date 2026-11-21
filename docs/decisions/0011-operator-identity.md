@@ -19,7 +19,8 @@ Role `hardening` gives the operator a **client certificate** and binds a read-on
   `portforward`, `proxy`, `serviceaccounts/token`, impersonate, escalate, bind or CSR approval.
   `pods/log` is allowed, like the built-in `view` role (logs may hold app data). Reads also cover RBAC objects, CRDs,
   webhook configs, CSRs, and cert-manager and Prometheus-operator objects.
-- **Files**: certificate in `.secrets/operator.crt`; it is also reissued after a VM rebuild (new cluster CA).
+- **Files**: certificate in `.secrets/operator.crt`. The cluster CA is kept across VM rebuilds
+  ([ADR 0006](0006-etcd-backups-outside-cluster.md#restore-on-a-rebuilt-vm)), so the certificate stays valid.
 - **Why not the built-in `view` role**: `view` grows when any chart adds a role labelled for it. An explicit list
   can't grow silently. `check_8a` asserts the exact rules.
 - **Calico caveat**: because of Calico's `calico-tiered-policy-passthrough` binding, `auth can-i` says yes for

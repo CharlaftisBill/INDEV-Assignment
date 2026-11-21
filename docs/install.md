@@ -80,7 +80,8 @@ It removes only what `make` created:
 - `out/` (kubeconfigs) and `backups/*` (etcd snapshots; `.gitkeep` stays);
 - the `core.hooksPath` git setting.
 
-**Kept** unless you add `PURGE_SECRETS=1`: `.secrets/` (the CA key). Without that key, the next provision stops (B-037)
+**Kept** unless you add `PURGE_SECRETS=1`: `.secrets/` (the CA key, and the cluster CAs that let old etcd snapshots
+restore onto a new VM). Without the CA key, the next provision stops (B-037)
 until you restore the key or delete `certs/ca.crt` to create a new CA (then commit and trust the new one). See
 [troubleshooting](runbooks/troubleshooting.md#fresh-clone-fails-in-pki-cert-without-key).
 

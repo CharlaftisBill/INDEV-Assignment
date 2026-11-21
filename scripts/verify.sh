@@ -92,6 +92,15 @@ check_2() { # kubeadm single node, schedulable control plane (node Ready, contro
   local sans; sans="$(node openssl x509 -in /etc/kubernetes/pki/apiserver.crt -noout -ext subjectAltName 2>&1)"
   if grep -q 'IP Address:127.0.0.1' <<<"$sans" && grep -q 'DNS:localhost' <<<"$sans"; then pass "API server cert SANs include 127.0.0.1 and localhost"
   else fail "API server cert SANs lack 127.0.0.1/localhost: $sans"; fi
+  # Cluster CAs + SA key pair come from the host copy, so a rebuilt VM keeps them (compares public halves only).
+  local f hsum nsum pki_bad=""
+  for f in ca.crt front-proxy-ca.crt etcd/ca.crt sa.pub; do
+    hsum="$(openssl dgst -sha256 -r "$ROOT/.secrets/kubeadm-pki/$f" 2>/dev/null | cut -d' ' -f1)"
+    nsum="$(node openssl dgst -sha256 -r "/etc/kubernetes/pki/$f" 2>/dev/null | cut -d' ' -f1)"
+    [[ -n "$hsum" && "$hsum" == "$nsum" ]] || pki_bad+="$f "
+  done
+  if [[ -z "$pki_bad" ]]; then pass "cluster CAs and SA public key match the host copy in .secrets/kubeadm-pki"
+  else fail "node PKI missing from or differs from .secrets/kubeadm-pki: $pki_bad"; fi
 
   # One node, registered as control plane, running the pinned version
   local nodes; nodes="$(k get nodes -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>&1)"

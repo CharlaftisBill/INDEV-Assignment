@@ -9,7 +9,7 @@ Disruptive tests (kubelet restart, containerd restart, pod deletion, VM reboot) 
 | ID | Requirement | Role | Checks | Milestone | Status |
 |---|---|---|---|---|---|
 | [1](#1-os-and-container-runtime) | OS prep, containerd, pinned packages | `os_prep`, `containerd` | 19 | M1 | Done |
-| [2](#2-kubeadm-single-node) | kubeadm, one node runs everything | `kubeadm` | 20 | M2 | Done |
+| [2](#2-kubeadm-single-node) | kubeadm, one node runs everything | `kubeadm` | 21 | M2 | Done |
 | [3a](#3a-network-plugin) | CNI installed and healthy | `cni_calico` | 15 | M3 | Done |
 | [3b](#3b-app-network-policy) | App pods accept only needed traffic | `llm_app` | 18 | M9 | Done |
 | [4](#4-ingress-and-tls) | Ingress + internal CA, auto renewal | `pki`, `ingress_traefik` | 48 | M5 | Done |
@@ -32,7 +32,9 @@ Disruptive tests (kubelet restart, containerd restart, pod deletion, VM reboot) 
 - **Built:** Kubernetes packages from pkgs.k8s.io v1.35, pinned and held, signing key checked. `kubeadm init` from a
   config ([control plane notes](architecture.md#control-plane-notes)). Control-plane taint removed. `out/admin.conf`
   for the Mac. `init` never runs over an existing cluster (B-029, [runbook](runbooks/troubleshooting.md#lost-adminconf)).
-- **Checked:** `/readyz` from the Mac over verified TLS; one Ready node at the pinned version, no blocking taint;
+  Cluster CAs and ServiceAccount keys are kept in `.secrets/kubeadm-pki/` and reused on a rebuilt VM.
+- **Checked:** `/readyz` from the Mac over verified TLS; node CAs and SA public key match the host copy;
+  one Ready node at the pinned version, no blocking taint;
   packages held; every kube-system pod healthy. After kubelet restart, containerd restart and VM reboot it stays healthy.
 
 ## 3a. Network plugin

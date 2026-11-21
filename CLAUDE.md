@@ -68,4 +68,5 @@ The assignment is `k8s-single-node-assignment.pdf`. Project state: **`TODO.md`**
 - Audit "every request": the policy must not contain `level: None` rules; rotate the log (`audit-log-maxage/maxbackup/maxsize`).
 - `.local` names on macOS go through mDNS first; the `/etc/hosts` entry is required.
 - The CA is generated on the host and reused across VM rebuilds, so the committed `certs/ca.crt` stays valid.
+  The kubeadm CAs and SA keys are reused too (`.secrets/kubeadm-pki/`, saved after the first init).
 - Debian 13 trixie: check package names/versions with `apt-cache madison` on the VM before pinning.

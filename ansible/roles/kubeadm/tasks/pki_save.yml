@@ -1,0 +1,39 @@
+---
+# Needs kubeadm_host_pki_complete (pki_restore.yml). Key material never reaches the output (no_log).
+- name: Read the node's cluster PKI for the host copy
+  ansible.builtin.slurp:
+    src: "{{ kubeadm_pki_dir }}/{{ item }}"
+  loop: "{{ kubeadm_persisted_pki }}"
+  register: kubeadm_node_pki_content
+  no_log: true
+  when: not kubeadm_host_pki_complete
+
+- name: Save the cluster PKI on the host
+  ansible.builtin.copy:
+    content: "{{ item.content | b64decode }}"
+    dest: "{{ kubeadm_host_pki_dir }}/{{ item.item }}"
+    mode: "0600"
+  loop: "{{ kubeadm_node_pki_content.results }}"
+  delegate_to: localhost
+  become: false
+  no_log: true
+  when: not kubeadm_host_pki_complete
+
+- name: Read the node's cluster PKI checksums
+  ansible.builtin.stat:
+    path: "{{ kubeadm_pki_dir }}/{{ item }}"
+  loop: "{{ kubeadm_persisted_pki }}"
+  register: kubeadm_node_pki
+  when: kubeadm_host_pki_complete
+
+# A cluster built before the host copy existed (or from another copy) keeps its own CAs.
+- name: Assert the node uses the host copy of the cluster PKI
+  ansible.builtin.assert:
+    that: >-
+      kubeadm_node_pki.results | map(attribute='stat.checksum', default='') | list
+      == kubeadm_host_pki.results | map(attribute='stat.checksum') | list
+    fail_msg: >-
+      The node's cluster CAs or SA keys differ from {{ kubeadm_host_pki_dir }}. Rebuild the VM (`make vm-reset`)
+      to use the host copy, or move that folder away to save the node's PKI instead.
+    quiet: true
+  when: kubeadm_host_pki_complete
