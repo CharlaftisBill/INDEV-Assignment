@@ -123,5 +123,8 @@ Set by the `kubeadm` role:
 - The API certificate also covers `127.0.0.1` and `localhost`, so `out/admin.conf` works through the Lima forward.
 - Metrics ports of controller-manager, scheduler, kube-proxy and etcd listen on the node IP, so Prometheus can reach them.
   etcd also keeps `127.0.0.1:2381` first, for its health probe.
+- Cluster CA, front-proxy CA, etcd CA and ServiceAccount key pair are saved to `.secrets/kubeadm-pki/` after the first
+  `kubeadm init` and put back before `init` on a rebuilt VM, so the cluster keeps its trust roots
+  ([ADR 0006](decisions/0006-etcd-backups-outside-cluster.md#restore-on-a-rebuilt-vm)).
 - kubeadm reads its config only on the first `kubeadm init`. Later changes need `make vm-reset`.
   The audit policy and Pod Security config are re-read when the API server restarts (the role handles that).

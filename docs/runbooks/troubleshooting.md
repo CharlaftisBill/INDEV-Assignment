@@ -75,6 +75,18 @@ make smoke
 **Fix:** either put the original key back in `.secrets/ca.key` (mode 0600), or delete `certs/ca.crt` to make a new CA
 and commit the new `certs/ca.crt` ([CA rotation](ca-rotation.md)).
 
+## kubeadm stops on the cluster PKI host copy
+
+**Symptom:** `make provision` fails in `kubeadm`: "`.secrets/kubeadm-pki` lacks some of ..." or "The node's cluster
+CAs or SA keys differ from ...".
+
+**Cause:** the host copy of the cluster CAs and ServiceAccount keys is incomplete, or the running cluster was built with
+other ones ([ADR 0006](../decisions/0006-etcd-backups-outside-cluster.md#restore-on-a-rebuilt-vm)).
+
+**Fix:** restore the missing files from your own copy; or rebuild with `make vm-reset` so the VM uses the host copy;
+or move `.secrets/kubeadm-pki` away so the next run saves the node's PKI instead (old snapshots then need the
+pod restart and token steps that B-050 describes).
+
 ## check_6 fails right after a restart
 
 **Symptom:** `make verify REQ=6` fails on rollout or target checks after a provision, a node reboot or a Prometheus

@@ -67,6 +67,6 @@ All are gitignored. Never print or share them.
 
 | Path | Holds |
 |---|---|
-| `.secrets/` | CA key, operator key, Grafana password |
+| `.secrets/` | CA key, cluster CAs and ServiceAccount keys (`kubeadm-pki/`), operator key, Grafana password |
 | `out/` | admin and operator kubeconfigs |
 | `backups/` | etcd snapshots. They contain every Kubernetes Secret |
