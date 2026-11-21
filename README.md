@@ -45,8 +45,14 @@ make provision    # run Ansible; a second run changes nothing
 kubectl --kubeconfig out/admin.conf get nodes
 make verify       # all requirement checks
 make smoke        # the curl above
-make monitoring-ui # Prometheus + Alertmanager on localhost:9090/9093 (Ctrl-C stops)
 ```
+
+**4. Open the web UIs** (optional):
+
+| UI | How |
+|---|---|
+| Grafana | `https://grafana.local`, user `admin` ([password](docs/runbooks/grafana.md)); needs the `/etc/hosts` line (`scripts/hosts-entry.sh --apply`) |
+| Prometheus, Alertmanager | `make monitoring-ui`, then `http://localhost:9090` and `http://localhost:9093`; Ctrl-C stops it. No login, so local port-forward only, no Ingress |
 
 `make e2e` does all of this on a fresh VM. `make uninstall` removes it again. `make help` lists every command.
 
@@ -55,7 +61,7 @@ make monitoring-ui # Prometheus + Alertmanager on localhost:9090/9093 (Ctrl-C st
 Start at the [docs index](docs/README.md). The most used pages:
 
 - [Install and uninstall](docs/install.md)
-- [Daily use](docs/usage.md): commands, kubeconfigs, Grafana
+- [Daily use](docs/usage.md): commands, kubeconfigs, Grafana, Prometheus, Alertmanager
 - [Architecture](docs/architecture.md) and [versions](docs/versions.md)
 - [Requirements](docs/requirements-matrix.md): what each requirement needs and how it is checked
 - [Decisions](docs/decisions/) and [runbooks](docs/runbooks/)
