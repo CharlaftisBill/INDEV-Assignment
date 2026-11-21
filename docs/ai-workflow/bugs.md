@@ -390,3 +390,10 @@ Sev: Medium · State: Solved · Found: 2026-11-20 · Solved: 2026-11-20 · Fix: 
 - **Root cause:** glob rules are case-sensitive and a blanket `describe:*` allow approved any spelling the deny missed.
 - **Fix:** `describe` allowed only for the 47 listed kinds (like `get`); deny `*ecret*`, `*ECRET*`, `-f`, `-f=`, `--filename`; stale docs fixed.
 - **Verification:** `describe Secret grafana-admin` and `describe secret …` both refused by the harness; `make lint` clean.
+
+### B-053 · etcd restore runbook: kubelet keeps running the pre-restore pods
+Sev: — · State: Solved · Found: 2026-11-21 · Solved: 2026-11-21 · Fix: e7b2129
+- **Report** (rebuilt-VM drill with kept PKI): 26 min after the restore the node still ran VM 2's pods; their bound SA tokens failed ("Token does not match server's copy").
+- **Root cause:** kubelet's pod watch stays at the newer pre-restore revision and never re-lists; B-050's "restart all pods" hid it.
+- **Fix:** runbook restarts kubelet once the API is back (same and rebuilt VM).
+- **Verification:** after `systemctl restart kubelet` the snapshot's pods ran within 3 s; `make provision` + all 12 IDs strict PASS.

@@ -3,7 +3,7 @@
 Live project state and bug tracker. Agents read this first and update it last (protocol in `CLAUDE.md`).
 
 ## Status
-Current milestone: **Done (M1–M10)** · Last verified: 2026-11-20 M10 final gate (`make e2e` from a destroyed VM 313 PASS; after the review fixes: `make idempotency` changed=0; 1: 19, 2: 20, 3a: 15, 3b: 18, 4: 48, 5: 15, 6: 76, 7: 23, 8a: 35, 8b: 19, 8c: 8, 9: 17 PASS · 0 FAIL · 0 SKIP, strict) · Last SRE review: working tree 2026-11-20 — M10 full r1+r2 (disruptive: reboot, kubelet/containerd restart, etcd restore same + rebuilt VM); clean after B-052 (user accepted)
+Current milestone: **Done (M1–M10)** · Last verified: 2026-11-21 PKI persistence (`make e2e` twice, 314 PASS each; after a rebuilt-VM etcd restore 1: 19, 2: 21, 3a: 15, 3b: 18, 4: 48, 5: 15, 6: 76, 7: 23, 8a: 35, 8b: 19, 8c: 8, 9: 17 PASS, strict) · Before: 2026-11-20 M10 final gate (`make e2e` from a destroyed VM 313 PASS; after the review fixes: `make idempotency` changed=0; 1: 19, 2: 20, 3a: 15, 3b: 18, 4: 48, 5: 15, 6: 76, 7: 23, 8a: 35, 8b: 19, 8c: 8, 9: 17 PASS · 0 FAIL · 0 SKIP, strict) · Last SRE review: working tree 2026-11-20 — M10 full r1+r2 (disruptive: reboot, kubelet/containerd restart, etcd restore same + rebuilt VM); clean after B-052 (user accepted)
 
 ## Milestones
 - [x] M0 Scaffolding: repo layout, agentic layer (`.claude/`), Makefile, lint configs, Lima config, docs skeleton, commit tooling (`split-commits` skill, `.githooks/commit-msg`)
@@ -38,6 +38,12 @@ Current milestone: **Done (M1–M10)** · Last verified: 2026-11-20 M10 final ga
   - [x] `scripts/hosts-entry.sh`: only flush the macOS DNS cache on macOS
   - [x] README + `CLAUDE.md`: host support listed in README; Linux install steps once `lima/k8s.yaml` is portable
   - [x] Test on a Linux host if one is available; otherwise keep "untested" in the docs (no Linux host: docs say "untested")
+
+- [x] **Keep the kubeadm PKI across VM rebuilds** (2026-11-21, `chore/persist-kubeadm-pki`, [ADR 0006](docs/decisions/0006-etcd-backups-outside-cluster.md#restore-on-a-rebuilt-vm)).
+  `kubeadm` role saves cluster/front-proxy/etcd CAs + SA keys to `.secrets/kubeadm-pki/` after the first init, restores
+  them before init on a new VM; `check_2` compares the public halves. Two `make e2e` runs: 314 PASS each, same CA
+  fingerprint. Old-VM snapshot restored onto the second VM without pod mass-restart or token reissue; kubelet
+  restart added to the runbook (B-053); 12 IDs strict PASS after it.
 
 ## Bugs
 All bugs, Open and Solved, are in [docs/ai-workflow/bugs.md](docs/ai-workflow/bugs.md) (format: `bug` skill).
