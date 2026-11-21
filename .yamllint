@@ -8,6 +8,7 @@ ignore: |
   .ansible/
   out/
   backups/
+  .claude/worktrees/
 
 rules:
   line-length:
