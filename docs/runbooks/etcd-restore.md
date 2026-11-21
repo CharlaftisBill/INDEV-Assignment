@@ -5,7 +5,8 @@ Design: [ADR 0006](../decisions/0006-etcd-backups-outside-cluster.md).
 Snapshots are `etcd-snapshot-<UTC>.db` files in `./backups` on the Mac (`/mnt/host-backups` in the VM).
 They contain every Secret: never open, print or share them.
 
-Tested on the same VM (2026-11-20) and on a rebuilt VM with kept PKI (2026-11-21). These steps follow kubeadm's
+Tested on the same VM (2026-11-20) and on a rebuilt VM with kept PKI (2026-11-21). Same VM again on 2026-11-21
+with the bump flags: watchers re-listed within about 10 s (B-054). These steps follow kubeadm's
 layout: etcd runs as a static pod from
 `/etc/kubernetes/manifests/etcd.yaml` and keeps its data in `/var/lib/etcd`.
 
@@ -41,15 +42,18 @@ Alert `EtcdBackupStale` means no good snapshot for over an hour. Read the journa
    sudo mv /var/lib/etcd /var/lib/etcd.old
    E=/root/manifests-off/etcd.yaml
    NAME="$(sudo sed -n 's/^ *- --name=//p' "$E")"; PEER="$(sudo sed -n 's/^ *- --initial-advertise-peer-urls=//p' "$E")"; CLUSTER="$(sudo sed -n 's/^ *- --initial-cluster=//p' "$E")"
-   sudo etcdutl snapshot restore "$SNAP" --data-dir /var/lib/etcd --name "$NAME" --initial-cluster "$CLUSTER" --initial-advertise-peer-urls "$PEER"
+   sudo etcdutl snapshot restore "$SNAP" --data-dir /var/lib/etcd --name "$NAME" --initial-cluster "$CLUSTER" --initial-advertise-peer-urls "$PEER" --bump-revision 1000000000 --mark-compacted
    ```
    Expected: member `k8s-node`, peer `https://192.168.5.15:2380`.
-4. Start the control plane again, then restart kubelet once the API answers. Its pod watch stays at the pre-restore
-   revision, so without the restart it keeps running pods the snapshot does not have (B-053):
+   The bump flags are needed because revisions must move forward past anything clients have seen, and marking them
+   compacted makes every watcher (kube-proxy, CoreDNS, Calico, cert-manager) re-list. Without them, watchers keep a
+   stale watch and miss deletions: kube-proxy kept rules for a deleted Service for over 5 min (B-054).
+4. Start the control plane again, then restart kubelet once the API answers. The restart makes kubelet re-sync pods
+   at once, so it stops pods the snapshot does not have (B-053):
    ```bash
    sudo mv /root/manifests-off/*.yaml /etc/kubernetes/manifests/
-   until sudo kubectl --kubeconfig /etc/kubernetes/admin.conf get --raw /readyz >/dev/null 2>&1; do sleep 2; done
-   sudo systemctl restart kubelet
+   for i in $(seq 60); do sudo kubectl --kubeconfig /etc/kubernetes/admin.conf get --raw /readyz >/dev/null 2>&1 && break; sleep 2; done
+   sudo kubectl --kubeconfig /etc/kubernetes/admin.conf get --raw /readyz && sudo systemctl restart kubelet   # no "ok": check etcd first
    ```
 5. Check from the Mac:
    ```bash
@@ -57,6 +61,7 @@ Alert `EtcdBackupStale` means no good snapshot for over an hour. Read the journa
    kubectl --kubeconfig out/admin.conf get pods -A
    make verify REQ=2 STRICT=1
    ```
+   Wait 15 min before `make verify REQ=4`: Traefik may log one "forbidden" while the API server loads RBAC (B-054).
    On a rebuilt VM, do the [extra steps](#restore-on-a-rebuilt-vm) first; until then this check can fail.
 
 Objects made after the snapshot are gone, and workloads go back to the snapshot's state.
@@ -68,7 +73,8 @@ When all is well, delete the old data: `sudo rm -rf /var/lib/etcd.old`.
 
 `make vm-reset` keeps `./backups` and `.secrets/`. So the rebuilt VM gets the same ingress CA and the same kubeadm
 CAs and ServiceAccount keys (`.secrets/kubeadm-pki/`, [ADR 0006](../decisions/0006-etcd-backups-outside-cluster.md#restore-on-a-rebuilt-vm)).
-Running pods and legacy token Secrets in the snapshot stay valid: no pod restart and no token reissue. Then:
+Running pods and legacy token Secrets in the snapshot stay valid, so you do not delete all pods by hand or reissue
+tokens. Kubelet still recreates the snapshot's pods itself. Then:
 
 ```bash
 make vm-up

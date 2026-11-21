@@ -522,8 +522,10 @@ check_4() { # Ingress (Traefik) + TLS from the internal CA (cert-manager) + auto
     if [[ "$role_n" == 1 && "$rb_n" == 1 ]]; then pass "Traefik Role and RoleBinding exist in watched namespace $ns"
     else fail "watched namespace $ns lacks the Traefik Role/RoleBinding (role=$role_n binding=$rb_n); re-run make provision TAGS=ingress_traefik"; fi
   done
-  local forbidden; forbidden="$(k logs -n "$tr_ns" deployment/traefik --tail=1000 2>&1 | grep -ci 'forbidden')"
-  if [[ "$forbidden" == 0 ]]; then pass "no 'forbidden' errors in the Traefik log (Ingress provider can list its namespaces)"; else fail "$forbidden 'forbidden' lines in the Traefik log (RBAC gap, provider not synced?)"; fi
+  # Last 15 min only: a real RBAC gap repeats on every reflector retry; an etcd restore leaves one-off lines
+  # from while the API server's RBAC cache was loading (B-054).
+  local forbidden; forbidden="$(k logs -n "$tr_ns" deployment/traefik --since=15m --tail=1000 2>&1 | grep -ci 'forbidden')"
+  if [[ "$forbidden" == 0 ]]; then pass "no 'forbidden' errors in the last 15 min of the Traefik log (Ingress provider can list its namespaces)"; else fail "$forbidden 'forbidden' lines in the last 15 min of the Traefik log (RBAC gap, provider not synced?)"; fi
   local p listen; listen="$(node ss -H -ltn 2>&1)"
   for p in "$https_port" "$http_port"; do
     if grep -Eq "[:*]${p}[[:space:]]" <<<"$listen"; then pass "node listens on :$p (Lima forwards it)"; else fail "nothing listens on :$p on the node"; fi

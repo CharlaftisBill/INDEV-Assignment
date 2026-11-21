@@ -397,3 +397,10 @@ Sev: — · State: Solved · Found: 2026-11-21 · Solved: 2026-11-21 · Fix: e7b
 - **Root cause:** kubelet's pod watch stays at the newer pre-restore revision and never re-lists; B-050's "restart all pods" hid it.
 - **Fix:** runbook restarts kubelet once the API is back (same and rebuilt VM).
 - **Verification:** after `systemctl restart kubelet` the snapshot's pods ran within 3 s; `make provision` + all 12 IDs strict PASS.
+
+### B-054 · [sre] Same-VM etcd restore: running controllers keep pre-restore watches; only kubelet re-lists
+Sev: Medium · State: Solved · Found: 2026-11-21 · Solved: 2026-11-21 · Fix: 64dddf4
+- **Report** (sre r1): B-053's cause (etcd revision goes back) hits every informer; same-VM restore keeps pods running, so kube-proxy, CoreDNS, Calico, cert-manager miss changes and deletions.
+- **Root cause:** plain `etcdutl snapshot restore` resets the revision below what watchers hold; drill: kube-proxy kept a deleted Service's rules > 5 min.
+- **Fix:** runbook restores with `--bump-revision 1000000000 --mark-compacted` (all watchers re-list); `check_4` scans only 15 min of Traefik log (restore leaves a one-off "forbidden").
+- **Verification:** same-VM drill with the flags: kube-proxy dropped both stale rules in ~10 s; `make provision` changed=0; 12 IDs strict PASS.
