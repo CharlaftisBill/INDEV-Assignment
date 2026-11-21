@@ -70,7 +70,8 @@ to this Mac only (`127.0.0.1`) until Ctrl-C:
 | `http://localhost:9093` | Alertmanager: firing alerts (`Watchdog` always fires) |
 
 `make chat` is a terminal chat with the model: it streams replies and keeps the conversation history.
-`/reset` clears the history; `/quit` or Ctrl-D exits.
+`/reset` clears the history; `/quit` or Ctrl-D exits. The model sees 2048 tokens per request, so when the history
+gets longer the oldest exchange is dropped (it says so).
 
 ## Files to keep private
 
