@@ -49,6 +49,9 @@ Current milestone: **Done (M1–M10)** · Last verified: 2026-11-21 PKI persiste
   `127.0.0.1:9090/9093` until Ctrl-C ([usage](docs/usage.md#web-pages)); no Ingress since neither has a login. Tested: both `/-/ready`
   200 through the forwards, Ctrl-C exits 0, busy port fails clearly; shellcheck clean.
 
+- [x] **Terminal chat** (2026-11-21, `chore/llm-chat-tui`). `make chat` (`scripts/chat.sh`, curl + jq): streams replies, keeps
+  history, `/reset`, `/quit`. Tested on the live model: history recalled, reset forgets, a 404 is reported and the chat goes on.
+
 ## Bugs
 All bugs, Open and Solved, are in [docs/ai-workflow/bugs.md](docs/ai-workflow/bugs.md) (format: `bug` skill).
 

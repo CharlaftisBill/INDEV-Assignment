@@ -199,6 +199,11 @@ monitoring-ui: ## Port-forward Prometheus (localhost:9090) and Alertmanager (loc
 	@$(HOST_TOOLS) preflight vm
 	@$(ROOT)/scripts/monitoring-ui.sh $(KUBECONFIG_ADMIN)
 
+.PHONY: chat
+chat: ## Chat with the model at llm.local in the terminal (/reset, /quit)
+	@$(HOST_TOOLS) preflight vm
+	@$(ROOT)/scripts/chat.sh
+
 .PHONY: smoke
 smoke: ## The acceptance curl from the assignment
 	curl --fail --cacert $(ROOT)/certs/ca.crt https://llm.local/v1/chat/completions \

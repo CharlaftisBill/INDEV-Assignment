@@ -54,6 +54,12 @@ make smoke        # the curl above
 | Grafana | `https://grafana.local`, user `admin` ([password](docs/runbooks/grafana.md)); needs the `/etc/hosts` line (`scripts/hosts-entry.sh --apply`) |
 | Prometheus, Alertmanager | `make monitoring-ui`, then `http://localhost:9090` and `http://localhost:9093`; Ctrl-C stops it. No login, so local port-forward only, no Ingress |
 
+**5. Chat with the model** (optional):
+
+```bash
+make chat         # streams replies, keeps history; /reset clears it, /quit or Ctrl-D exits
+```
+
 `make e2e` does all of this on a fresh VM. `make uninstall` removes it again. `make help` lists every command.
 
 ## Documentation
