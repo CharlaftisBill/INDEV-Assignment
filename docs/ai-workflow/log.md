@@ -98,3 +98,6 @@ review before a PR found B-021 and B-022 in that fix; both fixed on their own br
   the monitoring runbook split. Bugs moved to [bugs.md](bugs.md), assumptions to `docs/assumptions.md`.
 - `review-loop` r1: `sre-reviewer` opened B-048 (README quick start fails on a fresh clone: no CA key), fixed;
   `security-reviewer` clean. Lows not folded and round 2 skipped (user: docs-only branch).
+- 2026-11-21, `chore/persist-kubeadm-pki` (kubeadm PKI kept across rebuilds): rebuilt-VM drill found B-053 (kubelet
+  keeps pre-restore pods). `review-loop` r1: `sre-reviewer` opened B-054 (every watcher stale after a same-VM
+  restore), reproduced and fixed with `--bump-revision --mark-compacted`; `security-reviewer` clean (3 Lows).
