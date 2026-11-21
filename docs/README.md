@@ -62,5 +62,5 @@ out/                generated kubeconfigs (gitignored)
 .githooks/          git hooks (commit-msg, pre-commit)
 CLAUDE.md           project rules for the agent
 TODO.md             milestones and backlog
-k8s-single-node-assignment.pdf   the assignment
+k8s-single-node-assignment.md   the assignment
 ```
