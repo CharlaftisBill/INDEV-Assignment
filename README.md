@@ -47,6 +47,12 @@ make verify       # all requirement checks
 make smoke        # the curl above
 ```
 
+**4. Chat with the model** (optional):
+
+```bash
+make chat         # streams replies, keeps history; /reset clears it, /quit or Ctrl-D exits
+```
+
 `make e2e` does all of this on a fresh VM. `make uninstall` removes it again. `make help` lists every command.
 
 ## Documentation

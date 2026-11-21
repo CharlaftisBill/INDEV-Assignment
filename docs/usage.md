@@ -61,6 +61,9 @@ Their certificates are signed by `certs/ca.crt`.
 | `https://llm.local` | llama.cpp API (OpenAI-style `/v1/chat/completions`) |
 | `https://grafana.local` | Grafana dashboards, user `admin` ([password](runbooks/grafana.md)) |
 
+`make chat` is a terminal chat with the model: it streams replies and keeps the conversation history.
+`/reset` clears the history; `/quit` or Ctrl-D exits.
+
 ## Files to keep private
 
 All are gitignored. Never print or share them.

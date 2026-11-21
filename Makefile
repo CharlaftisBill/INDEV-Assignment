@@ -194,6 +194,11 @@ e2e: ## Full run from a clean VM; any FAIL or SKIP fails it
 	$(MAKE) idempotency
 	$(MAKE) verify STRICT=1
 
+.PHONY: chat
+chat: ## Chat with the model at llm.local in the terminal (/reset, /quit)
+	@$(HOST_TOOLS) preflight vm
+	@$(ROOT)/scripts/chat.sh
+
 .PHONY: smoke
 smoke: ## The acceptance curl from the assignment
 	curl --fail --cacert $(ROOT)/certs/ca.crt https://llm.local/v1/chat/completions \
