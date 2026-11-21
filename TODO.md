@@ -45,6 +45,9 @@ Current milestone: **Done (M1–M10)** · Last verified: 2026-11-21 PKI persiste
   fingerprint. Old-VM snapshot restored onto the second VM without pod mass-restart or token reissue; kubelet
   restart added to the runbook (B-053); 12 IDs strict PASS after it.
 
+- [x] **Terminal chat** (2026-11-21, `chore/llm-chat-tui`). `make chat` (`scripts/chat.sh`, curl + jq): streams replies, keeps
+  history, `/reset`, `/quit`. Tested on the live model: history recalled, reset forgets, a 404 is reported and the chat goes on.
+
 ## Bugs
 All bugs, Open and Solved, are in [docs/ai-workflow/bugs.md](docs/ai-workflow/bugs.md) (format: `bug` skill).
 
