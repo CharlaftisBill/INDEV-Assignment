@@ -45,6 +45,10 @@ Current milestone: **Done (M1–M10)** · Last verified: 2026-11-21 PKI persiste
   fingerprint. Old-VM snapshot restored onto the second VM without pod mass-restart or token reissue; kubelet
   restart added to the runbook (B-053); 12 IDs strict PASS after it.
 
+- [x] **Prometheus/Alertmanager UI access** (2026-11-21, `chore/monitoring-ui-port-forward`). `make monitoring-ui` port-forwards both to
+  `127.0.0.1:9090/9093` until Ctrl-C ([usage](docs/usage.md#web-pages)); no Ingress since neither has a login. Tested: both `/-/ready`
+  200 through the forwards, Ctrl-C exits 0, busy port fails clearly; shellcheck clean.
+
 ## Bugs
 All bugs, Open and Solved, are in [docs/ai-workflow/bugs.md](docs/ai-workflow/bugs.md) (format: `bug` skill).
 
