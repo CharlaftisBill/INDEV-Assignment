@@ -5,7 +5,8 @@ Design: [ADR 0006](../decisions/0006-etcd-backups-outside-cluster.md).
 Snapshots are `etcd-snapshot-<UTC>.db` files in `./backups` on the Mac (`/mnt/host-backups` in the VM).
 They contain every Secret: never open, print or share them.
 
-Tested 2026-11-20 on the same VM and on a rebuilt VM. These steps follow kubeadm's layout: etcd runs as a static pod from
+Tested on the same VM (2026-11-20) and on a rebuilt VM with kept PKI (2026-11-21). These steps follow kubeadm's
+layout: etcd runs as a static pod from
 `/etc/kubernetes/manifests/etcd.yaml` and keeps its data in `/var/lib/etcd`.
 
 ## Check the backups
@@ -43,9 +44,12 @@ Alert `EtcdBackupStale` means no good snapshot for over an hour. Read the journa
    sudo etcdutl snapshot restore "$SNAP" --data-dir /var/lib/etcd --name "$NAME" --initial-cluster "$CLUSTER" --initial-advertise-peer-urls "$PEER"
    ```
    Expected: member `k8s-node`, peer `https://192.168.5.15:2380`.
-4. Start the control plane again:
+4. Start the control plane again, then restart kubelet once the API answers. Its pod watch stays at the pre-restore
+   revision, so without the restart it keeps running pods the snapshot does not have (B-053):
    ```bash
    sudo mv /root/manifests-off/*.yaml /etc/kubernetes/manifests/
+   until sudo kubectl --kubeconfig /etc/kubernetes/admin.conf get --raw /readyz >/dev/null 2>&1; do sleep 2; done
+   sudo systemctl restart kubelet
    ```
 5. Check from the Mac:
    ```bash
@@ -62,7 +66,9 @@ When all is well, delete the old data: `sudo rm -rf /var/lib/etcd.old`.
 
 ## Restore on a rebuilt VM
 
-`make vm-reset` keeps `./backups` and `.secrets/` (so the CA stays the same). Then:
+`make vm-reset` keeps `./backups` and `.secrets/`. So the rebuilt VM gets the same ingress CA and the same kubeadm
+CAs and ServiceAccount keys (`.secrets/kubeadm-pki/`, [ADR 0006](../decisions/0006-etcd-backups-outside-cluster.md#restore-on-a-rebuilt-vm)).
+Running pods and legacy token Secrets in the snapshot stay valid: no pod restart and no token reissue. Then:
 
 ```bash
 make vm-up
@@ -70,40 +76,30 @@ make provision     # new cluster with a new etcd; takes a first snapshot
 ```
 
 Now run the same-VM steps above with the old snapshot. Node name and IP are fixed in `group_vars`, so they match.
-Tested 2026-11-20: the API was back 5 s after the manifests returned, and objects made after the snapshot were gone.
+Tested 2026-11-21 (snapshot from the VM of the first `make e2e`, restored after a second one; same CA fingerprint):
+the API was back 2 s after the manifests returned with the old cluster's objects, kubelet ran the snapshot's pods 3 s
+after its restart, no x509 or token errors, and the legacy token Secret worked unchanged.
 Then do these extra steps, in this order.
-
-The rebuilt VM has a new kubeadm CA and ServiceAccount key (only the ingress CA is kept across rebuilds). Keeping
-both across rebuilds would avoid steps 2 and 3. That is not done.
 
 1. **Fix local-path volume permissions.** Restored PVs point at old `pvc-<uid>` folders. Kubelet recreates them as
    root `0755`, so non-root Prometheus crashloops with "permission denied" and the model cannot be fetched.
-   Their data is gone (it was on the old disk): Prometheus starts with empty history, and the model is fetched in step 4.
+   Their data is gone (it was on the old disk): Prometheus starts with empty history, and the model is fetched in step 2.
    ```bash
    kubectl --kubeconfig out/admin.conf get pv -o jsonpath='{range .items[?(@.spec.storageClassName=="local-path")]}{.spec.hostPath.path}{"\n"}{end}'
    limactl shell k8s sudo find <path> -type d -exec chmod 0777 {} +   # each path, subPath dirs too; 0777 is what local-path-provisioner sets
    ```
-2. **Restart all pods.** Running pods keep the old CA. kube-proxy then fails with
-   "x509: certificate signed by unknown authority", so Service IPs are not programmed (cert-manager webhook and
-   Calico API time out).
-   ```bash
-   kubectl --kubeconfig out/admin.conf delete pods --all -A --wait=false
-   kubectl --kubeconfig out/admin.conf get pods -A     # wait until all are Ready (about 30 s)
-   ```
-3. **Reissue legacy token Secrets.** Their tokens are signed by the old key, so Prometheus scrapes get 401.
-   Today only `monitoring/kps-prometheus-token` exists.
-   ```bash
-   kubectl --kubeconfig out/admin.conf get secrets -A --field-selector type=kubernetes.io/service-account-token -o name
-   kubectl --kubeconfig out/admin.conf patch secret <name> -n <ns> --type=json -p '[{"op":"remove","path":"/data/token"}]'
-   ```
-   kube-controller-manager then issues a new token.
-   **Warning:** never `describe` or `get -o yaml` these Secrets. `describe` prints the token in clear text (B-051).
-4. **Re-apply and verify.** `make provision` fetches the model again (`llm_app` changed=4). Then:
+2. **Re-apply and verify.** `make provision` fetches the model again (`llm_app` changed). Then:
    ```bash
    make verify STRICT=1     # all 12 IDs PASS in the drill
    ```
-5. Optional: the new cluster's own PV folders are now unused. They are the folders under
+3. Optional: the new cluster's own PV folders are now unused. They are the folders under
    `/opt/local-path-provisioner` that the `get pv` command in step 1 does **not** list. Delete only those.
+
+**If `.secrets/kubeadm-pki/` was lost** (or the snapshot predates it), the VM has new CAs. Before step 2, also restart
+all pods (`kubectl --kubeconfig out/admin.conf delete pods --all -A --wait=false`; running pods keep the old CA and
+kube-proxy fails with x509) and remove `data.token` from each legacy token Secret so kube-controller-manager issues a
+new one (`--field-selector type=kubernetes.io/service-account-token -o name` lists them; `patch secret <name> -n <ns>
+--type=json -p '[{"op":"remove","path":"/data/token"}]'`). Never `describe` or `get -o yaml` these Secrets (B-051).
 
 ## Notes
 
