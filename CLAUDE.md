@@ -2,7 +2,7 @@
 
 Build a single-node kubeadm cluster on a local Debian 13 VM **with Ansible, from a clean VM**,
 ending in a llama.cpp server reachable at `https://llm.local` over TLS from the Mac.
-The assignment is `k8s-single-node-assignment.pdf`. Project state: **`TODO.md`**; bugs: **`docs/ai-workflow/bugs.md`** (read both first, update them last).
+The assignment is `k8s-single-node-assignment.md`. Project state: **`TODO.md`**; bugs: **`docs/ai-workflow/bugs.md`** (read both first, update them last).
 
 ## Requirements (details + verification in `docs/requirements-matrix.md`; check IDs `1 2 3a 3b 4 5 6 7 8a 8b 8c 9`)
 1. OS prep, containerd runtime, **pinned** package versions
@@ -49,7 +49,7 @@ The assignment is `k8s-single-node-assignment.pdf`. Project state: **`TODO.md`**
 - A bug becomes **Solved** only with the fixing commit hash (or `uncommitted` until committed) in its Fix field and a passing check.
 - Verifier/reviewer agents (`k8s-verifier`, `sre-reviewer`, `security-reviewer`) only *open* bugs; review findings set the Sev column and only Critical/High/Medium are logged. Fixes go through the `fix-next-bug` skill (one bug per run, reproduce → root cause → fix → verify). Use the `bug` skill to keep the format.
 - A milestone can't be ticked while Open bugs exist for it or an earlier milestone. Open bugs for later milestones are *deferred*: tracked, not worked, until their milestone becomes current.
-- Assumptions made where the PDF is unclear, and risks the user accepts, go in `docs/assumptions.md`; implementation details go in the ADRs.
+- Assumptions made where the brief is unclear, and risks the user accepts, go in `docs/assumptions.md`; implementation details go in the ADRs.
 
 ## Definition of done (per milestone)
 `make lint` clean → `make provision TAGS=<role>` OK → `make idempotency TAGS=<role>` (per role) and bare `make idempotency` (whole playbook) `changed=0` → `make verify REQ=<id> STRICT=1` for each ID in the milestone line PASS (no SKIP) →

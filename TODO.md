@@ -3,7 +3,7 @@
 Live project state and bug tracker. Agents read this first and update it last (protocol in `CLAUDE.md`).
 
 ## Status
-Current milestone: **Done (M1–M10)** · Last verified: 2026-11-21 PKI persistence (`make e2e` twice, 314 PASS each; after a rebuilt-VM etcd restore 1: 19, 2: 21, 3a: 15, 3b: 18, 4: 48, 5: 15, 6: 76, 7: 23, 8a: 35, 8b: 19, 8c: 8, 9: 17 PASS, strict) · Before: 2026-11-20 M10 final gate (`make e2e` from a destroyed VM 313 PASS; after the review fixes: `make idempotency` changed=0; 1: 19, 2: 20, 3a: 15, 3b: 18, 4: 48, 5: 15, 6: 76, 7: 23, 8a: 35, 8b: 19, 8c: 8, 9: 17 PASS · 0 FAIL · 0 SKIP, strict) · Last SRE review: working tree 2026-11-21 — clean (B-054 fix r2, non-disruptive; r1 at 2b3b8d0 opened B-054)
+Current milestone: **Done (M1–M10)** · Last verified: 2026-11-21 PKI persistence (`make e2e` twice, 314 PASS each; after a rebuilt-VM etcd restore 1: 19, 2: 21, 3a: 15, 3b: 18, 4: 48, 5: 15, 6: 76, 7: 23, 8a: 35, 8b: 19, 8c: 8, 9: 17 PASS, strict) · Before: 2026-11-20 M10 final gate (`make e2e` from a destroyed VM 313 PASS; after the review fixes: `make idempotency` changed=0; 1: 19, 2: 20, 3a: 15, 3b: 18, 4: 48, 5: 15, 6: 76, 7: 23, 8a: 35, 8b: 19, 8c: 8, 9: 17 PASS · 0 FAIL · 0 SKIP, strict) · Last SRE review: working tree 2026-11-21 — clean (B-055 fix r2, non-disruptive; r1 at 639f647 opened B-055)
 
 ## Milestones
 - [x] M0 Scaffolding: repo layout, agentic layer (`.claude/`), Makefile, lint configs, Lima config, docs skeleton, commit tooling (`split-commits` skill, `.githooks/commit-msg`)
@@ -44,6 +44,13 @@ Current milestone: **Done (M1–M10)** · Last verified: 2026-11-21 PKI persiste
   them before init on a new VM; `check_2` compares the public halves. Two `make e2e` runs: 314 PASS each, same CA
   fingerprint. Old-VM snapshot restored onto the second VM without pod mass-restart or token reissue; kubelet
   restart added to the runbook (B-053); 12 IDs strict PASS after it.
+
+- [x] **Prometheus/Alertmanager UI access** (2026-11-21, `chore/monitoring-ui-port-forward`). `make monitoring-ui` port-forwards both to
+  `127.0.0.1:9090/9093` until Ctrl-C ([usage](docs/usage.md#web-pages)); no Ingress since neither has a login. Tested: both `/-/ready`
+  200 through the forwards, Ctrl-C exits 0, busy port fails clearly; shellcheck clean.
+
+- [x] **Terminal chat** (2026-11-21, `chore/llm-chat-tui`). `make chat` (`scripts/chat.sh`, curl + jq): streams replies, keeps
+  history, `/reset`, `/quit`. Tested on the live model: history recalled, reset forgets, a 404 is reported and the chat goes on.
 
 ## Bugs
 All bugs, Open and Solved, are in [docs/ai-workflow/bugs.md](docs/ai-workflow/bugs.md) (format: `bug` skill).

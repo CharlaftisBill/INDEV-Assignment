@@ -17,7 +17,7 @@ The server pod never has outbound access.
 - **Network**: only pods with the Job's label get DNS and HTTPS (TCP 443) to public IPs. Private ranges
   (RFC1918, 169.254/16, 100.64/10) stay blocked. Any public IP, because Hugging Face's CDN addresses change and
   NetworkPolicy can't match hostnames.
-- **Server**: one Deployment, 1 replica, `Recreate`. CPU 1 (request = limit), memory 768Mi request / 1536Mi limit,
+- **Server**: one Deployment, 1 replica, `Recreate`. CPU 1 request / 3 limit (3 threads), memory 768Mi request / 1536Mi limit,
   2 slots × 2048 context. `--no-slots` hides the `/slots` endpoint, `--no-webui` the web UI; no metrics endpoint, so Prometheus doesn't scrape it.
   It mounts the volume read-only. Init container `verify-model` checks the hash and stops on a mismatch (`Init:Error`).
 - The Job and the init container reuse the llama.cpp image (it has curl and sha256sum), so there is no second image.

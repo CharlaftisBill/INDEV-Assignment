@@ -61,6 +61,19 @@ Their certificates are signed by `certs/ca.crt`.
 | `https://llm.local` | llama.cpp API (OpenAI-style `/v1/chat/completions`) |
 | `https://grafana.local` | Grafana dashboards, user `admin` ([password](runbooks/grafana.md)) |
 
+Prometheus and Alertmanager have no login, so they get no Ingress. `make monitoring-ui` port-forwards them
+to this Mac only (`127.0.0.1`) until Ctrl-C:
+
+| URL | What |
+|---|---|
+| `http://localhost:9090` | Prometheus: queries, targets, alert rules |
+| `http://localhost:9093` | Alertmanager: firing alerts (`Watchdog` always fires) |
+
+`make chat` is a terminal chat with the model: it streams replies and keeps the conversation history.
+`/reset` clears the history; `/quit` or Ctrl-D exits; Ctrl-C stops a reply (at the prompt it exits). The model sees
+2048 tokens per request, so when the history gets longer the oldest exchanges are dropped (it says so); a single
+message too long to fit is refused and the history kept.
+
 ## Files to keep private
 
 All are gitignored. Never print or share them.
