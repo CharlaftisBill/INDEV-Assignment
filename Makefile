@@ -194,6 +194,11 @@ e2e: ## Full run from a clean VM; any FAIL or SKIP fails it
 	$(MAKE) idempotency
 	$(MAKE) verify STRICT=1
 
+.PHONY: monitoring-ui
+monitoring-ui: ## Port-forward Prometheus (localhost:9090) and Alertmanager (localhost:9093) until Ctrl-C
+	@$(HOST_TOOLS) preflight vm
+	@$(ROOT)/scripts/monitoring-ui.sh $(KUBECONFIG_ADMIN)
+
 .PHONY: smoke
 smoke: ## The acceptance curl from the assignment
 	curl --fail --cacert $(ROOT)/certs/ca.crt https://llm.local/v1/chat/completions \

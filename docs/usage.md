@@ -61,6 +61,14 @@ Their certificates are signed by `certs/ca.crt`.
 | `https://llm.local` | llama.cpp API (OpenAI-style `/v1/chat/completions`) |
 | `https://grafana.local` | Grafana dashboards, user `admin` ([password](runbooks/grafana.md)) |
 
+Prometheus and Alertmanager have no login, so they get no Ingress. `make monitoring-ui` port-forwards them
+to this Mac only (`127.0.0.1`) until Ctrl-C:
+
+| URL | What |
+|---|---|
+| `http://localhost:9090` | Prometheus: queries, targets, alert rules |
+| `http://localhost:9093` | Alertmanager: firing alerts (`Watchdog` always fires) |
+
 ## Files to keep private
 
 All are gitignored. Never print or share them.

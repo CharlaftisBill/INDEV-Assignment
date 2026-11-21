@@ -45,6 +45,7 @@ make provision    # run Ansible; a second run changes nothing
 kubectl --kubeconfig out/admin.conf get nodes
 make verify       # all requirement checks
 make smoke        # the curl above
+make monitoring-ui # Prometheus + Alertmanager on localhost:9090/9093 (Ctrl-C stops)
 ```
 
 `make e2e` does all of this on a fresh VM. `make uninstall` removes it again. `make help` lists every command.
