@@ -157,6 +157,7 @@ vm-shell: ## Open a shell in the VM
 # ---------------------------------------------------------------- provisioning
 .PHONY: provision
 provision: tools ## Run site.yml (TAGS=os_prep,containerd to limit)
+	@$(HOST_TOOLS) ca $(TAGS)
 	cd $(ANSIBLE_DIR) && ansible-playbook site.yml $(if $(TAGS),--tags $(TAGS),) $(ANSIBLE_ARGS)
 
 .PHONY: idempotency
@@ -189,6 +190,7 @@ verify: ## Run requirement checks (REQ=4 for one; STRICT=1 makes SKIP fail)
 .PHONY: e2e
 e2e: ## Full run from a clean VM; any FAIL or SKIP fails it
 	@$(HOST_TOOLS) preflight hosts
+	@$(HOST_TOOLS) ca
 	$(MAKE) vm-reset
 	$(MAKE) provision
 	$(MAKE) idempotency
