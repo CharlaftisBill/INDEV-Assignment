@@ -1,4 +1,7 @@
 ---
+# Debian arch name; picks per-arch entries in os_base_packages (binNMU versions differ).
+os_prep_arch: "{{ {'aarch64': 'arm64', 'x86_64': 'amd64'}[ansible_facts['architecture']] }}"
+
 os_prep_kernel_modules: [overlay, br_netfilter]
 
 os_prep_sysctls:

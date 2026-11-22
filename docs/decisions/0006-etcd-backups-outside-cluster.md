@@ -17,7 +17,7 @@ the API server or scheduler is broken. Snapshots go to `/mnt/host-backups`, whic
   write anywhere else. Snapshots must never land on the VM disk (B-010). `check_7` compares Mac and node listings.
 - `etcdctl snapshot save` with kubeadm's `healthcheck-client` certificate, then `etcdutl snapshot status` to check
   it. Written under a temp name and renamed, so a half-written file never has the final name.
-- Keeps the newest 48 snapshots. Files are mode 0600 and, through virtiofs, owned by the Mac user.
+- Keeps the newest 48 snapshots. Files are mode 0600 and, through virtiofs (macOS) or 9p (Linux), owned by the host user.
 - The script is `/usr/local/sbin/etcd-backup`, run as root. The role takes one snapshot when none exists yet.
 - etcdctl and etcdutl v3.6.6, the same version as kubeadm's etcd.
 - Writes metrics (last success, size, count) for node-exporter's textfile collector. Alert `EtcdBackupStale` fires

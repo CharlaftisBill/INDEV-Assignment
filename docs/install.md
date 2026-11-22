@@ -5,17 +5,20 @@ except one line in `/etc/hosts`, and `make deps` asks before it adds it.
 
 ## What you need
 
-- An **Apple Silicon Mac** (tested), or a Linux host (arm64 or amd64, see [Linux](#linux-untested)).
+- An **Apple Silicon Mac** (tested), or a Linux host with KVM: amd64 tested on Ubuntu 24.04, arm64 untested (see [Linux](#linux)).
 - `make`, `curl`, `tar`, `git`, `openssl` and `sudo`. `xcode-select --install` gives you all of them on a Mac.
 
 Not supported:
 - **Intel Macs.** A locked Python package (cryptography 50) has no Intel macOS build.
 - **Windows.**
 
-### Linux (untested)
+### Linux
 
 `lima/k8s.yaml` sets no VM type or mount type, so Lima picks QEMU with 9p on Linux (vz with virtiofs on macOS).
-The config is portable, but no Linux host was available, so this path is **untested**. On Linux, `make deps`
+x86_64 uses Debian's `generic` image, whose kernel has 9p (the `genericcloud` one does not). virtiofs is avoided
+on QEMU: Lima backs guest RAM with `/dev/shm`, too small for 8 GiB on a 16 GiB host (B-058).
+Tested on Ubuntu 24.04 amd64 (`make provision`, `changed=0`, all 12 checks strict PASS, `make smoke`);
+Linux arm64 is untested and would also need the `generic` image. Your user needs `/dev/kvm` access. `make deps`
 asks for sudo to:
 - install QEMU packages for Lima;
 - set `net.ipv4.ip_unprivileged_port_start=80` so Lima can forward 443 and 80. This lowers the limit **host-wide**
@@ -81,8 +84,8 @@ It removes only what `make` created:
 - the `core.hooksPath` git setting.
 
 **Kept** unless you add `PURGE_SECRETS=1`: `.secrets/` (the CA key, and the cluster CAs that let old etcd snapshots
-restore onto a new VM). Without the CA key, the next provision stops (B-037)
-until you restore the key or delete `certs/ca.crt` to create a new CA (then commit and trust the new one). See
+restore onto a new VM). Without the CA key, the next `make provision` asks (B-037): restore the key, or
+create a new local CA (deletes `certs/ca.crt`; trust the new one). See
 [troubleshooting](runbooks/troubleshooting.md#fresh-clone-fails-in-pki-cert-without-key).
 
 **Never touched**: tools you installed yourself, `~/.lima/_config`, and Lima's image cache (other VMs share them).

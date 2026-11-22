@@ -4,6 +4,7 @@
 #   scripts/host-tools.sh preflight [vm|hosts] quiet doctor subset: only problems, exit 1 if any
 #   scripts/host-tools.sh deps                install what is missing (pinned, sha256-checked) into .tools/
 #   scripts/host-tools.sh uninstall           remove what make installed, asking per step (DRY_RUN=1, YES=1, PURGE_SECRETS=1)
+#   scripts/host-tools.sh ca [TAGS]           before provision: certs/ca.crt without .secrets/ca.key asks restore or new CA
 # Pins: host_* keys in ansible/group_vars/all/versions.yml. Runs on macOS /bin/bash 3.2.
 set -euo pipefail
 
@@ -358,10 +359,28 @@ cmd_uninstall() {
   echo "  kubectl, gh), ~/.lima/_config and Lima's image cache (shared with other Lima VMs)."
 }
 
+# ---------------------------------------------------------------- CA key preflight
+cmd_ca() {  # ca [TAGS]: a fresh clone has the committed certs/ca.crt but not its key; pki would stop (B-037)
+  local tags="${1:-}" crt="$ROOT/certs/ca.crt" key="$ROOT/.secrets/ca.key" a
+  [[ -z "$tags" || ",$tags," == *,pki,* || ",$tags," == *,all,* ]] || return 0
+  [[ -f "$crt" && ! -f "$key" ]] || return 0
+  echo "certs/ca.crt exists but its key .secrets/ca.key does not (fresh clone?)."
+  echo "  r) stop: copy the original key to .secrets/ca.key (mode 0600), then re-run"
+  echo "  n) new local CA: delete certs/ca.crt; provision creates a new key and cert. Clients must trust"
+  echo "     the new certs/ca.crt; commit it only if it should replace the CA for everyone."
+  is_tty || { echo "No terminal to ask: stopped. Do r) or n) yourself (rm certs/ca.crt)." >&2; exit 1; }
+  read -r -p "    Restore the key or create a new CA? [r/n] " a || a=""  # EOF (Ctrl-D) = stop
+  case "$a" in
+    n | N) rm -f "$crt"; echo "==> Removed certs/ca.crt; provision creates a new CA." ;;
+    *) echo "Stopped. Put the key in .secrets/ca.key (chmod 600) and re-run." >&2; exit 1 ;;
+  esac
+}
+
 case "${1:-}" in
   doctor) cmd_doctor ;;
   preflight) shift; cmd_preflight "$@" ;;
   deps) cmd_deps ;;
   uninstall) cmd_uninstall ;;
-  *) sed -n '2,7p' "$0"; exit 2 ;;
+  ca) shift; cmd_ca "${1:-}" ;;
+  *) sed -n '2,8p' "$0"; exit 2 ;;
 esac

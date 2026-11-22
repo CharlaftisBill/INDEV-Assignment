@@ -104,3 +104,7 @@ review before a PR found B-021 and B-022 in that fix; both fixed on their own br
 - 2026-11-21, `chore/monitoring-ui-port-forward` (`make monitoring-ui`, `make chat`, brief .pdf → .md): `review-loop` r1:
   `sre-reviewer` opened B-055 (`make chat` dead after the 2048-token context fills), fixed on `fix/b-055-*` (trim oldest
   exchange, show the server's error); `security-reviewer` clean (Lows: control chars, body in `ps`, both folded in). r2: both clean.
+- 2026-11-22, `chore/linux-host-support` (first Linux host, Ubuntu 24.04 amd64): fixed B-056 (arm64-only apt binNMU pins),
+  B-057 (GNU `stat`), B-058 (no 9p in `genericcloud`; virtiofs on QEMU filled `/dev/shm` and froze the VM → `generic` x86_64
+  image + 9p); `make provision` asks restore/new CA on a fresh clone. `review-loop` r1 (disruptive, incl. VM restart):
+  `sre-reviewer` and `security-reviewer` clean; Lows folded in (CA check before `e2e`'s `vm-reset`, `TAGS=all`, Ctrl-D).

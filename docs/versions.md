@@ -10,7 +10,7 @@ All apt packages are held (`apt-mark hold`), so upgrades never change them.
 
 | Component | Version | Source |
 |---|---|---|
-| Debian | 13 (trixie) genericcloud arm64, build 20261103-2651 | cloud.debian.org; sha512 in `lima/k8s.yaml` |
+| Debian | 13 (trixie) build 20261103-2651: genericcloud arm64 (Mac), generic amd64 (Linux, has 9p; B-058) | cloud.debian.org; sha512 in `lima/k8s.yaml` |
 | containerd | 1.7.24~ds1-6+deb13u1 | Debian |
 | runc | 1.1.15+ds1-2+b4 | Debian. Known CVEs accepted (B-026) |
 | Base packages (9) | see `os_base_packages` | Debian |

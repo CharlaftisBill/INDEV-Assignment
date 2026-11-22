@@ -63,7 +63,7 @@
 
 - name: Install base packages at pinned versions
   ansible.builtin.apt:
-    name: "{{ item.key }}={{ item.value }}"
+    name: "{{ item.key }}={{ item.value if item.value is string else item.value[os_prep_arch] }}"
     state: present
     update_cache: true
     cache_valid_time: "{{ 0 if os_prep_snapshot_repos is changed else 86400 }}"

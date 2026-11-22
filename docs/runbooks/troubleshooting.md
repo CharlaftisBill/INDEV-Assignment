@@ -68,12 +68,13 @@ make smoke
 
 ## Fresh clone fails in pki: cert without key
 
-**Symptom:** `make provision` fails: "`certs/ca.crt` exists but `.secrets/ca.key` does not".
+**Symptom:** `make provision` asks "Restore the key or create a new CA?", or (no terminal, or `ansible-playbook`
+run directly) fails: "`certs/ca.crt` exists but `.secrets/ca.key` does not".
 
 **Cause:** the CA key is never committed, so a fresh clone has only the certificate (B-037).
 
-**Fix:** either put the original key back in `.secrets/ca.key` (mode 0600), or delete `certs/ca.crt` to make a new CA
-and commit the new `certs/ca.crt` ([CA rotation](ca-rotation.md)).
+**Fix:** either put the original key back in `.secrets/ca.key` (mode 0600), or answer `n` (same as `rm certs/ca.crt`)
+for a new local CA. Commit the new `certs/ca.crt` only if it replaces the CA for everyone ([CA rotation](ca-rotation.md)).
 
 ## kubeadm stops on the cluster PKI host copy
 
