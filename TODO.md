@@ -3,7 +3,7 @@
 Live project state and bug tracker. Agents read this first and update it last (protocol in `CLAUDE.md`).
 
 ## Status
-Current milestone: **Done (M1–M10)** · Last verified: 2026-11-21 PKI persistence (`make e2e` twice, 314 PASS each; after a rebuilt-VM etcd restore 1: 19, 2: 21, 3a: 15, 3b: 18, 4: 48, 5: 15, 6: 76, 7: 23, 8a: 35, 8b: 19, 8c: 8, 9: 17 PASS, strict) · Before: 2026-11-20 M10 final gate (`make e2e` from a destroyed VM 313 PASS; after the review fixes: `make idempotency` changed=0; 1: 19, 2: 20, 3a: 15, 3b: 18, 4: 48, 5: 15, 6: 76, 7: 23, 8a: 35, 8b: 19, 8c: 8, 9: 17 PASS · 0 FAIL · 0 SKIP, strict) · Last SRE review: working tree 2026-11-21 — clean (B-055 fix r2, non-disruptive; r1 at 639f647 opened B-055)
+Current milestone: **Done (M1–M10)** · Linux amd64 host: 2026-11-22 (Ubuntu 24.04, fresh VM: idempotency changed=0, 314 PASS strict, smoke OK) · Last verified: 2026-11-21 PKI persistence (`make e2e` twice, 314 PASS each; after a rebuilt-VM etcd restore 1: 19, 2: 21, 3a: 15, 3b: 18, 4: 48, 5: 15, 6: 76, 7: 23, 8a: 35, 8b: 19, 8c: 8, 9: 17 PASS, strict) · Before: 2026-11-20 M10 final gate (`make e2e` from a destroyed VM 313 PASS; after the review fixes: `make idempotency` changed=0; 1: 19, 2: 20, 3a: 15, 3b: 18, 4: 48, 5: 15, 6: 76, 7: 23, 8a: 35, 8b: 19, 8c: 8, 9: 17 PASS · 0 FAIL · 0 SKIP, strict) · Last SRE review: working tree 2026-11-22 — clean (Linux host support r1, incl. VM restart)
 
 ## Milestones
 - [x] M0 Scaffolding: repo layout, agentic layer (`.claude/`), Makefile, lint configs, Lima config, docs skeleton, commit tooling (`split-commits` skill, `.githooks/commit-msg`)
@@ -31,13 +31,13 @@ Current milestone: **Done (M1–M10)** · Last verified: 2026-11-21 PKI persiste
   - Cross-cutting: the Makefile names directly exec'd tools by path (GNU make 3.81 ignores the exported PATH there, so `make lint`/`collections` could hit Homebrew copies). `scripts/verify.sh`: shellcheck fixes, no behaviour change (shellcheck now always runs in `make lint`)
   - Checked on this Mac: `make lint` clean; `make deps` twice (2nd installs nothing; the sudo hosts step is re-offered while declined); fresh copy with PATH=/usr/bin:/bin → deps + lint OK; VM restarted by the repo-local `limactl`; `make verify REQ=1 STRICT=1` 17 PASS
   - [x] Follow-ups (M10, `feat/m10-final`): recipes run via `scripts/make-shell.sh` (`-eu -o pipefail` on make 3.81 too; `.SHELLFLAGS` alone was ignored); `check_9` accepts llama.cpp restarts only with last reason `Unknown` (node restart), crashes still fail
-- [x] **Linux host support** (target: before M10). Host tooling is OS-aware since the bootstrap above; the VM config is portable since M10; Linux is untested.
+- [x] **Linux host support** (target: before M10). Host tooling is OS-aware since the bootstrap above; the VM config is portable since M10; tested on Ubuntu 24.04 amd64 2026-11-22.
   - [x] `lima/k8s.yaml`: drop the hard-coded `vmType: vz` and `mountType: virtiofs` so Lima picks its default (vz on macOS, qemu on Linux)
   - [x] `make deps` detects OS/arch; Lima release binary on both, QEMU distro packages on Linux (asked, recorded in the manifest)
   - [x] Port 443 on Linux: `make doctor` checks `net.ipv4.ip_unprivileged_port_start`; `make deps` offers the sysctl (asked), uninstall reverts it
   - [x] `scripts/hosts-entry.sh`: only flush the macOS DNS cache on macOS
   - [x] README + `CLAUDE.md`: host support listed in README; Linux install steps once `lima/k8s.yaml` is portable
-  - [x] Test on a Linux host if one is available; otherwise keep "untested" in the docs (no Linux host: docs say "untested")
+  - [x] Test on a Linux host (2026-11-22, `chore/linux-host-support`, Ubuntu 24.04 amd64, KVM): B-056 per-arch apt pins, B-057 GNU `stat`, B-058 x86_64 `generic` image + 9p (virtiofs filled `/dev/shm`); fresh-clone CA now asked in `make provision`. `make provision` OK, `make idempotency` changed=0, 1: 19, 2: 21, 3a: 15, 3b: 18, 4: 48, 5: 15, 6: 76, 7: 23, 8a: 35, 8b: 19, 8c: 8, 9: 17 PASS strict (314), `make smoke` OK. Linux arm64 untested
 
 - [x] **Keep the kubeadm PKI across VM rebuilds** (2026-11-21, `chore/persist-kubeadm-pki`, [ADR 0006](docs/decisions/0006-etcd-backups-outside-cluster.md#restore-on-a-rebuilt-vm)).
   `kubeadm` role saves cluster/front-proxy/etcd CAs + SA keys to `.secrets/kubeadm-pki/` after the first init, restores

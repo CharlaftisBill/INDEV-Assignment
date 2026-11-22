@@ -411,3 +411,24 @@ Sev: Medium · State: Solved · Found: 2026-11-21 · Solved: 2026-11-21 · Fix: 
 - **Root cause:** `chat.sh` resent the whole history every turn and `--fail` dropped the server's error body, so one overflow broke every later turn.
 - **Fix:** `--fail-with-body`; on `exceed_context_size_error` drop the oldest exchange and retry; print `error.message` (or curl's); note `finish_reason: length`.
 - **Verification:** 3 long turns then short ones: trimmed and answered; a 2600-word message gets a clear note; 404/refused show the cause; REQ=9 strict PASS.
+
+### B-056 · Linux amd64: `os_prep` fails, `conntrack`/`ebtables` pins exist only for arm64
+Sev: — · State: Solved · Found: 2026-11-22 · Solved: 2026-11-22 · Fix: ca51e47
+- **Report** (setup, Linux host): snapshot pool has `conntrack_1.4.8-2+b1` and `ebtables_2.0.11-6+b2` for arm64 only; amd64 has `1.4.8-2` / `2.0.11-6`.
+- **Root cause:** Debian binNMU suffixes (`+bN`) are per architecture; the pins were looked up on the arm64 VM only.
+- **Fix:** `os_base_packages` values may be `{arm64, amd64}` maps (`versions.yml`), picked by `os_prep_arch`; `pin-version` skill checks both arches.
+- **Verification:** clean amd64 VM: `os_prep` installs all pins; `make verify REQ=1 STRICT=1` 19 PASS; `make idempotency` changed=0.
+
+### B-057 · Linux: `verify.sh` file-mode checks read garbage, BSD `stat -f` tried first
+Sev: — · State: Solved · Found: 2026-11-22 · Solved: 2026-11-22 · Fix: a562920
+- **Report** (setup, Linux host): GNU `stat -f '%Lp' f` prints filesystem status and fails, so `fmode` = that block + `600`; checks 4, 6, 7, 8a misreport.
+- **Root cause:** `stat -f … || stat -c …` assumed BSD `-f` fails on GNU; it succeeds partly and writes stdout.
+- **Fix:** `file_mode` helper and `hstat` in `scripts/verify.sh` try `stat -c` first, BSD `stat -f` second.
+- **Verification:** helper prints `600` for a 0600 file on Linux; REQ 4, 6, 7, 8a strict PASS on the Linux host.
+
+### B-058 · Linux: `./backups` never mounts (no 9p in cloud kernel); virtiofs then locks up the VM
+Sev: — · State: Solved · Found: 2026-11-22 · Solved: 2026-11-22 · Fix: 7950074
+- **Report** (setup, Linux host): `genericcloud` kernel has no 9p, `/mnt/host-backups` stays empty; with virtiofs, QEMU RAM sits in 7.7G `/dev/shm`, fills it, guest soft-locks.
+- **Root cause:** cloud kernel lacks 9p; Lima's QEMU virtiofs needs a shared-memory RAM backend in `/dev/shm` (half of host RAM).
+- **Fix:** `lima/k8s.yaml` x86_64 image is Debian `generic` (same build, sha512 pinned), mount type left at Lima's default (9p on QEMU).
+- **Verification:** `findmnt` shows 9p rw; root write + chmod 600 OK; `/dev/shm` stays 0%; REQ=7 strict 23 PASS; full provision OK.
