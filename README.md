@@ -14,7 +14,7 @@ curl --cacert certs/ca.crt https://llm.local/v1/chat/completions \
 
 ## Quick start
 
-Supported hosts: Apple Silicon Mac (tested); Linux arm64/amd64 with QEMU (config portable, untested).
+Supported hosts: Apple Silicon Mac (tested); Linux amd64 with QEMU/KVM (tested on Ubuntu 24.04); Linux arm64 (untested).
 You need `make`; on a Mac run `xcode-select --install` if you don't have it.
 Details: [install guide](docs/install.md).
 
@@ -29,9 +29,9 @@ make deps       # installs it
 make doctor     # everything should be OK now
 ```
 
-**2. Build the cluster.** A fresh clone has `certs/ca.crt` but not its key, so `make provision` stops in `pki`.
-Either put the original key in `.secrets/ca.key` (mode 0600), or run `rm certs/ca.crt` to create your own CA
-(then `curl --cacert certs/ca.crt` uses your new certificate).
+**2. Build the cluster.** A fresh clone has `certs/ca.crt` but not its key, so `make provision` asks first:
+stop and restore the original key to `.secrets/ca.key` (mode 0600), or create your own local CA
+(it deletes `certs/ca.crt`; `curl --cacert certs/ca.crt` then uses your new certificate). Without a terminal it stops.
 See [troubleshooting](docs/runbooks/troubleshooting.md#fresh-clone-fails-in-pki-cert-without-key).
 
 ```bash

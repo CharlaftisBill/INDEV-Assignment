@@ -6,10 +6,10 @@ Where the assignment is unclear, this is how we read it. Add new ones here.
 
 | Assignment says | We read it as |
 |---|---|
-| A Debian 13 VM on the host | The host is an Apple Silicon Mac, so the VM is **arm64** under Lima. Intel Macs are unsupported, Linux hosts (QEMU) are untested ([install](install.md#linux-untested)), Windows is out of scope (Ansible needs WSL2) |
+| A Debian 13 VM on the host | The host is an Apple Silicon Mac, so the VM is **arm64** under Lima. Linux amd64 hosts (QEMU) are tested, so the VM is then amd64; Linux arm64 is untested ([install](install.md#linux)). Intel Macs are unsupported, Windows is out of scope (Ansible needs WSL2) |
 | Pinned package versions | Every apt package a role installs by name is pinned and held. Their dependencies are not pinned |
 | Debian apt pins stay installable | `snapshot.debian.org` at one pinned timestamp is a fallback next to the live mirrors, not the only source: it is slower and can rate-limit. `apt update` needs it reachable (B-027) |
-| Pinned versions in general | We take the newest release that is **at least 2 weeks old**, with an arm64 build |
+| Pinned versions in general | We take the newest release that is **at least 2 weeks old**, with arm64 and amd64 builds |
 | Requirement 3: app pods accept only the traffic they need | Traffic from other pods and networks. Traffic from the node itself is always allowed by Kubernetes and Calico ([ADR 0003](decisions/0003-traefik-ingress.md)). Accepted by the user, 2026-11-19 |
 | Requirement 6: node and etcd alerts fire in Alertmanager | The default node and etcd rules are loaded and healthy, the always-on `Watchdog` reaches Alertmanager, and `promtool` tests show the alerts fire on bad input. Breaking a real node or etcd takes minutes and disrupts the cluster, so that is a manual [demo](runbooks/alert-demo.md). Alerts only need to reach Alertmanager, so it has no receivers |
 | Requirement 7: snapshots stored outside the cluster | Outside the VM too: in `./backups` on the Mac |

@@ -16,7 +16,7 @@ The assignment is `k8s-single-node-assignment.md`. Project state: **`TODO.md`**;
 9. llama.cpp + Qwen2.5-0.5B-Instruct GGUF Q4 on CPU, via ingress/TLS, no model re-download on pod restart
 
 ## Environment
-- Host: Apple Silicon Mac. VM: Lima instance `k8s` (`lima/k8s.yaml`, Lima default VM type: vz on macOS, arm64, Debian 13, 4 CPU / 8 GiB / 40 GiB).
+- Host: Apple Silicon Mac (vz + virtiofs, arm64) or Linux amd64 (QEMU/KVM + 9p, `generic` image; B-058). VM: Lima instance `k8s` (`lima/k8s.yaml`, Debian 13, 4 CPU / 8 GiB / 40 GiB). "Mac" below means the host.
 - Ansible runs **on the Mac** and pushes over SSH (`ansible/ansible.cfg` uses `~/.lima/k8s/ssh.config`, host alias `lima-k8s`).
 - Shell in VM: `limactl shell k8s`. Admin kubeconfig (after M2): `out/admin.conf` → `kubectl --kubeconfig out/admin.conf ...`.
 - Host-forwarded ports: Mac 443, 80, 6443 only (443/80 map to Traefik's 8443/8000 in the VM). `/etc/hosts` on the Mac maps `llm.local grafana.local` to 127.0.0.1 (`scripts/hosts-entry.sh`).
