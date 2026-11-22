@@ -73,6 +73,8 @@ check_1() { # OS preparation, containerd, pinned packages
   done
 }
 
+# Octal mode of a host file. GNU -c first: GNU `stat -f` is filesystem status, prints and fails.
+file_mode() { stat -c '%a' "$1" 2>/dev/null || stat -f '%Lp' "$1" 2>/dev/null; }
 # Pinned value from versions.yml (single source of truth), e.g. pinned kubernetes_version -> 1.35.10-1.1
 pinned() { sed -n "s/^$1: \"\\([^\"]*\\)\".*/\\1/p" "$ROOT/ansible/group_vars/all/versions.yml"; }
 NODE_NAME="${NODE_NAME:-k8s-node}"
@@ -439,7 +441,7 @@ check_4() { # Ingress (Traefik) + TLS from the internal CA (cert-manager) + auto
   else fail "certs/ca.crt lacks critical name constraints permitting only DNS:local and excluding all IPs"; fi
   if openssl x509 -in "$CA_CERT" -noout -checkend 31536000 >/dev/null 2>&1; then pass "certs/ca.crt valid for more than 1 year"; else fail "certs/ca.crt expires within 1 year or is unreadable"; fi
   local key="$ROOT/.secrets/ca.key" fmode
-  fmode="$(stat -f '%Lp' "$key" 2>/dev/null || stat -c '%a' "$key" 2>/dev/null)"
+  fmode="$(file_mode "$key")"
   if [[ -f "$key" && "$fmode" == "600" ]]; then pass ".secrets/ca.key exists with mode 600"; else fail ".secrets/ca.key missing or mode '$fmode' (want 600)"; fi
   # B-037: the key must belong to the committed certificate; only public-key hashes are compared and shown
   local key_pub cert_pub
@@ -984,7 +986,7 @@ check_6() { # Prometheus, Grafana, node + etcd alerts in Alertmanager (M6)
   local envref; envref="$(k get deployments "$rel-grafana" -n "$ns" -o json 2>&1 | jq -r '.spec.template.spec.containers[] | select(.name == "grafana") | .env[] | select(.name == "GF_SECURITY_ADMIN_PASSWORD") | "\(.valueFrom.secretKeyRef.name) \(.value // "no-plaintext")"' 2>&1)"
   if [[ "$envref" == "$gsecret no-plaintext" ]]; then pass "Grafana takes the admin password from Secret $gsecret, not from a plaintext env value"; else fail "Grafana admin password env: '$envref'"; fi
   local pwfile="$ROOT/.secrets/grafana-admin-password" fmode pw=""
-  fmode="$(stat -f '%Lp' "$pwfile" 2>/dev/null || stat -c '%a' "$pwfile" 2>/dev/null)"
+  fmode="$(file_mode "$pwfile")"
   if [[ -f "$pwfile" && "$fmode" == "600" ]]; then pass ".secrets/grafana-admin-password exists with mode 600"; else fail ".secrets/grafana-admin-password missing or mode '$fmode' (want 600)"; fi
   if [[ -f "$pwfile" ]]; then pw="$(<"$pwfile")"; fi
   # B-039: Grafana is reachable from the Mac; its ServiceAccount must not read the CA key or any other Secret
@@ -1193,7 +1195,7 @@ check_7() { # scheduled etcd snapshots stored outside the cluster (M7, B-010)
   if [[ -z "$bdir" || -z "$keep" || -z "$ns" || -z "$stale" || -z "$glob" || -z "$unit" || -z "$script" || -z "$fstype" || -z "$rule" ]]; then
     fail "etcd_backup defaults or group_vars keys not found"; return 0
   fi
-  hstat() { stat -f '%z %m' "$1" 2>/dev/null || stat -c '%s %Y' "$1" 2>/dev/null; } # size mtime (BSD, then GNU)
+  hstat() { stat -c '%s %Y' "$1" 2>/dev/null || stat -f '%z %m' "$1" 2>/dev/null; } # size mtime (GNU, then BSD)
 
   # --- Timer and unit
   if [[ "$(node systemctl is-active "$unit.timer" 2>&1)" == "active" ]]; then pass "$unit.timer is active"; else fail "$unit.timer is not active"; fi
@@ -1297,7 +1299,7 @@ check_8a() { # read-only operator role + operator kubeconfig (M8)
   # --- credentials on the host
   local fmode f
   for f in "$KUBECONFIG_OPERATOR" "$ROOT/.secrets/operator.key"; do
-    fmode="$(stat -f '%Lp' "$f" 2>/dev/null || stat -c '%a' "$f" 2>/dev/null)"
+    fmode="$(file_mode "$f")"
     if [[ "$fmode" == 600 ]]; then pass "${f#"$ROOT"/} is mode 0600"; else fail "${f#"$ROOT"/} mode is '$fmode', want 600"; fi
   done
   local server; server="$(kop config view -o jsonpath='{.clusters[0].cluster.server}' 2>&1)"
