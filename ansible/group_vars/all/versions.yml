@@ -3,7 +3,7 @@
 # Rules (see CLAUDE.md and the pin-version skill):
 #   - exact versions only, never "latest" / floating tags / unpinned apt packages
 #   - one comment per entry: where the version was looked up and when
-#   - images must publish an arm64 manifest
+#   - images must publish arm64 and amd64 manifests; apt versions differ per arch only by binNMU (+bN): use an {arm64, amd64} map then
 #
 # Entries are added milestone by milestone; commented keys are planned.
 #
@@ -18,9 +18,9 @@ os_base_packages:
   ca-certificates: "20250419+deb13u1"  # apt-cache madison (trixie-security), 2026-11-18
   curl: "8.14.1-2+deb13u7"             # apt-cache madison (trixie-security); backports 8.21 skipped, 2026-11-18
   gpg: "2.4.7-21+deb13u1+b5"           # apt-cache madison (trixie), 2026-11-18
-  conntrack: "1:1.4.8-2+b1"            # apt-cache madison (trixie), kubeadm preflight, 2026-11-18
+  conntrack: {arm64: "1:1.4.8-2+b1", amd64: "1:1.4.8-2"}  # apt-cache madison (trixie) + snapshot pool (amd64), kubeadm preflight, 2026-11-22
   socat: "1.8.0.3-1+deb13u1"           # apt-cache madison (trixie), kubeadm preflight, 2026-11-18
-  ebtables: "2.0.11-6+b2"              # apt-cache madison (trixie), kubeadm preflight, 2026-11-18
+  ebtables: {arm64: "2.0.11-6+b2", amd64: "2.0.11-6"}     # apt-cache madison (trixie) + snapshot pool (amd64), kubeadm preflight, 2026-11-22
   iptables: "1.8.11-2"                 # apt-cache madison (trixie), kubeadm preflight, 2026-11-18
   ethtool: "1:6.14.2-1"                # apt-cache madison (trixie), kubeadm preflight, 2026-11-18
   iproute2: "6.15.0-1"                 # apt-cache madison (trixie), kubeadm preflight (ip, tc), 2026-11-18
