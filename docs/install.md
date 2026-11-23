@@ -30,7 +30,7 @@ asks for sudo to:
 Lima stays the default. When `external-vm.conf` exists at the repo root, every `make` command uses the VM it names
 instead (`ansible/inventory/external.yml`, `scripts/external.sh`). To go back to Lima: `make tunnel-stop`, delete the
 file, `make vm-up` (it stops a tunnel left running; `make doctor` flags one).
-Short version: [README](../README.md#quick-start-with-your-own-debian-13-vm).
+Short version: [README](../README.md#quick-start-with-a-provided-debian-13-vm).
 
 ### The VM
 

@@ -45,7 +45,7 @@ More detail: [install guide](docs/install.md).
 
 ## Quick start with a provided Debian 13 VM
 
-Already have a VM? The project can use it over SSH instead of creating one.
+Already have a VM? The project can use it over SSH instead of creating one. Everything else works the same.
 
 **Your VM needs:**
 
@@ -55,39 +55,54 @@ Already have a VM? The project can use it over SSH instead of creating one.
 - `python3` installed, and a default network route (no internet needed behind it).
 - An address that is not inside `10.244.x.x` or `10.96.x.x` to `10.111.x.x` (the cluster uses those ranges).
 
-### Not User is set up yet?
-Connect to the VM, as root and type:
+**Step 0 (only if needed). Prepare the VM.** Log in to the VM as root and run (use your own user name instead
+of `debian`):
 
 ```bash
 apt-get install -y sudo python3
-# use your own user name instead of `debian`
 echo 'debian ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/90-indev && chmod 440 /etc/sudoers.d/90-indev
 ```
 
-Then, from your computer run: `ssh-copy-id debian@<vm-address>`.
+Then, from your computer, copy your SSH key to it: `ssh-copy-id debian@<vm-address>`.
 
-### Run it:
+**Step 1. Get the code and point it at your VM.**
 
-#### Clone the Repo:
 ```bash
 git clone https://github.com/CharlaftisBill/INDEV-Assignment.git
 cd INDEV-Assignment
+
+cp external-vm.conf.example external-vm.conf
+nano external-vm.conf   # set host= (the VM's address) and user=; port= and ssh_key= only if needed
 ```
 
-#### Use `external-vm.conf.example` as a template:
-``` bash
-cp external-vm.conf.example external-vm.conf   # then write your VM's address and user in it
-nano 
+**Step 2. Install the tools.** Tools go into this folder only. You are asked before anything needs `sudo`.
+Because `external-vm.conf` exists, the software for creating a VM (Lima) is skipped.
+
+```bash
+make doctor     # shows what is missing (changes nothing)
+make deps       # installs what is missing
+make doctor     # now everything should say OK
 ```
 
+**Step 3. Build the cluster.**
 
-``` bash
-make deps         # installs the tools (skips the VM software you don't need)
+```bash
 make vm-up        # checks your VM is ready and connects to it (it creates nothing)
-make provision    # sets everything up
-make verify       # runs every requirement check
-make smoke        # sends the "Say hello" request
+make provision    # sets everything up with Ansible (safe to run again: a second run changes nothing)
 ```
+
+The first time, `make provision` asks about the certificate key, the same as in the
+[other quick start](#quick-start-the-project-creates-the-vm).
+
+**Step 4. Check that it works.**
+
+```bash
+make verify       # runs every requirement check
+make smoke        # sends the "Say hello" request above
+```
+
+**Step 5 (optional). Look around:** the same dashboards, chat and commands as in
+[step 4 of the other quick start](#quick-start-the-project-creates-the-vm).
 
 **Good to know:**
 
@@ -101,7 +116,6 @@ make smoke        # sends the "Say hello" request
 - **Back to Lima:** run `make tunnel-stop`, delete `external-vm.conf`, then `make vm-up`.
 
 Full details and troubleshooting: [install guide](docs/install.md#your-own-debian-13-vm-over-ssh-instead-of-lima).
-
 
 ## Quick start (the project creates the VM)
 
@@ -145,7 +159,7 @@ make smoke        # sends the "Say hello" request above
 | Chat with the model | Run `make chat`. `/reset` starts over, `/quit` exits |
 | Kubernetes itself | `kubectl --kubeconfig out/admin.conf get pods -A` |
 
-**Handy commands:** `make help` lists everything. `make e2e` does steps 2 and 3 from a clean VM.
+**Handy commands:** `make help` lists everything. `make e2e` does steps 2 and 3 from a clean VM (Lima only).
 `make uninstall` removes what the project installed.
 
 ## Keep these private
