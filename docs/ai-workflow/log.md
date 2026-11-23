@@ -111,3 +111,6 @@ review before a PR found B-021 and B-022 in that fix; both fixed on their own br
 - 2026-11-23, `fix/b-059-hosts-ipv6-entry` (`::1` hosts line, 5 s macOS lookup → 0.004 s): `review-loop` r1: `security-reviewer`
   opened B-060 (`hosts-entry.sh` rewrite could wipe `/etc/hosts` on a grep error; `sre-reviewer` added the GNU non-UTF-8 case),
   fixed on `fix/b-060-*` (byte-wise grep, abort if any other line would be lost); sec re-check and r2 `sre-reviewer` clean.
+- 2026-11-23, `fix/b-097-airgap-cidrs` (air gap no longer allows off-node pod/Service CIDRs): `security-reviewer`'s re-check
+  caught B-098 in the fix (node → pod-backed ClusterIPs rejected, cert-manager webhook failing closed); fixed with
+  `ct status dnat`, re-check clean. A failed `fib oifname` attempt left the VM without the firewall: B-099 opened.
