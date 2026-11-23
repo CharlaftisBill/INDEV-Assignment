@@ -1,9 +1,7 @@
 # INDEV assignment: single-node Kubernetes
 
-Ansible turns a clean, **air-gapped** Debian 13 VM into a one-node Kubernetes cluster: a Lima VM it creates on your Mac or Linux
-machine, or [a VM you already have](#quick-start-with-your-own-debian-13-vm).
-The VM never uses the internet itself: its downloads go through your machine to pinned sources only
-([how](docs/install.md#internet-access-from-the-vm)). At the end, a small language model (llama.cpp) answers over HTTPS:
+This project builds a small Kubernetes cluster on **one virtual machine (VM)**, fully automated with Ansible.
+When it is done, a small AI language model (llama.cpp with Qwen2.5-0.5B) answers you over a secure HTTPS connection:
 
 ```bash
 curl --cacert certs/ca.crt https://llm.local/v1/chat/completions \
@@ -11,128 +9,197 @@ curl --cacert certs/ca.crt https://llm.local/v1/chat/completions \
   -d '{"messages":[{"role":"user","content":"Say hello"}]}'
 ```
 
-> **Status:** all milestones (M1–M10) are done. `make e2e` builds the cluster from a destroyed VM and every requirement check passes (313 PASS, 0 FAIL, 0 SKIP, 2026-11-20).
-> Your own Debian 13 VM over SSH: all checks pass on a stand-in VM reached only over SSH (2026-11-22), also air-gapped: no internet or DNS (2026-11-23).
-> Progress: [TODO.md](TODO.md). Bugs: [bugs.md](docs/ai-workflow/bugs.md). Assumptions: [assumptions.md](docs/assumptions.md).
+You can let the project **create the VM for you** (with Lima), or **use a Debian 13 VM you already have**.
 
-## Quick start
+> **Status:** everything is built and tested. One command (`make e2e`) deletes the VM, builds it again from scratch
+> and runs all checks: all 315 pass, none fail or are skipped (2026-11-23).
+> More: [progress](TODO.md) · [known bugs](docs/ai-workflow/bugs.md) · [how we read the assignment](docs/assumptions.md)
 
-**Air-gapped by design**, with Lima or your own VM:
-- a firewall on the VM (nftables, set up by `os_prep`) lets it reach only itself and the cluster;
-- its downloads (packages, images, charts, helm, etcdctl) go over SSH to a small proxy on your machine that relays
-  HTTPS to the pinned sources in [`scripts/egress-allowlist.txt`](scripts/egress-allowlist.txt) only;
-- your machine downloads the model and copies it in, so the `llm` namespace has no egress at all;
-- `make verify` checks that the VM cannot reach the internet itself.
+## What you get
 
+- A one-node Kubernetes cluster: the same machine runs the control plane and the apps.
+- Secure web access with certificates from our own certificate authority (CA), renewed automatically.
+- Monitoring dashboards (Grafana) and alerts for node and etcd health (Prometheus, Alertmanager).
+- A backup of the cluster database (etcd) every 30 minutes, kept outside the VM.
+- Locked-down apps: no root, no extra privileges, only the network traffic they need, every API call logged.
 
-Two ways to get the VM: **Lima** (default: created for you, steps below) or **a Debian 13 VM you already have**, over SSH ([steps](#quick-start-with-your-own-debian-13-vm)).
+### The VM never touches the internet
 
-Supported hosts: Apple Silicon Mac (tested); Linux amd64 with QEMU/KVM (tested on Ubuntu 24.04); Linux arm64 (untested).
-You need `make`; on a Mac run `xcode-select --install` if you don't have it.
-Details: [install guide](docs/install.md).
+The VM is treated as **air-gapped**, whether Lima created it or you brought it:
 
-**1. Install the tools** (into this folder only; asks before it uses `sudo`):
+- A firewall on the VM blocks every connection to the outside world.
+- Everything it needs to download (packages, container images, charts) goes through **your computer**, over SSH,
+  and only from a fixed list of trusted sources ([`scripts/egress-allowlist.txt`](scripts/egress-allowlist.txt)).
+- Your computer downloads the AI model and copies it in.
+- `make verify` proves it: it checks the firewall is on and that the VM cannot reach the internet by itself.
 
+So your computer needs internet access; the VM does not.
+
+## Before you start
+
+- **Your computer:** an Apple Silicon Mac (tested) or Linux on Intel/AMD with KVM (tested on Ubuntu 24.04).
+- **`make`:** on a Mac, run `xcode-select --install` if you don't have it. Everything else is installed for you.
+- **Room for the VM:** 4 CPU cores, 8 GB of memory, 40 GB of disk.
+
+More detail: [install guide](docs/install.md).
+
+## Quick start with a provided Debian 13 VM
+
+Already have a VM? The project can use it over SSH instead of creating one. Everything else works the same.
+
+> **TL;DR**: once the VM meets the needs below and `external-vm.conf` points at it (step 0 and 1), one command
+> builds and checks everything on it (The steps below do the same thing one at a time.):
 ```bash
-git clone https://github.com/CharlaftisBill/INDEV-Assignment.git
-cd INDEV-Assignment
-
-make doctor     # shows what is missing (changes nothing)
-make deps       # installs it (skips Lima and QEMU when you use your own VM)
-make doctor     # everything should be OK now
+ make deps && make e2e KEEP_VM=1
 ```
 
-**2. Build the cluster.** A fresh clone has `certs/ca.crt` but not its key, so `make provision` asks first:
-stop and restore the original key to `.secrets/ca.key` (mode 0600), or create your own local CA
-(it deletes `certs/ca.crt`; `curl --cacert certs/ca.crt` then uses your new certificate). Without a terminal it stops.
-See [troubleshooting](docs/runbooks/troubleshooting.md#fresh-clone-fails-in-pki-cert-without-key).
+**Your VM needs:**
 
-```bash
-make vm-up        # create and start the VM (4 CPU, 8 GiB RAM, 40 GiB disk)
-make provision    # run Ansible; a second run changes nothing
-```
+- A fresh **Debian 13** install (Intel/AMD or ARM) with 4 CPU cores, 8 GB of memory and 40 GB of disk.
+  Nothing container-related on it yet: the project installs and manages that itself.
+- **SSH login with a key** (no password prompt), as `root` or as a user who can `sudo` without a password.
+- `python3` installed, and a default network route (no internet needed behind it).
+- An address that is not inside `10.244.x.x` or `10.96.x.x` to `10.111.x.x` (the cluster uses those ranges).
 
-**3. Check it:**
-
-```bash
-kubectl --kubeconfig out/admin.conf get nodes
-make verify       # all requirement checks
-make smoke        # the curl above
-```
-
-**4. Open the web UIs** (optional):
-
-| UI | How |
-|---|---|
-| Grafana | `https://grafana.local`, user `admin` ([password](docs/runbooks/grafana.md)); needs the `/etc/hosts` lines (`scripts/hosts-entry.sh --apply`) |
-| Prometheus, Alertmanager | `make monitoring-ui`, then `http://localhost:9090` and `http://localhost:9093`; Ctrl-C stops it. No login, so local port-forward only, no Ingress |
-
-**5. Chat with the model** (optional):
-
-```bash
-make chat         # streams replies, keeps history; /reset clears it, /quit or Ctrl-D exits
-```
-
-`make e2e` does all of this on a fresh VM. `make uninstall` removes it again. `make help` lists every command.
-
-## Quick start with your own Debian 13 VM
-
-Already have a VM? Point the project at it over SSH instead of letting it create a Lima VM.
-Everything else (Ansible, checks, `https://llm.local` on your machine) works the same.
-**The VM is treated as air-gapped:** it needs no internet or DNS of its own, only SSH from your machine, which must be online.
-
-**What the VM needs**
-
-- A **fresh** Debian 13 (trixie), amd64 or arm64, 4 CPU, 8 GiB RAM, 40 GiB disk (≥ 20 GiB free), an IPv4 default
-  route (kubeadm needs one; internet behind it is not needed).
-  No Docker, containerd or Kubernetes on it already: the playbook installs and owns them.
-- SSH with a key (no password prompt), as a user with **passwordless sudo** (or as `root`), and `python3`.
-- An address outside the cluster ranges `10.244.0.0/16` and `10.96.0.0/12`.
-
-Not set up yet? On the VM, as root (replace `debian` with your user):
+**Step 0 (only if needed). Prepare the VM.** Log in to the VM as root and run (use your own user name instead
+of `debian`):
 
 ```bash
 apt-get install -y sudo python3
 echo 'debian ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/90-indev && chmod 440 /etc/sudoers.d/90-indev
 ```
 
-and from your machine: `ssh-copy-id debian@<vm-address>`.
+Then, from your computer, copy your SSH key to it: `ssh-copy-id debian@<vm-address>`.
 
-**Run it** in the clone from step 1. Create the config before `make deps`, so Lima and QEMU are skipped.
-The CA question (step 2) and the web UIs (step 4) are the same as above.
+**Step 1. Get the code and point it at your VM.**
 
 ```bash
-cp external-vm.conf.example external-vm.conf   # gitignored: set host=, user=, and port=/ssh_key= if needed
-make deps         # host tools, without Lima/QEMU; asks before sudo (/etc/hosts line)
-make vm-up        # checks SSH, sudo, Debian 13, CPU/RAM/disk, addresses; opens the tunnels; tests downloads (creates nothing)
-make provision    # run Ansible against your VM; a second run changes nothing
-make verify       # all requirement checks
-make smoke        # the curl above
+git clone https://github.com/CharlaftisBill/INDEV-Assignment.git
+cd INDEV-Assignment
+
+cp external-vm.conf.example external-vm.conf
+nano external-vm.conf   # set host= (the VM's address) and user=; port= and ssh_key= only if needed
 ```
 
-**What is different from Lima**
+**Step 2. Install the tools.** Tools go into this folder only. You are asked before anything needs `sudo`.
+Because `external-vm.conf` exists, the software for creating a VM (Lima) is skipped.
 
-- **Internet for the VM**: the same as with Lima, the VM is air-gapped and a firewall keeps it so; its downloads go
-  through your machine. Got a proxy for the VM instead? Set `egress=proxy` and `proxy=http://…` in `external-vm.conf`.
-- **Ports.** `make vm-up` opens an SSH tunnel so your machine's `127.0.0.1` ports 443, 80 and 6443 reach the VM, as Lima's
-  forwards do. Only connections from your machine are accepted. `make verify`, `smoke`, `chat` and `monitoring-ui`
-  reopen it when needed; `make vm-down` (or `make tunnel-stop`) closes it and leaves the VM running. Stop a running
-  Lima VM first (`limactl stop k8s`), since it holds the same ports.
-- **Backups.** No folder is shared from your machine, so the VM writes snapshots to `/var/backups/etcd` and your
-  machine pulls them into `./backups/external` every 30 minutes while the tunnel is up (`make backups-pull` pulls at once).
-- **Your VM, your call.** `make vm-destroy`, `vm-reset`, `e2e` and `uninstall` never delete or reset it.
-  To start over, reinstall Debian 13.
-- To go back to Lima: `make tunnel-stop`, delete `external-vm.conf`, `make vm-up` (it also stops a tunnel left running).
+```bash
+make doctor     # shows what is missing (changes nothing)
+make deps       # installs what is missing
+make doctor     # now everything should say OK
+```
 
-Details and troubleshooting: [install guide](docs/install.md#your-own-debian-13-vm-over-ssh-instead-of-lima).
+**Step 3. Build the cluster.**
+
+```bash
+make vm-up        # checks your VM is ready and connects to it (it creates nothing)
+make provision    # sets everything up with Ansible (safe to run again: a second run changes nothing)
+```
+
+The first time, `make provision` asks about the certificate key, the same as in the
+[other quick start](#quick-start-the-project-creates-the-vm).
+
+**Step 4. Check that it works.**
+
+```bash
+make verify       # runs every requirement check
+make smoke        # sends the "Say hello" request above
+```
+
+**Step 5 (optional). Look around.**
+
+| What | How |
+|---|---|
+| Grafana dashboards | Open `https://grafana.local`, user `admin` ([where the password is](docs/runbooks/grafana.md)) |
+| Prometheus and Alertmanager | Run `make monitoring-ui`, then open `http://localhost:9090` and `http://localhost:9093`. Ctrl-C stops it |
+| Chat with the model | Run `make chat`. `/reset` starts over, `/quit` exits |
+| Kubernetes itself | `kubectl --kubeconfig out/admin.conf get pods -A` |
+
+**Handy commands:** `make help` lists everything. `make e2e KEEP_VM=1` does steps 3 and 4 in one go on your VM
+(it never rebuilds it: a fresh Debian 13 install is up to you).
+`make uninstall` removes what the project installed.
+
+**Good to know:**
+
+- **Connections:** `make vm-up` opens SSH tunnels, so `https://llm.local` on your computer reaches the VM.
+  Only your own computer can use them. `make tunnel-stop` closes them (the VM keeps running).
+  If the Lima VM is also running, stop it first (`limactl stop k8s`): both need the same ports.
+- **Backups:** while the tunnels are open, your computer copies the VM's backups into `backups/external/`
+  every 30 minutes. `make backups-pull` copies them right away.
+- **Behind a proxy?** Add `egress=proxy` and `proxy=http://<proxy IP>:<port>` to `external-vm.conf`.
+- **It's your VM:** the project never deletes or resets it. To start over, reinstall Debian 13.
+- **Back to Lima:** run `make tunnel-stop`, delete `external-vm.conf`, then `make vm-up`.
+
+Full details and troubleshooting: [install guide](docs/install.md#your-own-debian-13-vm-over-ssh-instead-of-lima).
+
+## Quick start (the project creates the VM)
+
+> **TL;DR**: after cloning, one command creates the VM, builds everything and runs every check (The steps below do the same thing one at a time.):
+```bash
+make deps && make e2e
+```
+
+
+**Step 1. Get the code and install the tools.** Tools go into this folder only. You are asked before anything
+needs `sudo`.
+
+```bash
+git clone https://github.com/CharlaftisBill/INDEV-Assignment.git
+cd INDEV-Assignment
+
+make doctor     # shows what is missing (changes nothing)
+make deps       # installs what is missing
+make doctor     # now everything should say OK
+```
+
+**Step 2. Build the cluster.**
+
+```bash
+make vm-up        # creates and starts the VM
+make provision    # sets everything up with Ansible (safe to run again: a second run changes nothing)
+```
+
+The first time, `make provision` asks about the certificate key. The repository contains our CA certificate
+(`certs/ca.crt`) but, for safety, not its secret key. You can either put the original key in `.secrets/ca.key`,
+or let it create a new CA for you (then `certs/ca.crt` is replaced by yours).
+[More about this choice](docs/runbooks/troubleshooting.md#fresh-clone-fails-in-pki-cert-without-key).
+
+**Step 3. Check that it works.**
+
+```bash
+make verify       # runs every requirement check
+make smoke        # sends the "Say hello" request above
+```
+
+**Step 4 (optional). Look around.**
+
+| What | How |
+|---|---|
+| Grafana dashboards | Open `https://grafana.local`, user `admin` ([where the password is](docs/runbooks/grafana.md)) |
+| Prometheus and Alertmanager | Run `make monitoring-ui`, then open `http://localhost:9090` and `http://localhost:9093`. Ctrl-C stops it |
+| Chat with the model | Run `make chat`. `/reset` starts over, `/quit` exits |
+| Kubernetes itself | `kubectl --kubeconfig out/admin.conf get pods -A` |
+
+**Handy commands:** `make help` lists everything. `make e2e` does steps 2 and 3 from a freshly rebuilt VM;
+`make e2e KEEP_VM=1` does them on the VM you have.
+`make uninstall` removes what the project installed.
+
+## Keep these private
+
+These folders are never committed to git. Don't share them:
+
+- `.secrets/`: the CA key and other keys
+- `out/`: the admin login for the cluster (`admin.conf`)
+- `backups/`: the cluster backups (they contain every password stored in the cluster)
 
 ## Documentation
 
-Start at the [docs index](docs/README.md). The most used pages:
+Start at the [documentation index](docs/README.md). Most used:
 
 - [Install and uninstall](docs/install.md)
-- [Daily use](docs/usage.md): commands, kubeconfigs, Grafana, Prometheus, Alertmanager
-- [Architecture](docs/architecture.md) and [versions](docs/versions.md)
-- [Requirements](docs/requirements-matrix.md): what each requirement needs and how it is checked
-- [Decisions](docs/decisions/) and [runbooks](docs/runbooks/)
+- [Daily use](docs/usage.md): commands, cluster access, dashboards
+- [How it fits together](docs/architecture.md) and [exact versions](docs/versions.md)
+- [Requirements](docs/requirements-matrix.md): how each one is built and checked
+- [Design decisions](docs/decisions/) and [step-by-step guides](docs/runbooks/)
 - [How this was built with Claude Code](docs/ai-workflow/README.md)

@@ -26,7 +26,7 @@ The assignment is `k8s-single-node-assignment.md`. Project state: **`TODO.md`**;
 - `make help` · `make doctor` (read-only host check) · `make deps` (pinned Python/kubectl/jq/Lima/shellcheck into `.tools/`, `.venv`, collections; asks before sudo) · `make uninstall [DRY_RUN=1|YES=1]` ([ADR 0012](docs/decisions/0012-host-toolchain.md)). All make targets use `.tools/bin` + `.venv/bin`; outside make `export PATH=$PWD/.tools/bin:$PWD/.venv/bin:$PATH`, never Homebrew's copies · `make vm-up` / `vm-down` / `vm-reset` (destructive) / `vm-shell`
 - `make provision [TAGS=role]` · `make idempotency [TAGS=role]` (fails unless `changed=0`) · `make check`
 - **Agents run one ID or role per call, unquoted, in this order**: `make verify REQ=<id> STRICT=1`, `make provision TAGS=<role>`, `make idempotency TAGS=<role>`. A set of IDs/roles = one call each, all must pass; bare `make provision`/`make idempotency` (whole playbook) are allowed too. Other forms (quoted, multi-ID, `TAGS=a,b`, reordered) prompt by design (B-020).
-- `make hooks` (enable `.githooks/`) · `make lint` · `make verify [REQ=8c STRICT=1]` (STRICT: SKIP fails) · `make smoke` (the acceptance curl) · `make e2e` (clean VM → all green)
+- `make hooks` (enable `.githooks/`) · `make lint` · `make verify [REQ=8c STRICT=1]` (STRICT: SKIP fails) · `make smoke` (the acceptance curl) · `make e2e` (clean VM → all green; `KEEP_VM=1` on the current VM, required for a provided VM)
 
 ## Hard rules
 - **Versions**: every version/tag/digest lives in `ansible/group_vars/all/versions.yml`, with a source+date comment. Never `latest`, never unpinned apt installs; hold apt packages (`dpkg_selections: hold`). Images must have an arm64 manifest. Use the `pin-version` skill.

@@ -33,6 +33,7 @@ STRICT       ?=
 DRY_RUN      ?= 0
 PURGE_SECRETS ?= 0
 NO_LIMA      ?= 0
+KEEP_VM      ?= 0
 YES          ?= 0
 
 override ANSIBLE_CONFIG := $(ANSIBLE_DIR)/ansible.cfg
@@ -61,7 +62,7 @@ override LIMACTL      := $(TOOLS)/bin/limactl
 # so a `$(shell ...)` or `;` payload is rejected before any shell runs. Helpers are `override`
 # so the command line cannot redefine them. Not covered (make expands them before reading this
 # file): `VAR:=$(shell ...)`, `--eval`, `-f`; hence only exact `make` commands are pre-approved (ADR 0009).
-override USER_VARS := VM TAGS REQ ANSIBLE_ARGS STRICT PYTHON DRY_RUN PURGE_SECRETS YES NO_LIMA
+override USER_VARS := VM TAGS REQ ANSIBLE_ARGS STRICT PYTHON DRY_RUN PURGE_SECRETS YES NO_LIMA KEEP_VM
 override _cmdline_vars := $(foreach v,$(.VARIABLES),$(if $(filter command line,$(origin $(v))),$(v)))
 $(if $(filter-out $(USER_VARS),$(_cmdline_vars)),$(error Only these variables can be set: $(USER_VARS); got: $(filter-out $(USER_VARS),$(_cmdline_vars))))
 # Destructive targets run alone, so they can't ride along with a harmless one (`make verify vm-destroy`).
@@ -85,6 +86,7 @@ $(call check_chars,DRY_RUN,0 1,0 or 1)
 $(call check_chars,PURGE_SECRETS,0 1,0 or 1)
 $(call check_chars,YES,0 1,0 or 1)
 $(call check_chars,NO_LIMA,0 1,0 or 1)
+$(call check_chars,KEEP_VM,0 1,0 or 1)
 $(call check_chars,VM,$(_lower) $(_digit) -,a Lima instance name)
 $(call check_chars,PYTHON,$(_lower) $(_digit) . / - _,a python executable name or path)
 $(call check_chars,ANSIBLE_ARGS,$(_lower) $(_upper) $(_digit) - _ = . / : $(comma) +,ansible-playbook flags without quotes or shell characters)
@@ -220,11 +222,11 @@ verify: ## Run requirement checks (REQ=4 for one; STRICT=1 makes SKIP fail)
 	$(ROOT)/scripts/verify.sh $(if $(filter 1,$(STRICT)),--strict,) $(REQ)
 
 .PHONY: e2e
-e2e: ## Full run from a clean VM; any FAIL or SKIP fails it (Lima only)
-	@if [ -n '$(EXTERNAL)' ]; then echo 'make e2e needs a VM it can recreate; with external-vm.conf run: make provision, make idempotency, make verify STRICT=1' >&2; exit 1; fi
+e2e: ## Full run from a clean VM; any FAIL or SKIP fails it. KEEP_VM=1: on the existing VM (required for a provided VM)
+	@if [ -n '$(EXTERNAL)' ] && [ '$(KEEP_VM)' != 1 ]; then echo 'external-vm.conf is set: make e2e cannot recreate your VM. Run it on the VM as it is: make e2e KEEP_VM=1' >&2; exit 1; fi
 	@$(HOST_TOOLS) preflight hosts
 	@$(HOST_TOOLS) ca
-	$(MAKE) vm-reset
+	$(MAKE) $(if $(filter 1,$(KEEP_VM)),vm-up,vm-reset)
 	$(MAKE) provision
 	$(MAKE) idempotency
 	$(MAKE) verify STRICT=1
