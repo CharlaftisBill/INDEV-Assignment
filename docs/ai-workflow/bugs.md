@@ -6,7 +6,6 @@ Format and rules: the `bug` skill (`.claude/skills/bug/SKILL.md`); `make lint` c
 ## Open
 
 - B-072 (M10, Medium) [sre] Own-VM restore runbook has no step to put a `./backups/external` snapshot back on a rebuilt VM
-- B-073 (M10, Medium) [sec] Pull-loop pid file trusted blindly: a stale or planted pid kills an unrelated process group
 - B-095 (M10, Medium) [sre] Lima and own-VM egress share one socket/pid; a tunnel to the other VM counts as up
 - B-097 (M10, Medium) [sec] Air gap allows the whole pod and Service CIDRs: off-node 10.96/12 and 10.244/16 are reachable
 
@@ -533,9 +532,10 @@ Sev: Medium · State: Open · Found: 2026-11-23
 - **Direction:** add the copy step (e.g. `scripts/external.sh run tee <backup_dir>/<name> < backups/external/<name>`, 0600) to "Restore on a rebuilt VM"; note pulls prune old ones after 24 h.
 
 ### B-073 · [sec] Pull-loop pid file trusted blindly: a stale or planted pid kills an unrelated process group
-Sev: Medium · State: Open · Found: 2026-11-23
-- **Report** (sec final): pid file → other group (3 procs): `backups-schedule stop` TERM/KILLs them; `status`/check_7 say loop runs, `start` skips (`scripts/external.sh:49,58-62,106`).
-- **Direction:** before trusting or group-killing, check pgid == pid and the command is this loop (`ps -o pgid=,command=`); else drop the file. Pid files out of shared `/tmp`.
+Sev: Medium · State: Solved · Found: 2026-11-23 · Solved: 2026-11-23 · Fix: e1b4877
+- **Root cause:** `alive` only ran `kill -0` on the pid in a shared-`/tmp` file, so any live pid passed and `pull_stop` killed its group.
+- **Fix:** `pull_alive` trusts the file only if pgid == pid and the command is `backups-pull --scheduled`, else drops it; file moved to `.cache/`.
+- **Verification:** planted pid of a `sleep` group: main kills it, fix leaves it running and reports no loop; real loop start/status/stop still works.
 
 ### B-092 · [sre] `indev-airgap.service` ordering cycle at boot: systemd deletes a start job to break it
 Sev: High · State: Solved · Found: 2026-11-23 · Solved: 2026-11-23 · Fix: 49653ef
