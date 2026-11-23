@@ -6,7 +6,7 @@ Format and rules: the `bug` skill (`.claude/skills/bug/SKILL.md`); `make lint` c
 ## Open
 
 - B-095 (M10, Medium) [sre] Lima and own-VM egress share one socket/pid; a tunnel to the other VM counts as up
-- B-097 (M10, Medium) [sec] Air gap allows the whole pod and Service CIDRs: off-node 10.96/12 and 10.244/16 are reachable
+- B-099 (M10, Medium) [sre] A rules file that fails to load leaves the VM with no air gap (restart deletes it first)
 
 ## M0 — Scaffolding
 
@@ -563,6 +563,18 @@ Sev: Medium · State: Open · Found: 2026-11-23
 - **Direction:** record the target (host:port) next to the socket and restart egress when it differs.
 
 ### B-097 · [sec] Air gap allows the whole pod and Service CIDRs: off-node 10.96/12 and 10.244/16 are reachable
+Sev: Medium · State: Solved · Found: 2026-11-23 · Solved: 2026-11-23 · Fix: 772d2b7
+- **Root cause:** `allowed4` listed the pod and Service CIDRs, but ClusterIPs are DNATed before priority 10 and local pods sit behind `cali*`, so the ranges only added off-node reach.
+- **Fix:** CIDRs dropped from `allowed4`; `oifname "cali*"` accepted in `out` and `through` (+ B-098); check_1 asserts off-node 10.111.255.254, 10.244.255.254, 10.244.0.254 are rejected.
+- **Verification:** probes timed out (escaped) before, refused after; REQ=1 26 PASS strict, `TAGS=os_prep` idempotency changed=0; security re-check confirmed.
+
+### B-098 · [sec] B-097 fix rejects node → pod-backed ClusterIPs: apiserver webhooks fail closed
+Sev: High · State: Solved · Found: 2026-11-23 · Solved: 2026-11-23 · Fix: 772d2b7
+- **Root cause:** in the output hook `oifname` is the pre-DNAT route (eth0) for a ClusterIP, so traffic DNATed to a pod hit the reject; `fib daddr oifname` is not allowed there.
+- **Fix:** `out` also accepts `ct status dnat ip daddr {{ pod_cidr }}` (kube-proxy DNAT to a pod); check_1 asserts node → cert-manager-webhook ClusterIP:443 connects.
+- **Verification:** webhook ClusterIP refused before, OPEN after; REQ=1 26 PASS strict, `TAGS=os_prep` idempotency changed=0.
+
+### B-099 · [sre] A rules file that fails to load leaves the VM with no air gap (restart deletes it first)
 Sev: Medium · State: Open · Found: 2026-11-23
-- **Report** (sec airgap, live): node → 1.1.1.1:443 refused, but 10.100.0.1:443 and 10.244.200.1:443 pass `allowed4` and leave via 192.168.5.2 (pods too); any LAN/VPN/kind net in those ranges is reachable.
-- **Direction:** drop the Service CIDR (ClusterIPs are DNATed before priority 10); accept pod traffic by route/interface (`oifname "cali*"`, `fib daddr type local`) instead of the /16.
+- **Report** (B-098 fix attempt, live): handler `state: restarted` runs `ExecStop` (delete table), then `ExecStart` failed on a bad rule; table gone, 1.1.1.1:443 OPEN until the next good provision.
+- **Direction:** add `ExecReload=nft -f <rules>` (the file's own `delete table` makes it atomic) and use `state: reloaded` in the handler; `validate:` on the template.

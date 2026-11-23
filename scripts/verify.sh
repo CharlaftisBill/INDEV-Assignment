@@ -54,6 +54,31 @@ try:
 except OSError as e:
     print("BLOCKED", type(e).__name__)' 2>&1)"
   if [[ "$direct" == BLOCKED* ]]; then pass "the VM cannot reach the internet itself (1.1.1.1:443: ${direct#BLOCKED })"; else fail "the VM reaches the internet directly: $direct"; fi
+  # B-097: off-node addresses in the pod/Service ranges are rejected too (a timeout means the firewall let them out).
+  # Port 9: no Service listens there, so kube-proxy does not DNAT it.
+  local offnode
+  for off_ip in 10.111.255.254 10.244.255.254 10.244.0.254; do
+    if node ip route get "$off_ip" 2>&1 | grep -q ' dev cali'; then continue; fi  # a local pod block: not off-node
+    offnode="$(node python3 -c "import socket
+try:
+    socket.create_connection(('$off_ip', 9), timeout=5); print('OPEN')
+except OSError as e:
+    print(type(e).__name__)" 2>&1)"
+    if [[ "$offnode" == ConnectionRefusedError ]]; then pass "off-node $off_ip is rejected by the air gap"; else fail "off-node $off_ip is not rejected by the air gap: $offnode"; fi
+  done
+  # B-098: the node still reaches a pod-backed ClusterIP (the apiserver calls webhooks this way).
+  local wh_ip wh
+  wh_ip="$(k get services -n cert-manager cert-manager-webhook -o jsonpath='{.spec.clusterIP}' 2>/dev/null)"
+  if [[ -n "$wh_ip" ]]; then
+    wh="$(node python3 -c "import socket
+try:
+    socket.create_connection(('$wh_ip', 443), timeout=5); print('OPEN')
+except OSError as e:
+    print(type(e).__name__)" 2>&1)"
+    if [[ "$wh" == OPEN ]]; then pass "the node reaches a pod-backed ClusterIP (cert-manager-webhook $wh_ip:443)"; else fail "the node cannot reach cert-manager-webhook $wh_ip:443: $wh"; fi
+  else
+    skip "cert-manager-webhook Service not found (req 4 not provisioned)"
+  fi
   # B-094: the clock syncs over NTP through the air gap (a restarted timesyncd needs a few seconds).
   local synced=""
   for _ in $(seq 1 30); do synced="$(node timedatectl show -p NTPSynchronized --value 2>&1)"; [[ "$synced" == yes ]] && break; sleep 2; done
