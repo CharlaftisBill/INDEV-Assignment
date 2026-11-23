@@ -8,6 +8,11 @@ out/
 backups/*
 !backups/.gitkeep
 
+# Your own VM over SSH (host/user/key): local only
+external-vm.conf
+# Model downloaded on the host for an air-gapped VM
+.cache/
+
 # Ansible
 *.retry
 ansible/collections/
