@@ -5,7 +5,27 @@ Format and rules: the `bug` skill (`.claude/skills/bug/SKILL.md`); `make lint` c
 
 ## Open
 
-_None._
+- B-071 (M10, Medium) [sre] `backups-pull` exits 0 ("pulled 0 new") when the VM is unreachable or `backup_dir` is missing
+- B-072 (M10, Medium) [sre] Own-VM restore runbook has no step to put a `./backups/external` snapshot back on a rebuilt VM
+- B-073 (M10, Medium) [sec] Pull-loop pid file trusted blindly: a stale or planted pid kills an unrelated process group
+- B-074 (M10, Low) [sre] `tunnel start` failing on a busy port leaves the pull loop and egress running
+- B-075 (M10, Low) [sre] `make uninstall` without external-vm.conf skips a leftover tunnel
+- B-076 (M10, Low) [sre] A SIGKILLed pull leaves a `.pull.*` temp dir with a partial snapshot
+- B-077 (M10, Low) [sec] One bad or vanished snapshot name aborts the whole pull
+- B-078 (M10, Low) [sec] No size or time limit on a snapshot pull
+- B-079 (M10, Low) [sec] Egress allowlist cannot contain a compromised VM (CDN tenants, domain fronting)
+- B-080 (M10, Low) [sec] Egress proxy has no per-connection limit; slow heads hold sockets 30 s
+- B-081 (M10, Low) [sec] Egress log writes raw request bytes (terminal escapes)
+- B-082 (M10, Low) [sec] Egress bridge is open whenever the tunnel is up; hostNetwork pods can use it
+- B-083 (M10, Low) [sec] `*` in the egress allowlist also allows IP literals and private addresses
+- B-084 (M10, Low) [sec] `loopback-forward.py` completes the TCP handshake for LAN peers before closing
+- B-085 (M10, Low) [sec] A `proxy=` URL with credentials lands in world-readable files on the VM
+- B-086 (M10, Low) [sec] check_3b air-gap branch is partly vacuous
+- B-087 (M10, Low) [sre] `external-vm.conf` parsing differs between `external.sh` and Ansible
+- B-088 (M10, Low) [sre] Stale `./backups` wording after the move to `./backups/external`
+- B-089 (M10, Low) [sre] Own-VM snapshots are visible inside a Lima VM's backup mount
+- B-090 (M10, Low) [sre] check_7 freshness limit (2x schedule) can fail when a pull lands just before a snapshot
+- B-091 (M10, Low) [sre] `etcd-backup.sh` mount guard skipped by any `REQUIRE_MOUNT` value other than `1`
 
 ## M0 — Scaffolding
 
@@ -446,3 +466,179 @@ Sev: Medium · State: Solved · Found: 2026-11-23 · Solved: 2026-11-23 · Fix: 
 - **Root cause:** `write_hosts` hid every `grep -v` failure (`|| true`), and grep's text/locale handling drops lines without failing.
 - **Fix:** byte-wise `LC_ALL=C grep -a`; abort on read error or if any non-marker line is lost (line count); temp file removed by `trap`.
 - **Verification:** temp copies (sudo shim), BSD + GNU 3.11 (`C.UTF-8`): NUL/latin1 lines kept, unreadable → rc 1, file untouched; `make lint` clean.
+
+### B-061 · Own-VM SSH tunnel cannot bind host 443/80 on macOS as a normal user
+Sev: — · State: Solved · Found: 2026-11-22 · Solved: 2026-11-22 · Fix: 7663012
+- **Report** (setup, own VM): `make vm-up` → `bind [127.0.0.1]:443: Permission denied`; Lima itself listens on `*:443`.
+- **Root cause:** macOS lets non-root bind ports < 1024 only on the wildcard address; `ssh -L 127.0.0.1:443` is refused.
+- **Fix:** ssh forwards to loopback 18443/18000; `scripts/loopback-forward.py` serves `*:443`/`*:80`, drops non-local peers (Lima's approach).
+- **Verification:** stand-in VM: `make smoke` OK, LAN-address request refused, 8 parallel 20 MB transfers intact, verify 314 PASS strict.
+
+### B-062 · Air-gapped own VM: image pulls denied, registry CDNs missing from the egress allowlist
+Sev: — · State: Solved · Found: 2026-11-23 · Solved: 2026-11-23 · Fix: 7663012
+- **Report** (setup, air-gapped stand-in VM): `kubeadm init` failed; egress log `DENY cdn.registry.k8s.io:443`, later `production.cloudfront.docker.com`.
+- **Root cause:** registries redirect blobs to CDN hosts not on `scripts/egress-allowlist.txt`; a proxy restart to add one also cut downloads.
+- **Fix:** `.registry.k8s.io` and Docker's CloudFront host allowed; `egress-proxy.py` reloads the allowlist when the file changes.
+- **Verification:** air-gapped VM: provision OK, idempotency changed=0, verify 313 PASS strict, smoke OK; reload ALLOW/DENY without restart.
+
+### B-063 · [sre] Own VM: scheduled snapshots stay on the node until a manual `make backups-pull`
+Sev: Medium · State: Solved · Found: 2026-11-23 · Solved: 2026-11-23 · Fix: 7663012
+- **Report** (sre r1): req 7 "stored outside the cluster"; with `etcd_backup_require_mount: false` the timer writes to `/var/backups/etcd` on the only node; check_7 passes because it pulls first.
+- **Root cause:** an air-gapped VM cannot push and nothing on the host pulled on a schedule; check_7 pulled first, so it passed anyway.
+- **Fix:** a host loop started with the tunnel pulls every 30 min (0600, regular files only, newest 48); launchd rejected (macOS TCC blocks ~/Desktop).
+- **Verification:** air-gapped stand-in: loop pulled; REQ=7 25 PASS incl. loop + pre-pull copy of a VM snapshot; full verify 315 PASS; pull unit test.
+
+### B-064 · [sre] Removing `external-vm.conf` orphans the tunnel (443/80/6443 held); `tunnel-stop` refuses
+Sev: Medium · State: Solved · Found: 2026-11-23 · Solved: 2026-11-23 · Fix: 7663012
+- **Report** (sre r1): conf removed (documented way back to Lima), forwarder alive → `external.sh tunnel stop` dies rc 1; uninstall skips it. Lima can't forward; kubectl may hit the old VM (same CA).
+- **Root cause:** `external.sh` exited on a missing conf before reading the tunnel's pid/socket files, which do not depend on it.
+- **Fix:** `tunnel stop|running`, `egress stop` work without the conf; Lima `make vm-up` stops a leftover tunnel; `make doctor` flags it.
+- **Verification:** stand-in VM, conf deleted with tunnel + pull loop up: doctor IN USE, Lima vm-up stopped all, `tunnel running` rc 1.
+
+### B-065 · [sec] Ansible skips host-key checks on the own VM: a MITM on the SSH path gets the CA keys
+Sev: Medium · State: Solved · Found: 2026-11-23 · Solved: 2026-11-23 · Fix: 50ca4cc
+- **Report** (sec r1): `ansible.cfg` `host_key_checking = False` → ssh `-o StrictHostKeyChecking=no`; a changed host key only warns, pubkey auth goes on; kubeadm CA/SA keys and `ca.key` then go to that host.
+- **Root cause:** `external.yml` inherited `ansible.cfg`'s `host_key_checking = False`, which is meant for Lima's rebuilt VMs.
+- **Fix:** `external.yml` sets `ansible_host_key_checking: true` and `-o StrictHostKeyChecking=accept-new` (trust on first use, like `external.sh`).
+- **Verification:** ControlPath=none, scratch known_hosts: empty → key recorded, SUCCESS; same key SUCCESS; wrong key → verification failed, UNREACHABLE.
+
+### B-066 · [sec] Egress proxy keeps the client `Host` on plain http: reaches any tenant of an allowed CDN
+Sev: Medium · State: Solved · Found: 2026-11-23 · Solved: 2026-11-23 · Fix: 7663012
+- **Report** (sec r1): `GET http://deb.debian.org/` + `Host: pypi.org` via `egress-proxy.py` → pypi.org's Fastly reply; log says `ALLOW GET http://deb.debian.org` (`scripts/egress-proxy.py:117`).
+- **Report** (sec r2, fix bypassed): header `X-A: 1\nHost: pypi.org` (bare LF) passes `keep()`; Fastly splits on LF → pypi.org 301, unknown name → "Fastly error: unknown domain".
+- **Fix:** forced `Host: <checked host>`, client Host/hop-by-hop/folded lines dropped (r1); 400 on any bare CR/LF or CTL in the head (r2).
+- **Verification:** `Host:`, `Host :`, folded Host → Debian 200; bare LF, bare CR (also CONNECT) → 400; apt http/https 200; bad port 400.
+
+### B-067 · [sre] Own-VM snapshot pull re-copies every snapshot each run (~1.3 GB per 30 min)
+Sev: Medium · State: Solved · Found: 2026-11-23 · Solved: 2026-11-23 · Fix: 7663012
+- **Report** (sre r2): `backups-pull` tars all of `backup_dir` each run (`scripts/external.sh:191`); repeat pull: each file a new inode; real snapshots 27.8 MB × 48 = 1.3 GB/run, plus a full temp copy.
+- **Root cause:** each pull tarred all of `backup_dir`, so every run re-sent and rewrote all 48 snapshots.
+- **Fix:** the pull fetches only the newest N names it does not have yet (`scripts/external.sh` backups-pull).
+- **Verification:** scratch pull test: 2nd run fetched 0, same inodes; air-gapped stand-in: loop pulled 1 new, REQ=7 25 PASS, verify 315 PASS.
+
+### B-068 · [sre] Stopping the pull loop leaves an in-flight pull writing `./backups` after uninstall
+Sev: Medium · State: Solved · Found: 2026-11-23 · Solved: 2026-11-23 · Fix: 7663012
+- **Report** (sre r2): `pull_stop` kills the loop and its direct child only; `ssh | tar` live on (PPID 1), a pull was logged after `backups-schedule stop` returned; uninstall YES=1 races `rm_backups`.
+- **Root cause:** `pull_stop` killed only the loop's shell and its sleep; an in-flight ssh/tar kept running, reparented to PID 1.
+- **Fix:** the loop starts in its own process group (`set -m`); `pull_stop` sends TERM to the group, waits, then KILL.
+- **Verification:** stopped during a 1.5 GB pull (5 procs in group): 0 left, no temp dir, no partial copy.
+
+### B-069 · [sre] Own-VM pull prunes Lima's snapshots in the shared `./backups` (one retention for two clusters)
+Sev: Medium · State: Solved · Found: 2026-11-23 · Solved: 2026-11-23 · Fix: 7663012
+- **Report** (sre r2): older Lima `etcd-snapshot-20251001T000000Z.db` in `./backups` deleted by `backups-pull` (newest 48 across both); after 24 h no Lima snapshot left, restore picks by name.
+- **Root cause:** own-VM pulls and Lima's mount shared `./backups` and one retention count, so the pull pruned Lima's files.
+- **Fix:** own-VM snapshots go to `./backups/external/` (0700); only that folder is pruned; check_7 and docs use it.
+- **Verification:** scratch test: Lima file in `./backups` kept, 48 in `external/`; Lima verify 314 PASS strict after.
+
+### B-070 · [sec] `backups-pull` splits snapshot names on newlines: a hostile VM deletes host files
+Sev: Medium · State: Solved · Found: 2026-11-23 · Solved: 2026-11-23 · Fix: 7663012
+
+- **Report** (sec r2): VM file `etcd-snapshot-\n-victim2.db\n.db` → retention `find | sort | read` (`scripts/external.sh:196`) yields `-victim2.db`; `rm -f` deleted it from the cwd (scheduled loop: repo root).
+- **Root cause:** retention read a newline-split `find` list, so a VM-chosen name became a host path for `rm`.
+- **Fix:** only names matching `^etcd-snapshot-[0-9]{8}T[0-9]{6}Z\.db$` are fetched; pruning uses a bash glob array.
+- **Verification:** VM file `etcd-snapshot-\n-victim.db\n.db`: not copied, cwd `-victim.db` kept; symlink with a valid name skipped.
+
+### B-071 · [sre] `backups-pull` exits 0 ("pulled 0 new") when the VM is unreachable or `backup_dir` is missing
+Sev: Medium · State: Open · Found: 2026-11-23
+- **Report** (sre final): port=1 or `backup_dir=/nonexistent` → `pulled 0 new snapshot(s)`, rc 0; the list runs in `< <(run find …)` (`scripts/external.sh:204`), so pipefail misses it; check_7's `|| fail` is dead.
+- **Direction:** list into a variable first (`names="$(run find …)" || die …`), then filter; a failed pull exits non-zero and logs an error line.
+
+### B-072 · [sre] Own-VM restore runbook has no step to put a `./backups/external` snapshot back on a rebuilt VM
+Sev: Medium · State: Open · Found: 2026-11-23
+- **Report** (sre final): `etcd-restore.md:6-7` restores from `/var/backups/etcd` on the VM; a reinstalled VM has only new snapshots there, and no step copies the host copy (the only off-node one) back.
+- **Direction:** add the copy step (e.g. `scripts/external.sh run tee <backup_dir>/<name> < backups/external/<name>`, 0600) to "Restore on a rebuilt VM"; note pulls prune old ones after 24 h.
+
+### B-073 · [sec] Pull-loop pid file trusted blindly: a stale or planted pid kills an unrelated process group
+Sev: Medium · State: Open · Found: 2026-11-23
+- **Report** (sec final): pid file → other group (3 procs): `backups-schedule stop` TERM/KILLs them; `status`/check_7 say loop runs, `start` skips (`scripts/external.sh:49,58-62,106`).
+- **Direction:** before trusting or group-killing, check pgid == pid and the command is this loop (`ps -o pgid=,command=`); else drop the file. Pid files out of shared `/tmp`.
+
+### B-074 · [sre] `tunnel start` failing on a busy port leaves the pull loop and egress running
+Sev: Low · State: Open · Found: 2026-11-23
+- **Report** (sre final): `external.sh tunnel start` with 18443 held: rc 1, `status` down, but the pull loop (and egress) keep running.
+- **Direction:** stop what `tunnel start` started when a later step fails (trap), or start the loop only after the forwards are up.
+
+### B-075 · [sre] `make uninstall` without external-vm.conf skips a leftover tunnel
+Sev: Low · State: Open · Found: 2026-11-23
+- **Report** (sre final): `host-tools.sh` uninstall checks `tunnel running` only inside the conf branch; a tunnel and forwarder outlive the uninstall (doctor flags it).
+- **Direction:** check `external.sh tunnel running` regardless of the conf and offer `tunnel stop`.
+
+### B-076 · [sre] A SIGKILLed pull leaves a `.pull.*` temp dir with a partial snapshot
+Sev: Low · State: Open · Found: 2026-11-23
+- **Report** (sre final): After `pull_stop`'s KILL fallback the EXIT trap does not run; `./backups/external/.pull.*` stays, no later pull removes it.
+- **Direction:** remove stale `.pull.*` dirs at the start of each pull.
+
+### B-077 · [sec] One bad or vanished snapshot name aborts the whole pull
+Sev: Low · State: Open · Found: 2026-11-23
+- **Report** (sec final): A VM name like `…7Z.db\n…8Z.db` yields two valid but absent names; `tar` exits 2 and nothing is pulled (also if the VM prunes between `find` and `tar`).
+- **Direction:** tolerate missing members (or re-list) and keep the files that did extract.
+
+### B-078 · [sec] No size or time limit on a snapshot pull
+Sev: Low · State: Open · Found: 2026-11-23
+- **Report** (sec final): A hostile or hung VM can fill the host disk or stall the loop forever (no ssh timeout on the pull).
+- **Direction:** cap bytes per pull and add `ServerAliveInterval`/a timeout to the pull's ssh.
+
+### B-079 · [sec] Egress allowlist cannot contain a compromised VM (CDN tenants, domain fronting)
+Sev: Low · State: Open · Found: 2026-11-23
+- **Report** (sec r2/final): `.pkg.dev`, `github.com`, `.githubusercontent.com`, `ghcr.io`, Docker Hub serve anyone's content; CONNECT is end to end, so a fronted SNI/Host is invisible.
+- **Direction:** state the limit in `docs/assumptions.md` (allowlist guards what is pulled, not exfiltration); narrow suffixes where possible.
+
+### B-080 · [sec] Egress proxy has no per-connection limit; slow heads hold sockets 30 s
+Sev: Low · State: Open · Found: 2026-11-23
+- **Report** (sec final): `egress-proxy.py` accepts unlimited connections; each slow head is held up to 30 s. Only local clients can connect.
+- **Direction:** add a connection semaphore and shorter head timeout.
+
+### B-081 · [sec] Egress log writes raw request bytes (terminal escapes)
+Sev: Low · State: Open · Found: 2026-11-23
+- **Report** (sec r1/r2): `egress-proxy.py` `log()` prints hostnames/methods from the request as is; ESC sequences reach whoever `tail`s the log.
+- **Direction:** log `repr()`/escaped values.
+
+### B-082 · [sec] Egress bridge is open whenever the tunnel is up; hostNetwork pods can use it
+Sev: Low · State: Open · Found: 2026-11-23
+- **Report** (sec r1): `tunnel start` also starts egress; any VM process on 127.0.0.1:18128 (Traefik, node-exporter: hostNetwork) gets allowlisted internet. Docs say pods get none.
+- **Direction:** run egress only during provision/idempotency (and verify image pulls), or document the exposure.
+
+### B-083 · [sec] `*` in the egress allowlist also allows IP literals and private addresses
+Sev: Low · State: Open · Found: 2026-11-23
+- **Report** (sec r1): With `*`, the VM reaches the host's 127.0.0.1:80/443, LAN hosts and 169.254.169.254.
+- **Direction:** even with `*`, refuse IP literals and loopback/private/link-local targets.
+
+### B-084 · [sec] `loopback-forward.py` completes the TCP handshake for LAN peers before closing
+Sev: Low · State: Open · Found: 2026-11-23
+- **Report** (sec r1): LAN/public-IPv6 peers connect, then are closed without data (like Lima); a scanner sees 443/80 open.
+- **Direction:** accept the behaviour in docs, or filter with the host firewall.
+
+### B-085 · [sec] A `proxy=` URL with credentials lands in world-readable files on the VM
+Sev: Low · State: Open · Found: 2026-11-23
+- **Report** (sec r1, sre r1): `/etc/apt/apt.conf.d/95indev-proxy` and the containerd drop-in are 0644; `systemctl show` and `egress test` argv expose it.
+- **Direction:** mode 0600 for both files; pass the URL to `egress test` on stdin.
+
+### B-086 · [sec] check_3b air-gap branch is partly vacuous
+Sev: Low · State: Open · Found: 2026-11-23
+- **Report** (sec r1): `FETCH_HTTPS_BLOCKED` (1.1.1.1:443) and `FETCH_DNS_FAIL` (huggingface.co) pass with no internet regardless of policy.
+- **Direction:** test DNS with `kubernetes.default.svc` for the Job label; keep node IP:6443 as the policy proof.
+
+### B-087 · [sre] `external-vm.conf` parsing differs between `external.sh` and Ansible
+Sev: Low · State: Open · Found: 2026-11-23
+- **Report** (sre r1): Duplicate keys: `external.sh` takes the first, the ini lookup the last; an `ssh_key` path with spaces breaks `ansible_ssh_common_args`.
+- **Direction:** reject duplicate keys and paths with spaces in `external.sh check`.
+
+### B-088 · [sre] Stale `./backups` wording after the move to `./backups/external`
+Sev: Low · State: Open · Found: 2026-11-23
+- **Report** (sre final): `verify.sh:1218-1220` comment, check_7 own-VM messages ("host ./backups"), Makefile `backups-pull` help.
+- **Direction:** update the wording.
+
+### B-089 · [sre] Own-VM snapshots are visible inside a Lima VM's backup mount
+Sev: Low · State: Open · Found: 2026-11-23
+- **Report** (sre final): `./backups/external` sits inside Lima's writable `./backups` mount (`/mnt/host-backups/external`); matters only on a host using both.
+- **Direction:** document it, or keep own-VM copies outside `./backups`.
+
+### B-090 · [sre] check_7 freshness limit (2x schedule) can fail when a pull lands just before a snapshot
+Sev: Low · State: Open · Found: 2026-11-23
+- **Report** (sre r2): Own VM: pull at t, snapshot at t+ε, next pull t+30 min; the host copy can approach the 3600 s limit with timing jitter.
+- **Direction:** base the limit on schedule + pull interval (+ margin).
+
+### B-091 · [sre] `etcd-backup.sh` mount guard skipped by any `REQUIRE_MOUNT` value other than `1`
+Sev: Low · State: Open · Found: 2026-11-23
+- **Report** (sre r1): `[[ "${REQUIRE_MOUNT:-1}" == 1 ]]`: `true` or `yes` skip the guard. The template only writes 1 or 0.
+- **Direction:** accept only `0` as off; anything else keeps the guard.
