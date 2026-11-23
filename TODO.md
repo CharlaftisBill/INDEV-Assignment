@@ -52,6 +52,9 @@ Current milestone: **Done (M1–M10)** · macOS arm64 re-check after Linux suppo
 - [x] **Terminal chat** (2026-11-21, `chore/llm-chat-tui`). `make chat` (`scripts/chat.sh`, curl + jq): streams replies, keeps
   history, `/reset`, `/quit`. Tested on the live model: history recalled, reset forgets, a 404 is reported and the chat goes on.
 
+- [x] **IPv6 hosts line** (2026-11-23, `fix/b-059-hosts-ipv6-entry`, B-059). `scripts/hosts-entry.sh` adds/removes `::1` next to
+  `127.0.0.1`; `make doctor` requires both. macOS lookup 5.005 s → 0.004 s, `make smoke` OK, `make lint` clean.
+
 ## Bugs
 All bugs, Open and Solved, are in [docs/ai-workflow/bugs.md](docs/ai-workflow/bugs.md) (format: `bug` skill).
 

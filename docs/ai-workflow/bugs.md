@@ -432,3 +432,10 @@ Sev: — · State: Solved · Found: 2026-11-22 · Solved: 2026-11-22 · Fix: 795
 - **Root cause:** cloud kernel lacks 9p; Lima's QEMU virtiofs needs a shared-memory RAM backend in `/dev/shm` (half of host RAM).
 - **Fix:** `lima/k8s.yaml` x86_64 image is Debian `generic` (same build, sha512 pinned), mount type left at Lima's default (9p on QEMU).
 - **Verification:** `findmnt` shows 9p rw; root write + chmod 600 OK; `/dev/shm` stays 0%; REQ=7 strict 23 PASS; full provision OK.
+
+### B-059 · macOS: every `https://llm.local` request waits 5 s in name lookup (no `::1` hosts line)
+Sev: — · State: Solved · Found: 2026-11-23 · Solved: 2026-11-23 · Fix: 8104992
+- **Report** (setup): `curl -w '%{time_namelookup}' https://llm.local/health` = 5.005 s, with `-4` 0.004 s; `/etc/hosts` has only the `127.0.0.1` line.
+- **Root cause:** no AAAA answer in `/etc/hosts`, so macOS sends the `.local` AAAA query to mDNS, which times out after 5 s.
+- **Fix:** `hosts-entry.sh` adds/removes a `::1` line too (upgrades the old single line), `--check`; `host-tools.sh` requires both (Lima listens `*:443`).
+- **Verification:** after `--apply`: `time_namelookup` 0.004 s without `-4` (via `::1`); `make smoke` 0.18 s; `make doctor` OK; `make lint` clean.
