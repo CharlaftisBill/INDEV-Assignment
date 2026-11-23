@@ -1,6 +1,7 @@
 #!/usr/sbin/nft -f
 # Managed by Ansible (os_prep). The VM is air-gapped: outbound traffic only to itself, the node IP, the pod and
-# Service ranges{{ ', and ' ~ (os_prep_egress_allow_ips | join(', ')) if os_prep_egress_allow_ips else '' }}. Downloads go through the egress proxy on 127.0.0.1.
+# Service ranges{{ ', and ' ~ (os_prep_egress_allow_ips | join(', ')) if os_prep_egress_allow_ips else '' }}, plus NTP (udp/123) to {{ vm_ntp_servers | join(', ') }}.
+# Downloads go through the egress proxy on 127.0.0.1.
 # Own table and base chains: kube-proxy and Calico rules elsewhere are untouched. "delete" makes reloads idempotent.
 table inet indev_airgap
 delete table inet indev_airgap
@@ -9,11 +10,16 @@ table inet indev_airgap {
     type ipv4_addr; flags interval
     elements = { 127.0.0.0/8, {{ pod_cidr }}, {{ service_cidr }}, {{ os_prep_node_ip }}/32{% for ip in os_prep_egress_allow_ips %}, {{ ip }}/32{% endfor %} }
   }
+  set ntp4 {
+    type ipv4_addr
+    elements = { {{ vm_ntp_servers | join(', ') }} }
+  }
   chain out {
     type filter hook output priority 10; policy accept;
     ct state established,related accept
     oifname "lo" accept
     ip daddr @allowed4 accept
+    ip daddr @ntp4 udp dport 123 accept
     counter reject
   }
   chain through {

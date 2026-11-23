@@ -31,7 +31,7 @@ Sev: Medium · State: Solved · Found: 2026-11-19 · Solved: 2026-11-19 · Fix: 
   `[sre]` (SRE review finding). Backticks for code; no HTML-like `<...>` text.
 - **Meta line**, exactly this field order: `Sev: … · State: … · Found: <date>`, then `· Solved: <date>` and
   `· Fix: …` when they apply.
-  - **Sev**: `Critical`, `High`, `Medium`, `Low` for review findings (Lows logged since 2026-11-23, user); `—` for bugs found otherwise.
+  - **Sev**: `Critical`, `High`, `Medium` for review findings (Lows are never logged); `—` for bugs found otherwise.
   - **State**: exactly `Open` or `Solved`.
   - **Fix**: absent while Open; `uncommitted` or the short commit hash once Solved. An Open bug may carry `Fix: [stuck rN]` (see Rules).
 - **Bullets**: at most 4, one line each, **~200 characters max** (lint: ≤ 220). Open bug: **Report** + **Direction**

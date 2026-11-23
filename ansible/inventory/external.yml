@@ -25,6 +25,9 @@ all:
           _ext_proxy: "{{ lookup('ansible.builtin.ini', 'proxy', type='properties', file=_ext_conf, default='') }}"
           vm_proxy_url: "{{ _ext_proxy if _ext_egress == 'proxy' else ('http://127.0.0.1:' ~ vm_egress_port) }}"
           vm_egress_allow_extra: "{{ [_ext_proxy | urlsplit('hostname')] if _ext_egress == 'proxy' else [] }}"
+          # ntp=<IPv4>[,<IPv4>...]: NTP servers the VM can reach (B-094); default: group_vars vm_ntp_default_servers.
+          _ext_ntp: "{{ lookup('ansible.builtin.ini', 'ntp', type='properties', file=_ext_conf, default='') }}"
+          vm_ntp_servers: "{{ (_ext_ntp | split(',') | map('trim') | select | list) if _ext_ntp else vm_ntp_default_servers }}"
           # No Lima mount here: snapshots go to a directory on the VM (outside Kubernetes); make backups-pull copies them to ./backups.
           etcd_backup_require_mount: false
           node_backup_dir: "{{ lookup('ansible.builtin.ini', 'backup_dir', type='properties', file=_ext_conf, default='/var/backups/etcd') }}"

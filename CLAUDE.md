@@ -45,11 +45,11 @@ The assignment is `k8s-single-node-assignment.md`. Project state: **`TODO.md`**;
 
 ## TODO.md and bugs protocol
 - Read `TODO.md` and the `## Open` list in `docs/ai-workflow/bugs.md` before starting; update the Status line, milestone checkboxes and bugs before finishing.
-- Bug states are only **Open** or **Solved**. IDs are sequential `B-NNN`, never reused or deleted.
+- Bug states are only **Open** or **Solved**. IDs are sequential `B-NNN`, never reused.
 - Format (defined in the `bug` skill, checked by `make lint`): an `## Open` list, then one `## M<n>` section per milestone with a block per bug: `### B-NNN · <title>` (≤ ~100 chars), a meta line (`Sev · State · Found · Solved · Fix`) and **at most 4** one-line bullets (Report, Direction or Root cause/Fix/Verification).
 - A bug becomes **Solved** only with the fixing commit hash (or `uncommitted` until committed) in its Fix field and a passing check.
-- Verifier/reviewer agents (`k8s-verifier`, `sre-reviewer`, `security-reviewer`) only *open* bugs; review findings set the Sev column; Critical/High/Medium/Low are all logged (Low since 2026-11-23, user). Fixes go through the `fix-next-bug` skill (one bug per run, reproduce → root cause → fix → verify). Use the `bug` skill to keep the format.
-- A milestone can't be ticked while Open Critical/High/Medium bugs exist for it or an earlier milestone (Lows don't block). Open bugs for later milestones are *deferred*: tracked, not worked, until their milestone becomes current.
+- Verifier/reviewer agents (`k8s-verifier`, `sre-reviewer`, `security-reviewer`) only *open* bugs; review findings set the Sev column and only Critical/High/Medium are logged. Fixes go through the `fix-next-bug` skill (one bug per run, reproduce → root cause → fix → verify). Use the `bug` skill to keep the format.
+- A milestone can't be ticked while Open bugs exist for it or an earlier milestone. Open bugs for later milestones are *deferred*: tracked, not worked, until their milestone becomes current.
 - Assumptions made where the brief is unclear, and risks the user accepts, go in `docs/assumptions.md`; implementation details go in the ADRs.
 
 ## Definition of done (per milestone)

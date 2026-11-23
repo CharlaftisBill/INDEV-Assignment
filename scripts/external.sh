@@ -82,7 +82,7 @@ esac
 [[ -f "$CONF" ]] || die "no external-vm.conf (copy external-vm.conf.example); the Lima VM is used instead"
 
 HOST="$(get host)"; USER_="$(get user)"; PORT="$(get port)"; KEY="$(get ssh_key)"; BDIR="$(get backup_dir)"
-EGRESS="$(get egress)"; PROXY="$(get proxy)"; HKC="$(get host_key_check)"
+EGRESS="$(get egress)"; PROXY="$(get proxy)"; HKC="$(get host_key_check)"; NTP="$(get ntp)"
 PORT="${PORT:-22}"; BDIR="${BDIR:-/var/backups/etcd}"; EGRESS="${EGRESS:-host}"
 [[ -n "$HOST" && -n "$USER_" ]] || die "external-vm.conf needs host= and user="
 [[ "$PORT" =~ ^[0-9]+$ ]] || die "external-vm.conf: port= must be a number"
@@ -94,6 +94,8 @@ case "$EGRESS" in
   proxy) [[ "$PROXY" =~ ^http://[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:[0-9]+/?$ ]] || die "external-vm.conf: egress=proxy needs proxy=http://<IPv4>:<port> (the VM has no DNS)" ;;
   *) die "external-vm.conf: egress= must be host or proxy" ;;
 esac
+# B-094: NTP servers by IP, like the proxy (no DNS on the VM).
+[[ -z "$NTP" || "$NTP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(,[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)*$ ]] || die "external-vm.conf: ntp= must be <IPv4>[,<IPv4>...] (the VM has no DNS)"
 
 SSH=(ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 -p "$PORT")
 # host_key_check=no only in the generated Lima conf: Lima's keys change on every rebuild (its own ssh.config does the same).

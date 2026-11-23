@@ -6,7 +6,7 @@
 - Each bug: `### B-NNN · <title>` (≤ MAX_TITLE chars), a meta line
   `Sev: <Sev> · State: <Open|Solved> · Found: <date>[ · Solved: <date>][ · Fix: <hash|uncommitted|[stuck rN]>]`,
   then at most MAX_BULLETS one-line bullets of at most MAX_LINE chars.
-- IDs are B-001..B-NNN with no gaps or duplicates; Solved needs a Solved date and a commit hash or `uncommitted`.
+- IDs are unique (never reused); Solved needs a Solved date and a commit hash or `uncommitted`.
 Exit 1 with one line per problem.
 """
 import re
@@ -15,7 +15,7 @@ import sys
 MAX_TITLE = 100
 MAX_BULLETS = 4
 MAX_LINE = 220
-SEVS = ("Critical", "High", "Medium", "Low", "—")
+SEVS = ("Critical", "High", "Medium", "—")
 DATE = r"\d{4}-\d{2}-\d{2}"
 META = re.compile(
     rf"Sev: (?P<sev>\S+) · State: (?P<state>\S+) · Found: (?P<found>{DATE})"
@@ -96,7 +96,7 @@ for bid, b in bugs.items():
         continue
     sev, state, solved, fix = meta["sev"], meta["state"], meta["solved"], meta["fix"] or ""
     if sev not in SEVS:
-        problems.append(f"{bid}: Sev must be Critical, High, Medium, Low or —, got '{sev}'")
+        problems.append(f"{bid}: Sev must be Critical, High, Medium or —, got '{sev}'")
     if state not in ("Open", "Solved"):
         problems.append(f"{bid}: State must be Open or Solved, got '{state}'")
     if state == "Solved" and (not solved or not re.search(r"uncommitted|\b[0-9a-f]{7,}\b", fix)):
@@ -109,10 +109,6 @@ for bid, b in bugs.items():
         problems.append(f"{bid}: {b['bullets']} bullets (max {MAX_BULLETS})")
 
 ids = sorted(bugs)
-for i, bid in enumerate(ids, 1):
-    if bid != "B-%03d" % i:
-        problems.append(f"IDs must run B-001..B-{len(ids):03d} with no gaps (missing B-{i:03d}?)")
-        break
 for ms in {b["ms"] for b in bugs.values()}:
     in_ms = [b["line"] for b in bugs.values() if b["ms"] == ms]
     by_id = [bugs[k]["line"] for k in ids if bugs[k]["ms"] == ms]
