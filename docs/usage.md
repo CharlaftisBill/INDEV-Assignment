@@ -53,7 +53,7 @@ Renew or revoke it: [operator kubeconfig runbook](runbooks/operator-kubeconfig.m
 
 ## Web pages
 
-Both need the `/etc/hosts` line ([install guide](install.md#other-changes-it-makes)).
+Both need the `/etc/hosts` lines ([install guide](install.md#other-changes-it-makes)).
 Their certificates are signed by `certs/ca.crt`.
 
 | URL | What |

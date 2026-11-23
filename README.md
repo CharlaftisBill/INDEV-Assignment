@@ -51,7 +51,7 @@ make smoke        # the curl above
 
 | UI | How |
 |---|---|
-| Grafana | `https://grafana.local`, user `admin` ([password](docs/runbooks/grafana.md)); needs the `/etc/hosts` line (`scripts/hosts-entry.sh --apply`) |
+| Grafana | `https://grafana.local`, user `admin` ([password](docs/runbooks/grafana.md)); needs the `/etc/hosts` lines (`scripts/hosts-entry.sh --apply`) |
 | Prometheus, Alertmanager | `make monitoring-ui`, then `http://localhost:9090` and `http://localhost:9093`; Ctrl-C stops it. No login, so local port-forward only, no Ingress |
 
 **5. Chat with the model** (optional):

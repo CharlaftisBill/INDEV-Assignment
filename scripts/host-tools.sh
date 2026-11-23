@@ -100,7 +100,8 @@ venv_ok() {
 }
 collections_ok() { local s="$ROOT/ansible/collections/.installed"; [[ -f "$s" && "$s" -nt "$ROOT/ansible/requirements.yml" ]]; }
 hooks_ok() { [[ "$(git -C "$ROOT" config --get core.hooksPath 2>/dev/null)" == .githooks ]]; }
-hosts_ok() { grep -q "$HOSTS_MARKER" /etc/hosts 2>/dev/null; }
+hosts_ok() { "$ROOT/scripts/hosts-entry.sh" --check; }   # both the 127.0.0.1 and ::1 lines (B-059)
+hosts_any() { grep -q "[[:space:]]$HOSTS_MARKER\$" /etc/hosts 2>/dev/null; }
 port_start() { cat /proc/sys/net/ipv4/ip_unprivileged_port_start 2>/dev/null || echo 1024; }
 port_ok() { [[ "$OS" == darwin ]] || [[ "$(port_start)" -le 80 ]]; }
 qemu_pkgs() {  # distro packages Lima needs on Linux (printed, installed only with confirmation)
@@ -123,8 +124,8 @@ vm_status() {
 
 check_state() {  # check_state REQUIRE_VM(1/0) REQUIRE_HOSTS(1/0)
   local need_vm="$1" need_hosts="$2" st
-  if hosts_ok; then report OK "$need_hosts" "/etc/hosts entry" "llm.local grafana.local -> 127.0.0.1"
-  else report MISSING "$need_hosts" "/etc/hosts entry" "needed for https://llm.local" "make deps (or scripts/hosts-entry.sh --apply)"; fi
+  if hosts_ok; then report OK "$need_hosts" "/etc/hosts entry" "llm.local grafana.local -> 127.0.0.1, ::1"
+  else report MISSING "$need_hosts" "/etc/hosts entry" "$(hosts_any && echo "incomplete: needs the 127.0.0.1 and ::1 lines" || echo "needed for https://llm.local")" "make deps (or scripts/hosts-entry.sh --apply)"; fi
   if port_ok; then report OK 1 "port 443 forwarding" "$([[ $OS == darwin ]] && echo "macOS allows unprivileged binds" || echo "ip_unprivileged_port_start=$(port_start)")"
   else report MISSING 1 "port 443 forwarding" "net.ipv4.ip_unprivileged_port_start=$(port_start) (Lima can't bind 443/80)" "make deps (or sudo sysctl -w net.ipv4.ip_unprivileged_port_start=80)"; fi
   if [[ "$OS" == linux ]]; then
@@ -227,7 +228,7 @@ cmd_deps() {
   port_ok || sudo_steps+=(port)
   for t in ${sudo_steps[@]+"${sudo_steps[@]}"}; do
     case "$t" in
-      hosts) plan+=("[sudo, asks first] add '127.0.0.1 llm.local grafana.local $HOSTS_MARKER' to /etc/hosts") ;;
+      hosts) plan+=("[sudo, asks first] add '127.0.0.1|::1 llm.local grafana.local $HOSTS_MARKER' to /etc/hosts") ;;
       qemu) plan+=("[sudo, asks first] install QEMU for Lima: $(qemu_pkgs)") ;;
       port) plan+=("[sudo, asks first] net.ipv4.ip_unprivileged_port_start=80 via $SYSCTL_FILE (Lima forwards 443/80)") ;;
     esac
@@ -246,7 +247,7 @@ cmd_deps() {
     case "$t" in
       hosts)
         echo "==> /etc/hosts: $ROOT/scripts/hosts-entry.sh --apply"
-        if confirm "Add the hosts line with sudo?"; then "$ROOT/scripts/hosts-entry.sh" --apply; fi ;;
+        if confirm "Add the hosts lines with sudo?"; then "$ROOT/scripts/hosts-entry.sh" --apply; fi ;;
       qemu)
         local pkgs; pkgs="$(qemu_pkgs)"
         if [[ -z "$pkgs" ]]; then echo "==> QEMU: no apt-get/dnf found; install qemu-system and qemu-img yourself"; continue; fi
@@ -302,8 +303,8 @@ cmd_uninstall() {
   local st; st="$(vm_status)"
   if [[ "$st" != absent ]]; then step "Lima VM '$VM' ($st): the whole cluster, its disk and etcd" "limactl delete --force $VM" delete_vm
   else echo "- VM '$VM': not present"; fi
-  if hosts_ok; then step "/etc/hosts line '$HOSTS_MARKER' (sudo)" "scripts/hosts-entry.sh --remove" "$ROOT/scripts/hosts-entry.sh" --remove
-  else echo "- /etc/hosts line: not present"; fi
+  if hosts_any; then step "/etc/hosts lines '$HOSTS_MARKER' (sudo)" "scripts/hosts-entry.sh --remove" "$ROOT/scripts/hosts-entry.sh" --remove
+  else echo "- /etc/hosts lines: not present"; fi
 
   local kept_system=0  # a system change the user keeps: its manifest record must survive the .tools/ step (B-047)
   if [[ -f "$MANIFEST" ]]; then  # system-wide changes recorded by make deps (Linux)
