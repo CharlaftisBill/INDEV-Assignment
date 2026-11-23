@@ -1,8 +1,9 @@
 # INDEV assignment: single-node Kubernetes
 
-Ansible turns a clean Debian 13 VM into a one-node Kubernetes cluster: a Lima VM it creates on your Mac or Linux
+Ansible turns a clean, **air-gapped** Debian 13 VM into a one-node Kubernetes cluster: a Lima VM it creates on your Mac or Linux
 machine, or [a VM you already have](#quick-start-with-your-own-debian-13-vm).
-At the end, a small language model (llama.cpp) answers over HTTPS:
+The VM never uses the internet itself: its downloads go through your machine to pinned sources only
+([how](docs/install.md#internet-access-from-the-vm)). At the end, a small language model (llama.cpp) answers over HTTPS:
 
 ```bash
 curl --cacert certs/ca.crt https://llm.local/v1/chat/completions \
@@ -15,6 +16,14 @@ curl --cacert certs/ca.crt https://llm.local/v1/chat/completions \
 > Progress: [TODO.md](TODO.md). Bugs: [bugs.md](docs/ai-workflow/bugs.md). Assumptions: [assumptions.md](docs/assumptions.md).
 
 ## Quick start
+
+**Air-gapped by design**, with Lima or your own VM:
+- a firewall on the VM (nftables, set up by `os_prep`) lets it reach only itself and the cluster;
+- its downloads (packages, images, charts, helm, etcdctl) go over SSH to a small proxy on your machine that relays
+  HTTPS to the pinned sources in [`scripts/egress-allowlist.txt`](scripts/egress-allowlist.txt) only;
+- your machine downloads the model and copies it in, so the `llm` namespace has no egress at all;
+- `make verify` checks that the VM cannot reach the internet itself.
+
 
 Two ways to get the VM: **Lima** (default: created for you, steps below) or **a Debian 13 VM you already have**, over SSH ([steps](#quick-start-with-your-own-debian-13-vm)).
 
@@ -70,7 +79,7 @@ make chat         # streams replies, keeps history; /reset clears it, /quit or C
 
 Already have a VM? Point the project at it over SSH instead of letting it create a Lima VM.
 Everything else (Ansible, checks, `https://llm.local` on your machine) works the same.
-**The VM may be air-gapped:** it needs no internet or DNS of its own, only SSH from your machine, which must be online.
+**The VM is treated as air-gapped:** it needs no internet or DNS of its own, only SSH from your machine, which must be online.
 
 **What the VM needs**
 
@@ -103,11 +112,8 @@ make smoke        # the curl above
 
 **What is different from Lima**
 
-- **Internet for the VM** (`egress=` in `external-vm.conf`). By default (`host`) the VM's downloads (packages, images,
-  charts, helm, etcdctl) go through your machine: an SSH reverse tunnel to a small proxy that relays HTTPS only, and
-  only to the pinned sources in [`scripts/egress-allowlist.txt`](scripts/egress-allowlist.txt). Your machine downloads
-  the model itself and copies it in, so the `llm` namespace has no egress at all. Got a proxy for the VM? Set
-  `egress=proxy` and `proxy=http://…`. The VM has internet? `egress=direct`.
+- **Internet for the VM**: the same as with Lima, the VM is air-gapped and a firewall keeps it so; its downloads go
+  through your machine. Got a proxy for the VM instead? Set `egress=proxy` and `proxy=http://…` in `external-vm.conf`.
 - **Ports.** `make vm-up` opens an SSH tunnel so your machine's `127.0.0.1` ports 443, 80 and 6443 reach the VM, as Lima's
   forwards do. Only connections from your machine are accepted. `make verify`, `smoke`, `chat` and `monitoring-ui`
   reopen it when needed; `make vm-down` (or `make tunnel-stop`) closes it and leaves the VM running. Stop a running

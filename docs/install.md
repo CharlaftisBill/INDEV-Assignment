@@ -69,7 +69,7 @@ One `key=value` per line, no trailing comments:
 | `port` | `22` | SSH port |
 | `ssh_key` | your ssh agent / `~/.ssh` keys | Private key file |
 | `backup_dir` | `/var/backups/etcd` | Where the VM keeps etcd snapshots |
-| `egress` | `host` | How the VM reaches the internet: `host`, `proxy` or `direct` ([below](#internet-access-from-the-vm)) |
+| `egress` | `host` | Where the VM's downloads go: `host` or `proxy` ([below](#internet-access-from-the-vm)) |
 | `proxy` | | Your proxy URL, with `egress=proxy` |
 
 The host key is accepted on first use (`StrictHostKeyChecking=accept-new`) and checked after that.
@@ -93,15 +93,17 @@ The usual ones work: `make deps` (no Lima or QEMU while the file exists; `make d
 
 ### Internet access from the VM
 
-The VM may be air-gapped. Pick with `egress=` in `external-vm.conf`:
+The VM is always air-gapped, Lima's and yours: `os_prep` installs a firewall (nftables table `inet indev_airgap`,
+unit `indev-airgap`) that lets it reach only itself, the node IP, the pod and Service ranges (and your proxy, with
+`egress=proxy`). `make verify` (check 1) proves it cannot open a connection to the internet. Its downloads go through:
 
 | `egress=` | The VM's downloads | Needs |
 |---|---|---|
 | `host` (default) | Through your machine, over SSH | Your machine online; the VM's sshd allows forwarding (`AllowTcpForwarding`, Debian's default) |
-| `proxy` | Through your proxy, `proxy=http://<host>:<port>` | That proxy reaches the sources below |
-| `direct` | Straight out | Internet and DNS on the VM |
+| `proxy` | Through your proxy, `proxy=http://<IPv4>:<port>` (an address: the VM has no DNS) | That proxy reaches the sources below |
 
-With `host`:
+With `host` (the only mode for Lima; `make provision`, `idempotency` and `verify` open the tunnel through Lima's SSH
+port, `scripts/lima-egress.sh`):
 - `ssh -R` maps the VM's `127.0.0.1:18128` to `scripts/egress-proxy.py` on your machine (`127.0.0.1:18128`).
   It relays `CONNECT` to port 443 (TLS stays end to end) and plain `http://` on port 80, only to hosts in
   [`scripts/egress-allowlist.txt`](../scripts/egress-allowlist.txt): Debian, Kubernetes packages, helm, GitHub
@@ -110,7 +112,7 @@ With `host`:
   `DENY <host>`: add the host to the allowlist; the proxy reloads it at once.
 - The VM needs no DNS: the proxy resolves names on your machine.
 
-With `host` or `proxy`, Ansible sets the proxy for apt (`/etc/apt/apt.conf.d/95indev-proxy`), containerd (systemd
+Ansible sets the proxy for apt (`/etc/apt/apt.conf.d/95indev-proxy`), containerd (systemd
 drop-in) and its own tasks (helm, `get_url`). `NO_PROXY` keeps node, pod and Service traffic direct. Pods get no
 proxy and no internet. The model is the one download a pod used to make, so instead your machine downloads it into
 `.cache/models/` (sha256-pinned, kept for rebuilds) and Ansible copies it into the model volume. The `llm` namespace
@@ -135,7 +137,7 @@ ports 443, 80, 6443, 18443, 18000 or (with `egress=host`) 18128 are taken, most 
 ### Backups
 
 Requirement 7 wants snapshots outside the cluster. With Lima they land in `./backups` on the host through a shared
-folder. Your VM has no such folder and may be air-gapped, so it cannot send them: its timer writes them to
+folder. Your VM has no such folder and is air-gapped, so it cannot send them: its timer writes them to
 `backup_dir` on the VM, and **this machine pulls them** into `./backups/external` every 30 minutes (B-063).
 - The pull runs in a background loop that starts and stops with the tunnel (`make vm-up`, `make tunnel`, and the
   `verify`/`smoke`/`chat` targets start it; `make tunnel-stop` stops it). Log: `.cache/backups-pull.log`. Not launchd

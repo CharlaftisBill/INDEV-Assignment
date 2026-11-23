@@ -50,7 +50,7 @@ Disruptive tests (kubelet restart, containerd restart, pod deletion, VM reboot) 
   ([who may talk to the app](architecture.md#who-may-talk-to-the-app)).
 - **Checked:** the deny policies exist; test traffic that should be blocked is blocked, the rest passes. Traffic from
   the node itself is always allowed by Kubernetes, so the check tests other pods ([assumptions](assumptions.md)).
-- **Air-gapped own VM** (`external-vm.conf`, `egress=host` or `proxy`): the model comes from the host, so `llm` has
+- **Air gap** (always, Lima or own VM): the model comes from the host, so `llm` has
   only `default-deny` and `allow-traefik-ingress`. The check expects that, uses the node's API port as the "reachable"
   control instead of a public IP, and checks that the download Job's label gets no egress either.
 
@@ -113,12 +113,12 @@ Disruptive tests (kubelet restart, containerd restart, pod deletion, VM reboot) 
 
 ## 9. LLM app
 
-- **Built:** llama.cpp server (by digest) with the model on a 2 GiB volume. A Job downloads it only when the file is
+- **Built:** llama.cpp server (by digest) with the model on a 2 GiB volume. The host downloads it and Ansible copies it into the volume only when the file is
   missing or its hash is wrong; an init container checks the hash before start. Ingress at `llm.local` with a
   certificate from our CA ([ADR 0008](decisions/0008-model-caching.md)).
 - **Checked:** pinned image and model hash; a chat answer over TLS, verified with `certs/ca.crt`; a deleted pod comes
   back Ready without a new download. A llama.cpp restart passes only when its last termination reason is `Unknown`
   (node restart); a crash fails. `make smoke` is the acceptance curl.
   Recovery: [troubleshooting](runbooks/troubleshooting.md#model-missing-or-corrupt).
-- **Air-gapped own VM:** the host downloads the model (same URL and sha256) into `.cache/models/` and Ansible copies it
+- **Air gap:** the host downloads the model (same URL and sha256) into `.cache/models/` and Ansible copies it
   into the volume; the Job only binds the volume. Same checks ([install guide](install.md#internet-access-from-the-vm)).

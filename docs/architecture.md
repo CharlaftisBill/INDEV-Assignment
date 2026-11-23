@@ -5,8 +5,8 @@
 Lima runs the VM (Debian 13 arm64, 4 CPU, 8 GiB, 40 GiB) and forwards only ports 443, 80 and 6443 ([ports](#ports)), plus its own SSH port.
 Ansible runs on the Mac and connects over SSH. Exact versions: [versions](versions.md).
 With your own VM (`external-vm.conf`) the picture is the same, but an SSH tunnel replaces Lima's forwards and the
-snapshots are pulled instead of shared. That VM may be air-gapped: its downloads then go through the Mac over SSH,
-to an allowlist only ([install guide](install.md#internet-access-from-the-vm)).
+snapshots are pulled instead of shared. Either VM is air-gapped (firewall on the VM): its downloads go through the
+Mac over SSH, to an allowlist only ([install guide](install.md#internet-access-from-the-vm)).
 
 ```mermaid
 flowchart LR

@@ -22,7 +22,7 @@ The VM is defined in `lima/k8s.yaml`. Lima's built-in containerd is off, so Ansi
 > and the checks to it over SSH, an SSH tunnel plus a loopback-only forwarder stands in for Lima's ports, and snapshots
 > are pulled with `make backups-pull` ([install guide](../install.md#your-own-debian-13-vm-over-ssh-instead-of-lima)).
 > Lima stays the default and the only path `make e2e` covers, since it can recreate the VM.
-> **Amended (2026-11-23):** that VM may be air-gapped: its downloads go through the reviewer's machine (SSH reverse
+> **Amended (2026-11-23):** every VM, Lima's included, is air-gapped (firewall from `os_prep`): its downloads go through the reviewer's machine (SSH reverse
 > tunnel to an allowlisting proxy) and the model is copied in ([install guide](../install.md#internet-access-from-the-vm)).
 
 ## Alternatives

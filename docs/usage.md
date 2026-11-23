@@ -18,7 +18,7 @@ Using your own VM (`external-vm.conf`)? A few commands differ: [install guide](i
 | `make smoke` | Sends the test question to `https://llm.local` |
 | `make lint` | yamllint, ansible-lint, bug tracker format, shellcheck |
 | `make e2e` | Clean VM → provision → all checks (Lima only) |
-| `make tunnel` / `make tunnel-stop` / `make backups-pull` | Own VM only: open / close the tunnels (ports, and the air-gapped VM's downloads), copy snapshots to `./backups/external` |
+| `make tunnel` / `make tunnel-stop` / `make backups-pull` | Own VM only: open / close the tunnels (ports, and the VM's downloads), copy snapshots to `./backups/external` |
 | `make uninstall` | Removes what make installed ([install guide](install.md#uninstall)) |
 
 Requirement IDs: `1 2 3a 3b 4 5 6 7 8a 8b 8c 9` ([requirements](requirements-matrix.md)).
