@@ -66,6 +66,13 @@ scripts/hosts-entry.sh --apply
 make smoke
 ```
 
+## Every request to llm.local or grafana.local takes 5 s
+
+**Cause:** `/etc/hosts` has only the `127.0.0.1` line (from before B-059). macOS sends the IPv6 lookup of a `.local`
+name to mDNS and waits 5 s. Check: `curl -so /dev/null -w '%{time_namelookup}\n' --cacert certs/ca.crt https://llm.local/health`.
+
+**Fix:** `scripts/hosts-entry.sh --apply` replaces the line with the `127.0.0.1` and `::1` pair; `make doctor` reports it.
+
 ## Fresh clone fails in pki: cert without key
 
 **Symptom:** `make provision` asks "Restore the key or create a new CA?", or (no terminal, or `ansible-playbook`

@@ -1,7 +1,7 @@
 # Install and uninstall
 
 Everything the project needs on the Mac goes into this folder. Nothing is installed system-wide,
-except one line in `/etc/hosts`, and `make deps` asks before it adds it.
+except two lines in `/etc/hosts`, and `make deps` asks before it adds them.
 
 ## What you need
 
@@ -53,8 +53,10 @@ Python packages come from [`requirements.in`](../requirements.in), locked with h
 
 ### Other changes it makes
 
-- **`/etc/hosts`** (asks for sudo): adds `127.0.0.1 llm.local grafana.local # indev-k8s`.
-  Same as `scripts/hosts-entry.sh --apply`. macOS needs this line because `.local` names go to mDNS first.
+- **`/etc/hosts`** (asks for sudo): adds `127.0.0.1 llm.local grafana.local # indev-k8s` and the same line for `::1`.
+  Same as `scripts/hosts-entry.sh --apply`. macOS needs both: `.local` names go to mDNS first, and without the `::1`
+  line the IPv6 lookup waits 5 s on mDNS (B-059). Where nothing listens on `::1:443`, clients are refused at once and
+  fall back to 127.0.0.1, so the extra line costs nothing on Linux.
 - **Git hooks**: sets `core.hooksPath` to `.githooks`. See [git workflow](ai-workflow/git-workflow.md).
 - **Linux only** (asks for sudo): installs QEMU for Lima, and sets `net.ipv4.ip_unprivileged_port_start=80`
   so Lima can forward ports 443 and 80. Both are recorded in `.tools/system-manifest`.
@@ -77,7 +79,7 @@ make uninstall YES=1       # runs every step without asking (sudo may still ask 
 ```
 
 It removes only what `make` created:
-- the VM, and the `/etc/hosts` line;
+- the VM, and the `/etc/hosts` lines;
 - what `.tools/system-manifest` lists (Linux packages and sysctl). If you keep one, the manifest stays;
 - `.tools/`, `.venv/`, `.ansible/`, `ansible/collections/`;
 - `out/` (kubeconfigs) and `backups/*` (etcd snapshots; `.gitkeep` stays);
