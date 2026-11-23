@@ -5,7 +5,6 @@ Format and rules: the `bug` skill (`.claude/skills/bug/SKILL.md`); `make lint` c
 
 ## Open
 
-- B-072 (M10, Medium) [sre] Own-VM restore runbook has no step to put a `./backups/external` snapshot back on a rebuilt VM
 - B-095 (M10, Medium) [sre] Lima and own-VM egress share one socket/pid; a tunnel to the other VM counts as up
 - B-097 (M10, Medium) [sec] Air gap allows the whole pod and Service CIDRs: off-node 10.96/12 and 10.244/16 are reachable
 
@@ -527,9 +526,10 @@ Sev: Medium · State: Solved · Found: 2026-11-23 · Solved: 2026-11-23 · Fix: 
 - **Verification:** port=1 and `backup_dir=/nonexistent` → error line, rc 1 (was rc 0 "pulled 0"); a reachable dir → rc 0.
 
 ### B-072 · [sre] Own-VM restore runbook has no step to put a `./backups/external` snapshot back on a rebuilt VM
-Sev: Medium · State: Open · Found: 2026-11-23
-- **Report** (sre final): `etcd-restore.md:6-7` restores from `/var/backups/etcd` on the VM; a reinstalled VM has only new snapshots there, and no step copies the host copy (the only off-node one) back.
-- **Direction:** add the copy step (e.g. `scripts/external.sh run tee <backup_dir>/<name> < backups/external/<name>`, 0600) to "Restore on a rebuilt VM"; note pulls prune old ones after 24 h.
+Sev: Medium · State: Solved · Found: 2026-11-23 · Solved: 2026-11-23 · Fix: b4c1e89
+- **Root cause:** the runbook assumed the snapshot is on the VM; on a reinstalled own VM the only copy is the host's `./backups/external`.
+- **Fix:** "Restore on a rebuilt VM" copies it to `/root/etcd-restore.db` (root, 0600, outside VM retention) via `external.sh run`; notes 24 h host retention.
+- **Verification:** the command copied a 100 kB test file to the VM: mode 600 root, same md5, nothing printed; file removed after.
 
 ### B-073 · [sec] Pull-loop pid file trusted blindly: a stale or planted pid kills an unrelated process group
 Sev: Medium · State: Solved · Found: 2026-11-23 · Solved: 2026-11-23 · Fix: e1b4877
