@@ -43,6 +43,7 @@ EG_LOG="${TMPDIR%/}/indev-k8s-ext-$(id -u).egress.log"
 PULL_PID="$ROOT/.cache/backups-pull.pid"   # B-073: in the repo, not a shared /tmp another user could plant it in
 PULL_LOG="$ROOT/.cache/backups-pull.log"
 PULL_EVERY=1800
+PULL_RETRY=120   # B-101: until a pull finds snapshots (fresh VM: none until etcd_backup runs), retry this soon
 PULL_DIR="$ROOT/backups/external"   # B-069: own folder; ./backups itself is Lima's (shared mount, own retention)
 SNAP_RE='^etcd-snapshot-[0-9]{8}T[0-9]{6}Z\.db$'   # the names etcd-backup.sh writes; nothing else is copied (B-070)
 
@@ -122,12 +123,13 @@ pull_start() {
   mkdir -p "$(dirname "$PULL_LOG")"
   # Detached loop in its own process group (job control on: a background job gets pgid = its pid); pull_stop kills the group.
   set -m
-  # shellcheck disable=SC2016  # $0/$1 belong to the inner shell
-  nohup /bin/bash -c 'while :; do "$0" backups-pull --scheduled; sleep "$1"; done' "$ROOT/scripts/external.sh" "$PULL_EVERY" \
+  # shellcheck disable=SC2016  # $0/$1/$2 belong to the inner shell
+  nohup /bin/bash -c 'while :; do if "$0" backups-pull --scheduled; then sleep "$1"; else sleep "$2"; fi; done' \
+    "$ROOT/scripts/external.sh" "$PULL_EVERY" "$PULL_RETRY" \
     >>"$PULL_LOG" 2>&1 </dev/null &
   echo $! >"$PULL_PID"
   set +m
-  echo "snapshot pull every $((PULL_EVERY / 60)) min into ./backups/external (log: .cache/backups-pull.log)"
+  echo "snapshot pull every $((PULL_EVERY / 60)) min (every $((PULL_RETRY / 60)) min until the VM has one) into ./backups/external (log: .cache/backups-pull.log)"
 }
 egress_start() {
   [[ "$EGRESS" == host ]] || return 0
@@ -231,7 +233,10 @@ u.build_opener(u.ProxyHandler(h)).open("https://deb.debian.org/debian/dists/trix
     # Same retention as on the VM: the newest $keep by name. A glob, never a newline-split list (B-070).
     shopt -s nullglob; all=("$PULL_DIR"/etcd-snapshot-*.db); shopt -u nullglob
     drop=$(( ${#all[@]} - keep )); i=0; while (( i < drop )); do rm -f -- "${all[$i]}"; i=$((i + 1)); done
-    echo "pulled $n new snapshot(s) from $TARGET:$BDIR into backups/external/ (keeping the newest $keep)" ;;
+    echo "pulled $n new snapshot(s) from $TARGET:$BDIR into backups/external/ (keeping the newest $keep)"
+    # B-101: tell the loop the VM has no snapshot yet, so it retries in PULL_RETRY, not PULL_EVERY.
+    if [[ "${2:-}" == --scheduled && -z "$list" ]]; then exit 3; fi
+    ;;
   backups-schedule)
     case "${2:-}" in
       start) pull_start ;;

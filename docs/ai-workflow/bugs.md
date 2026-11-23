@@ -587,3 +587,17 @@ Sev: High · State: Solved · Found: 2026-11-23 · Solved: 2026-11-23 · Fix: df
 - **Root cause:** the entries array was named `LINES`; after `sudo` (a terminal command) bash resets `LINES` to the window height, overwriting element 0.
 - **Fix:** array renamed `ENTRIES`.
 - **Verification:** `--apply` from the user's terminal wrote both lines; `make e2e` from a destroyed VM: idempotency changed=0, 320 PASS strict.
+
+### B-101 · [sre] Fresh own VM: e2e fails REQ 7, the pull loop waits 30 min after a failed first pull
+Sev: High · State: Solved · Found: 2026-11-23 · Solved: 2026-11-23 · Fix: b0d1db5
+- **Report** (reviewer dry run, air-gapped stand-in, fresh clone of 89fb7cf): 320 PASS · 2 FAIL; `[7] before this check pulled: no host copy … younger than 3600s`.
+- **Root cause:** the loop starts at `vm-up`, before `/var/backups/etcd` exists, and always slept 30 min, so its next pull came after `make verify`.
+- **Fix:** a scheduled pull exits 3 when the VM has no snapshot; the loop retries any unsuccessful pull after 2 min (`PULL_RETRY`).
+- **Verification:** loop test: no dir 19:26, empty 19:28, pulled 19:30, then 30 min; fresh air-gapped stand-in `make e2e KEEP_VM=1` 322 PASS strict, smoke OK.
+
+### B-102 · [sre] Own VM on a network that blocks NTP: REQ 1 clock-sync check fails, `make e2e` cannot pass
+Sev: Medium · State: Solved · Found: 2026-11-23 · Solved: 2026-11-23 · Fix: 727bdf7
+- **Report** (reviewer dry run, stand-in network drops all egress incl. udp/123): `[1] clock not synchronized over NTP`; everything else in REQ 1 PASS.
+- **Root cause:** the stand-in network dropped udp/123; the check needs NTP by design (B-094).
+- **Fix:** user decision: assumption in `docs/assumptions.md` (the reviewer's network allows NTP to the `ntp=` servers).
+- **Verification:** with NTP allowed: `[1] clock synchronized over NTP (216.239.35.0)`, 322 PASS strict.
