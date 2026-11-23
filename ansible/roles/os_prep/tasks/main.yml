@@ -1,5 +1,23 @@
 ---
 # Node prerequisites for kubeadm + containerd (req 1).
+# Air-gapped VM (vm_proxy_url set): apt goes through the proxy, before the first apt task here or in later roles.
+- name: Configure the apt proxy
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/95indev-proxy
+    content: |
+      Acquire::http::Proxy "{{ vm_proxy_url }}";
+      Acquire::https::Proxy "{{ vm_proxy_url }}";
+    mode: "0644"
+    owner: root
+    group: root
+  when: vm_proxy_url | length > 0
+
+- name: Remove the apt proxy when the VM has direct internet
+  ansible.builtin.file:
+    path: /etc/apt/apt.conf.d/95indev-proxy
+    state: absent
+  when: vm_proxy_url | length == 0
+
 - name: Disable swap now
   ansible.builtin.command: swapoff -a
   when: ansible_facts['swaptotal_mb'] | int > 0

@@ -3,3 +3,4 @@
   ansible.builtin.systemd_service:
     name: containerd
     state: restarted
+    daemon_reload: true  # picks up the proxy drop-in
