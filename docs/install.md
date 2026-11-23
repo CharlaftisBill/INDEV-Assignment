@@ -88,7 +88,8 @@ The usual ones work: `make deps` (no Lima or QEMU while the file exists; `make d
 | `make vm-shell` | Root shell on the VM over SSH |
 | `make tunnel` / `make tunnel-stop` | Start / stop the tunnels (ports, and egress for `egress=host`) and the 30-min [snapshot pull](#backups) |
 | `make backups-pull` | Copy new VM snapshots into `./backups/external` now (the loop does it every 30 min) |
-| `make vm-destroy`, `make vm-reset`, `make e2e` | Refuse: they would need to delete your VM. Run `make provision`, `make idempotency`, `make verify STRICT=1` instead |
+| `make vm-destroy`, `make vm-reset` | Refuse: they would need to delete your VM |
+| `make e2e KEEP_VM=1` | Checks the VM, provisions, proves idempotency, strict verify, on your VM as it is (plain `make e2e` refuses) |
 | `make uninstall` | Leaves the VM and its cluster alone; closes the tunnel |
 
 ### Internet access from the VM

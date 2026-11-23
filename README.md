@@ -47,6 +47,12 @@ More detail: [install guide](docs/install.md).
 
 Already have a VM? The project can use it over SSH instead of creating one. Everything else works the same.
 
+> **TL;DR**: once the VM meets the needs below and `external-vm.conf` points at it (step 0 and 1), one command
+> builds and checks everything on it (The steps below do the same thing one at a time.):
+```bash
+ make deps && make e2e KEEP_VM=1
+```
+
 **Your VM needs:**
 
 - A fresh **Debian 13** install (Intel/AMD or ARM) with 4 CPU cores, 8 GB of memory and 40 GB of disk.
@@ -101,8 +107,18 @@ make verify       # runs every requirement check
 make smoke        # sends the "Say hello" request above
 ```
 
-**Step 5 (optional). Look around:** the same dashboards, chat and commands as in
-[step 4 of the other quick start](#quick-start-the-project-creates-the-vm).
+**Step 5 (optional). Look around.**
+
+| What | How |
+|---|---|
+| Grafana dashboards | Open `https://grafana.local`, user `admin` ([where the password is](docs/runbooks/grafana.md)) |
+| Prometheus and Alertmanager | Run `make monitoring-ui`, then open `http://localhost:9090` and `http://localhost:9093`. Ctrl-C stops it |
+| Chat with the model | Run `make chat`. `/reset` starts over, `/quit` exits |
+| Kubernetes itself | `kubectl --kubeconfig out/admin.conf get pods -A` |
+
+**Handy commands:** `make help` lists everything. `make e2e KEEP_VM=1` does steps 3 and 4 in one go on your VM
+(it never rebuilds it: a fresh Debian 13 install is up to you).
+`make uninstall` removes what the project installed.
 
 **Good to know:**
 
@@ -118,6 +134,12 @@ make smoke        # sends the "Say hello" request above
 Full details and troubleshooting: [install guide](docs/install.md#your-own-debian-13-vm-over-ssh-instead-of-lima).
 
 ## Quick start (the project creates the VM)
+
+> **TL;DR**: after cloning, one command creates the VM, builds everything and runs every check (The steps below do the same thing one at a time.):
+```bash
+make deps && make e2e
+```
+
 
 **Step 1. Get the code and install the tools.** Tools go into this folder only. You are asked before anything
 needs `sudo`.
@@ -159,7 +181,8 @@ make smoke        # sends the "Say hello" request above
 | Chat with the model | Run `make chat`. `/reset` starts over, `/quit` exits |
 | Kubernetes itself | `kubectl --kubeconfig out/admin.conf get pods -A` |
 
-**Handy commands:** `make help` lists everything. `make e2e` does steps 2 and 3 from a clean VM (Lima only).
+**Handy commands:** `make help` lists everything. `make e2e` does steps 2 and 3 from a freshly rebuilt VM;
+`make e2e KEEP_VM=1` does them on the VM you have.
 `make uninstall` removes what the project installed.
 
 ## Keep these private
