@@ -8,34 +8,8 @@ Format and rules: the `bug` skill (`.claude/skills/bug/SKILL.md`); `make lint` c
 - B-071 (M10, Medium) [sre] `backups-pull` exits 0 ("pulled 0 new") when the VM is unreachable or `backup_dir` is missing
 - B-072 (M10, Medium) [sre] Own-VM restore runbook has no step to put a `./backups/external` snapshot back on a rebuilt VM
 - B-073 (M10, Medium) [sec] Pull-loop pid file trusted blindly: a stale or planted pid kills an unrelated process group
-- B-074 (M10, Low) [sre] `tunnel start` failing on a busy port leaves the pull loop and egress running
-- B-075 (M10, Low) [sre] `make uninstall` without external-vm.conf skips a leftover tunnel
-- B-076 (M10, Low) [sre] A SIGKILLed pull leaves a `.pull.*` temp dir with a partial snapshot
-- B-077 (M10, Low) [sec] One bad or vanished snapshot name aborts the whole pull
-- B-078 (M10, Low) [sec] No size or time limit on a snapshot pull
-- B-079 (M10, Low) [sec] Egress allowlist cannot contain a compromised VM (CDN tenants, domain fronting)
-- B-080 (M10, Low) [sec] Egress proxy has no per-connection limit; slow heads hold sockets 30 s
-- B-081 (M10, Low) [sec] Egress log writes raw request bytes (terminal escapes)
-- B-082 (M10, Low) [sec] Egress bridge is open whenever the tunnel is up; hostNetwork pods can use it
-- B-083 (M10, Low) [sec] `*` in the egress allowlist also allows IP literals and private addresses
-- B-084 (M10, Low) [sec] `loopback-forward.py` completes the TCP handshake for LAN peers before closing
-- B-085 (M10, Low) [sec] A `proxy=` URL with credentials lands in world-readable files on the VM
-- B-086 (M10, Low) [sec] check_3b air-gap branch is partly vacuous
-- B-087 (M10, Low) [sre] `external-vm.conf` parsing differs between `external.sh` and Ansible
-- B-088 (M10, Low) [sre] Stale `./backups` wording after the move to `./backups/external`
-- B-089 (M10, Low) [sre] Own-VM snapshots are visible inside a Lima VM's backup mount
-- B-090 (M10, Low) [sre] check_7 freshness limit (2x schedule) can fail when a pull lands just before a snapshot
-- B-091 (M10, Low) [sre] `etcd-backup.sh` mount guard skipped by any `REQUIRE_MOUNT` value other than `1`
-- B-094 (M10, Medium) [sre] Air-gap firewall blocks NTP: no time sync, `NodeClockNotSynchronising` fires
 - B-095 (M10, Medium) [sre] Lima and own-VM egress share one socket/pid; a tunnel to the other VM counts as up
-- B-096 (M10, Low) [sre] Air-gap handler restart drops the table first; template not validated with `nft -c`
 - B-097 (M10, Medium) [sec] Air gap allows the whole pod and Service CIDRs: off-node 10.96/12 and 10.244/16 are reachable
-- B-098 (M10, Low) [sec] hostNetwork containers with CAP_NET_RAW bypass the nftables air gap (AF_PACKET)
-- B-099 (M10, Low) [sec] `host_key_check=no` is honoured from any conf: external-vm.conf can turn off host-key checks
-- B-100 (M10, Low) [sec] A reviewer proxy (`egress=proxy`) is allowed on every port and protocol
-- B-101 (M10, Low) [sec] Air gap fails open: containerd and kubelet start without the firewall unit
-- B-102 (M10, Low) [sre] Lima's host egress proxy outlives `make vm-down` / `vm-destroy`
-- B-103 (M10, Low) [sre] Stale air-gap comments in `external.sh` and versions.yml
 
 ## M0 — Scaffolding
 
@@ -563,96 +537,6 @@ Sev: Medium · State: Open · Found: 2026-11-23
 - **Report** (sec final): pid file → other group (3 procs): `backups-schedule stop` TERM/KILLs them; `status`/check_7 say loop runs, `start` skips (`scripts/external.sh:49,58-62,106`).
 - **Direction:** before trusting or group-killing, check pgid == pid and the command is this loop (`ps -o pgid=,command=`); else drop the file. Pid files out of shared `/tmp`.
 
-### B-074 · [sre] `tunnel start` failing on a busy port leaves the pull loop and egress running
-Sev: Low · State: Open · Found: 2026-11-23
-- **Report** (sre final): `external.sh tunnel start` with 18443 held: rc 1, `status` down, but the pull loop (and egress) keep running.
-- **Direction:** stop what `tunnel start` started when a later step fails (trap), or start the loop only after the forwards are up.
-
-### B-075 · [sre] `make uninstall` without external-vm.conf skips a leftover tunnel
-Sev: Low · State: Open · Found: 2026-11-23
-- **Report** (sre final): `host-tools.sh` uninstall checks `tunnel running` only inside the conf branch; a tunnel and forwarder outlive the uninstall (doctor flags it).
-- **Direction:** check `external.sh tunnel running` regardless of the conf and offer `tunnel stop`.
-
-### B-076 · [sre] A SIGKILLed pull leaves a `.pull.*` temp dir with a partial snapshot
-Sev: Low · State: Open · Found: 2026-11-23
-- **Report** (sre final): After `pull_stop`'s KILL fallback the EXIT trap does not run; `./backups/external/.pull.*` stays, no later pull removes it.
-- **Direction:** remove stale `.pull.*` dirs at the start of each pull.
-
-### B-077 · [sec] One bad or vanished snapshot name aborts the whole pull
-Sev: Low · State: Open · Found: 2026-11-23
-- **Report** (sec final): A VM name like `…7Z.db\n…8Z.db` yields two valid but absent names; `tar` exits 2 and nothing is pulled (also if the VM prunes between `find` and `tar`).
-- **Direction:** tolerate missing members (or re-list) and keep the files that did extract.
-
-### B-078 · [sec] No size or time limit on a snapshot pull
-Sev: Low · State: Open · Found: 2026-11-23
-- **Report** (sec final): A hostile or hung VM can fill the host disk or stall the loop forever (no ssh timeout on the pull).
-- **Direction:** cap bytes per pull and add `ServerAliveInterval`/a timeout to the pull's ssh.
-
-### B-079 · [sec] Egress allowlist cannot contain a compromised VM (CDN tenants, domain fronting)
-Sev: Low · State: Open · Found: 2026-11-23
-- **Report** (sec r2/final): `.pkg.dev`, `github.com`, `.githubusercontent.com`, `ghcr.io`, Docker Hub serve anyone's content; CONNECT is end to end, so a fronted SNI/Host is invisible.
-- **Direction:** state the limit in `docs/assumptions.md` (allowlist guards what is pulled, not exfiltration); narrow suffixes where possible.
-
-### B-080 · [sec] Egress proxy has no per-connection limit; slow heads hold sockets 30 s
-Sev: Low · State: Open · Found: 2026-11-23
-- **Report** (sec final): `egress-proxy.py` accepts unlimited connections; each slow head is held up to 30 s. Only local clients can connect.
-- **Direction:** add a connection semaphore and shorter head timeout.
-
-### B-081 · [sec] Egress log writes raw request bytes (terminal escapes)
-Sev: Low · State: Open · Found: 2026-11-23
-- **Report** (sec r1/r2): `egress-proxy.py` `log()` prints hostnames/methods from the request as is; ESC sequences reach whoever `tail`s the log.
-- **Direction:** log `repr()`/escaped values.
-
-### B-082 · [sec] Egress bridge is open whenever the tunnel is up; hostNetwork pods can use it
-Sev: Low · State: Open · Found: 2026-11-23
-- **Report** (sec r1): `tunnel start` also starts egress; any VM process on 127.0.0.1:18128 (Traefik, node-exporter: hostNetwork) gets allowlisted internet. Docs say pods get none.
-- **Direction:** run egress only during provision/idempotency (and verify image pulls), or document the exposure.
-
-### B-083 · [sec] `*` in the egress allowlist also allows IP literals and private addresses
-Sev: Low · State: Open · Found: 2026-11-23
-- **Report** (sec r1): With `*`, the VM reaches the host's 127.0.0.1:80/443, LAN hosts and 169.254.169.254.
-- **Direction:** even with `*`, refuse IP literals and loopback/private/link-local targets.
-
-### B-084 · [sec] `loopback-forward.py` completes the TCP handshake for LAN peers before closing
-Sev: Low · State: Open · Found: 2026-11-23
-- **Report** (sec r1): LAN/public-IPv6 peers connect, then are closed without data (like Lima); a scanner sees 443/80 open.
-- **Direction:** accept the behaviour in docs, or filter with the host firewall.
-
-### B-085 · [sec] A `proxy=` URL with credentials lands in world-readable files on the VM
-Sev: Low · State: Open · Found: 2026-11-23
-- **Report** (sec r1, sre r1): `/etc/apt/apt.conf.d/95indev-proxy` and the containerd drop-in are 0644; `systemctl show` and `egress test` argv expose it.
-- **Direction:** mode 0600 for both files; pass the URL to `egress test` on stdin.
-
-### B-086 · [sec] check_3b air-gap branch is partly vacuous
-Sev: Low · State: Open · Found: 2026-11-23
-- **Report** (sec r1): `FETCH_HTTPS_BLOCKED` (1.1.1.1:443) and `FETCH_DNS_FAIL` (huggingface.co) pass with no internet regardless of policy.
-- **Direction:** test DNS with `kubernetes.default.svc` for the Job label; keep node IP:6443 as the policy proof.
-
-### B-087 · [sre] `external-vm.conf` parsing differs between `external.sh` and Ansible
-Sev: Low · State: Open · Found: 2026-11-23
-- **Report** (sre r1): Duplicate keys: `external.sh` takes the first, the ini lookup the last; an `ssh_key` path with spaces breaks `ansible_ssh_common_args`.
-- **Direction:** reject duplicate keys and paths with spaces in `external.sh check`.
-
-### B-088 · [sre] Stale `./backups` wording after the move to `./backups/external`
-Sev: Low · State: Open · Found: 2026-11-23
-- **Report** (sre final): `verify.sh:1218-1220` comment, check_7 own-VM messages ("host ./backups"), Makefile `backups-pull` help.
-- **Direction:** update the wording.
-
-### B-089 · [sre] Own-VM snapshots are visible inside a Lima VM's backup mount
-Sev: Low · State: Open · Found: 2026-11-23
-- **Report** (sre final): `./backups/external` sits inside Lima's writable `./backups` mount (`/mnt/host-backups/external`); matters only on a host using both.
-- **Direction:** document it, or keep own-VM copies outside `./backups`.
-
-### B-090 · [sre] check_7 freshness limit (2x schedule) can fail when a pull lands just before a snapshot
-Sev: Low · State: Open · Found: 2026-11-23
-- **Report** (sre r2): Own VM: pull at t, snapshot at t+ε, next pull t+30 min; the host copy can approach the 3600 s limit with timing jitter.
-- **Direction:** base the limit on schedule + pull interval (+ margin).
-
-### B-091 · [sre] `etcd-backup.sh` mount guard skipped by any `REQUIRE_MOUNT` value other than `1`
-Sev: Low · State: Open · Found: 2026-11-23
-- **Report** (sre r1): `[[ "${REQUIRE_MOUNT:-1}" == 1 ]]`: `true` or `yes` skip the guard. The template only writes 1 or 0.
-- **Direction:** accept only `0` as off; anything else keeps the guard.
-
 ### B-092 · [sre] `indev-airgap.service` ordering cycle at boot: systemd deletes a start job to break it
 Sev: High · State: Solved · Found: 2026-11-23 · Solved: 2026-11-23 · Fix: 49653ef
 - **Report** (sre airgap): Reboot journal: "ordering cycle ... networkd-wait-online.service/start deleted"; default deps order the unit after sysinit, cloud-init-network before it; a boot may drop the firewall.
@@ -668,51 +552,17 @@ Sev: High · State: Solved · Found: 2026-11-23 · Solved: 2026-11-23 · Fix: 49
 - **Verification:** `egress-mode` with `proxy=http://proxy.corp:3128` → rc 1 with the message; with `http://10.0.0.5:3128` → rc 0.
 
 ### B-094 · [sre] Air-gap firewall blocks NTP: no time sync, `NodeClockNotSynchronising` fires
-Sev: Medium · State: Open · Found: 2026-11-23
-- **Report** (sre airgap): `timesync-status`: no server, 0 packets (udp/123 rejected); `node_timex_sync_status`=0, alert pending after reboot. Drift then hits TLS, etcd, certs.
-- **Direction:** allow udp/123 to pinned NTP servers (or the Lima gateway if it serves time), or sync the clock from the host; else document and silence the alert.
+Sev: Medium · State: Solved · Found: 2026-11-23 · Solved: 2026-11-23 · Fix: 1d57dfb
+- **Root cause:** the firewall rejected udp/123 and DNS, so timesyncd's pool (by name) was unreachable; Lima's guest-agent clock step leaves the kernel unsynced.
+- **Fix:** `os_prep` allows udp/123 to `vm_ntp_servers` only (IPv4; Google Public NTP default, own VM `ntp=`), points timesyncd at them; check_1 asserts `NTPSynchronized`.
+- **Verification:** new check FAILed, then after `TAGS=os_prep`: synced to 216.239.35.0, REQ=1 22 PASS strict; idempotency changed=0 (os_prep and whole playbook).
 
 ### B-095 · [sre] Lima and own-VM egress share one socket/pid; a tunnel to the other VM counts as up
 Sev: Medium · State: Open · Found: 2026-11-23
 - **Report** (sre airgap, code): `EG_SOCK` is per user, not per target; switching Lima/own VM keeps the old VM's `-R`, so the new VM's :18128 is dead; `tunnel running` ignores egress.
 - **Direction:** record the target (host:port) next to the socket and restart egress when it differs.
 
-### B-096 · [sre] Air-gap handler restart drops the table first; template not validated with `nft -c`
-Sev: Low · State: Open · Found: 2026-11-23
-- **Report** (sre airgap): `systemd_service state: restarted` runs ExecStop (`nft delete table`) then ExecStart; a template the parser rejects leaves the VM with no air-gap table and a failed handler.
-- **Direction:** add `validate: nft -c -f %s` to the template task; reload with `ExecReload=nft -f` (file already deletes+recreates atomically).
-
 ### B-097 · [sec] Air gap allows the whole pod and Service CIDRs: off-node 10.96/12 and 10.244/16 are reachable
 Sev: Medium · State: Open · Found: 2026-11-23
 - **Report** (sec airgap, live): node → 1.1.1.1:443 refused, but 10.100.0.1:443 and 10.244.200.1:443 pass `allowed4` and leave via 192.168.5.2 (pods too); any LAN/VPN/kind net in those ranges is reachable.
 - **Direction:** drop the Service CIDR (ClusterIPs are DNATed before priority 10); accept pod traffic by route/interface (`oifname "cali*"`, `fib daddr type local`) instead of the /16.
-
-### B-098 · [sec] hostNetwork containers with CAP_NET_RAW bypass the nftables air gap (AF_PACKET)
-Sev: Low · State: Open · Found: 2026-11-23
-- **Report** (sec airgap, live): a raw AF_PACKET SYN from the node to 1.1.1.1:443 got a SYN-ACK (netfilter never sees it); hostNetwork pods with NET_RAW (tigera-operator, kube-proxy) can too.
-- **Direction:** record in `docs/assumptions.md` that the in-VM gap stops processes, not root/NET_RAW in the host netns (a hard gap is the hypervisor's); drop NET_RAW where the chart allows.
-
-### B-099 · [sec] `host_key_check=no` is honoured from any conf: external-vm.conf can turn off host-key checks
-Sev: Low · State: Open · Found: 2026-11-23
-- **Report** (sec airgap, code): `external.sh` honours `host_key_check` from any `CONF`; in external-vm.conf a MITM can fake `run`/verify output and plant `./backups/external` snapshots (Ansible stays accept-new).
-- **Direction:** honour it only for the generated Lima conf (e.g. an env flag set by `lima-egress.sh`); reject the key in external-vm.conf.
-
-### B-100 · [sec] A reviewer proxy (`egress=proxy`) is allowed on every port and protocol
-Sev: Low · State: Open · Found: 2026-11-23
-- **Report** (sec airgap, code): `vm_egress_allow_extra` puts the proxy host as a /32 in `allowed4`, so every service on that box (SSH, DNS, SMB) is reachable, not just the proxy port.
-- **Direction:** a separate rule `ip daddr <ip> tcp dport <proxy port> accept`.
-
-### B-101 · [sec] Air gap fails open: containerd and kubelet start without the firewall unit
-Sev: Low · State: Open · Found: 2026-11-23
-- **Report** (sec airgap, code): nothing `Requires=` indev-airgap; if `nft -f` fails at boot (or B-092 drops the job) the node runs workloads with full egress until the next verify.
-- **Direction:** drop-ins for containerd/kubelet with `Requires=indev-airgap.service` + `After=`.
-
-### B-102 · [sre] Lima's host egress proxy outlives `make vm-down` / `vm-destroy`
-Sev: Low · State: Open · Found: 2026-11-23
-- **Report** (sre airgap): After `limactl stop k8s` the host `egress-proxy.py` keeps 127.0.0.1:18128 until the next egress start; `make uninstall` misses it (cf. B-075).
-- **Direction:** stop Lima's egress in `vm-down`/`vm-destroy` (`EXT_CONF=.cache/lima-vm.conf external.sh egress stop`).
-
-### B-103 · [sre] Stale air-gap comments in `external.sh` and versions.yml
-Sev: Low · State: Open · Found: 2026-11-23
-- **Report** (sre airgap): `external.sh`: header lists `egress-mode` direct; EGRESS_PORT points at inventory/external.yml (now group_vars). nftables pin says "amd64 unverified" (madison: 1.1.3-1 amd64).
-- **Direction:** update the three comments.
