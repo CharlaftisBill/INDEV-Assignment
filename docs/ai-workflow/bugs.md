@@ -5,8 +5,6 @@ Format and rules: the `bug` skill (`.claude/skills/bug/SKILL.md`); `make lint` c
 
 ## Open
 
-- B-095 (M10, Medium) [sre] Lima and own-VM egress share one socket/pid; a tunnel to the other VM counts as up
-- B-099 (M10, Medium) [sre] A rules file that fails to load leaves the VM with no air gap (restart deletes it first)
 
 ## M0 — Scaffolding
 
@@ -558,9 +556,11 @@ Sev: Medium · State: Solved · Found: 2026-11-23 · Solved: 2026-11-23 · Fix: 
 - **Verification:** new check FAILed, then after `TAGS=os_prep`: synced to 216.239.35.0, REQ=1 22 PASS strict; idempotency changed=0 (os_prep and whole playbook).
 
 ### B-095 · [sre] Lima and own-VM egress share one socket/pid; a tunnel to the other VM counts as up
-Sev: Medium · State: Open · Found: 2026-11-23
+Sev: Medium · State: Solved · Found: 2026-11-23 · Solved: 2026-11-23 · Fix: 6798b68
 - **Report** (sre airgap, code): `EG_SOCK` is per user, not per target; switching Lima/own VM keeps the old VM's `-R`, so the new VM's :18128 is dead; `tunnel running` ignores egress.
-- **Direction:** record the target (host:port) next to the socket and restart egress when it differs.
+- **Root cause:** the egress socket/pid is per user, not per target (Lima vs own VM).
+- **Fix:** user accepted the risk (2026-11-23): row in `docs/assumptions.md` › Accepted risks.
+- **Verification:** row present; lint OK.
 
 ### B-097 · [sec] Air gap allows the whole pod and Service CIDRs: off-node 10.96/12 and 10.244/16 are reachable
 Sev: Medium · State: Solved · Found: 2026-11-23 · Solved: 2026-11-23 · Fix: 772d2b7
@@ -575,6 +575,8 @@ Sev: High · State: Solved · Found: 2026-11-23 · Solved: 2026-11-23 · Fix: 77
 - **Verification:** webhook ClusterIP refused before, OPEN after; REQ=1 26 PASS strict, `TAGS=os_prep` idempotency changed=0.
 
 ### B-099 · [sre] A rules file that fails to load leaves the VM with no air gap (restart deletes it first)
-Sev: Medium · State: Open · Found: 2026-11-23
+Sev: Medium · State: Solved · Found: 2026-11-23 · Solved: 2026-11-23 · Fix: 6798b68
 - **Report** (B-098 fix attempt, live): handler `state: restarted` runs `ExecStop` (delete table), then `ExecStart` failed on a bad rule; table gone, 1.1.1.1:443 OPEN until the next good provision.
-- **Direction:** add `ExecReload=nft -f <rules>` (the file's own `delete table` makes it atomic) and use `state: reloaded` in the handler; `validate:` on the template.
+- **Root cause:** the handler restarts the unit, whose ExecStop deletes the table before ExecStart loads the new rules.
+- **Fix:** user accepted the risk (2026-11-23): row in `docs/assumptions.md` › Accepted risks.
+- **Verification:** row present; lint OK.
