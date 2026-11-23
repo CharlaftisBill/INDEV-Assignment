@@ -10,9 +10,13 @@ pod_cidr: 10.244.0.0/16
 service_cidr: 10.96.0.0/12
 cluster_dns_domain: cluster.local
 
-# Proxy for the VM's own downloads (apt, containerd, helm, get_url). Empty: direct internet (Lima).
-# inventory/external.yml sets it for an air-gapped VM: the host's egress proxy over SSH, or the reviewer's proxy.
-vm_proxy_url: ""
+# The VM is always air-gapped (Lima or a reviewer's VM): its downloads (apt, containerd, helm, get_url) go through
+# the host's allowlisting proxy, reached over SSH (-R, scripts/external.sh), or the reviewer's proxy (inventory/external.yml).
+vm_egress_port: 18128  # = EGRESS_PORT in scripts/external.sh
+vm_proxy_url: "http://127.0.0.1:{{ vm_egress_port }}"
+# Outbound traffic the os_prep firewall still lets through, besides loopback, the node IP and the cluster ranges
+# (e.g. the reviewer's proxy, set in inventory/external.yml).
+vm_egress_allow_extra: []
 vm_no_proxy: "127.0.0.1,localhost,{{ ansible_facts['default_ipv4']['address'] | default('') }},{{ pod_cidr }},{{ service_cidr }},.svc,.{{ cluster_dns_domain }}"
 vm_proxy_env: >-
   {{ {} if vm_proxy_url | length == 0 else

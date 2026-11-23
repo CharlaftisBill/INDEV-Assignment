@@ -19,15 +19,12 @@ all:
           ansible_ssh_common_args: >-
             -o StrictHostKeyChecking=accept-new
             {{ ('-o IdentitiesOnly=yes -i ' ~ _ext_key) if _ext_key else '' }}
-          # Internet for the VM (external-vm.conf egress=): host (default, air-gapped VM: the host's allowlisted proxy
-          # over SSH, scripts/external.sh), proxy (proxy=<url>, the reviewer's own), direct (the VM has internet).
+          # The VM is air-gapped (external-vm.conf egress=): host (default: the host's allowlisting proxy over SSH,
+          # scripts/external.sh) or proxy (proxy=<url>, the reviewer's own; the firewall lets the VM reach only it).
           _ext_egress: "{{ lookup('ansible.builtin.ini', 'egress', type='properties', file=_ext_conf, default='host') }}"
-          vm_egress_port: 18128  # = EGRESS_PORT in scripts/external.sh
-          vm_proxy_url: >-
-            {{ ('http://127.0.0.1:' ~ vm_egress_port) if _ext_egress == 'host' else
-               (lookup('ansible.builtin.ini', 'proxy', type='properties', file=_ext_conf, default='') if _ext_egress == 'proxy' else '') }}
-          # Without direct internet the host downloads the model and copies it in, so the llm namespace keeps no egress at all.
-          llm_app_model_from_host: "{{ _ext_egress != 'direct' }}"
+          _ext_proxy: "{{ lookup('ansible.builtin.ini', 'proxy', type='properties', file=_ext_conf, default='') }}"
+          vm_proxy_url: "{{ _ext_proxy if _ext_egress == 'proxy' else ('http://127.0.0.1:' ~ vm_egress_port) }}"
+          vm_egress_allow_extra: "{{ [_ext_proxy | urlsplit('hostname')] if _ext_egress == 'proxy' else [] }}"
           # No Lima mount here: snapshots go to a directory on the VM (outside Kubernetes); make backups-pull copies them to ./backups.
           etcd_backup_require_mount: false
           node_backup_dir: "{{ lookup('ansible.builtin.ini', 'backup_dir', type='properties', file=_ext_conf, default='/var/backups/etcd') }}"

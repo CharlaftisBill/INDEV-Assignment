@@ -35,7 +35,7 @@ llm_app_init_resources:
 llm_app_fetch_name: model-fetch
 # Air-gapped VM (inventory/external.yml): the host downloads the pinned model into this cache, Ansible copies it into
 # the volume, and the Job only binds the PVC. The llm namespace then has no egress policy at all.
-llm_app_model_from_host: false
+llm_app_model_from_host: true  # always: the VM is air-gapped
 llm_app_model_cache: "{{ repo_root }}/.cache/models/{{ llm_model_file }}"
 llm_app_fetch_deadline: 900
 # Model file on the node, from the bound PV (hostPath for local-path, local.path accepted); empty while the PVC has no PV.
