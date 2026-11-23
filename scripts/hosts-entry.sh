@@ -9,7 +9,8 @@ set -euo pipefail
 NAMES="llm.local grafana.local"
 MARKER="# indev-k8s"
 # ::1 too: without an AAAA answer macOS sends the .local AAAA query to mDNS and waits 5 s (B-059).
-# Lima's forward listens on *:443 (dual stack), so ::1 reaches it.
+# On macOS Lima's forward listens on *:443 (dual stack), so ::1 reaches it; on Linux it binds 127.0.0.1,
+# ::1 is refused at once and clients fall back to 127.0.0.1.
 LINES=("127.0.0.1 $NAMES $MARKER" "::1 $NAMES $MARKER")
 
 flush_dns() {  # macOS caches /etc/hosts lookups; Linux resolvers read the file directly
@@ -18,16 +19,29 @@ flush_dns() {  # macOS caches /etc/hosts lookups; Linux resolvers read the file 
   sudo killall -HUP mDNSResponder 2>/dev/null || true
 }
 
-any() { grep -q "[[:space:]]$MARKER\$" /etc/hosts 2>/dev/null; }
-complete() { local l; for l in "${LINES[@]}"; do grep -qxF "$l" /etc/hosts 2>/dev/null || return 1; done; }
-show() { grep "[[:space:]]$MARKER\$" /etc/hosts; }
+# Byte-wise grep (LC_ALL=C, -a): in a UTF-8 locale GNU grep drops non-UTF-8 lines, and NUL bytes make
+# grep treat the file as binary; either would lose unrelated entries on rewrite (B-060).
+g() { LC_ALL=C grep -a "$@"; }
+any() { g -q "[[:space:]]$MARKER\$" /etc/hosts 2>/dev/null; }
+complete() { local l; for l in "${LINES[@]}"; do g -qxF "$l" /etc/hosts 2>/dev/null || return 1; done; }
+show() { g "[[:space:]]$MARKER\$" /etc/hosts; }
 
+tmp=""; trap '[[ -z "$tmp" ]] || rm -f "$tmp"' EXIT
+count() { g -c "$1" "$2" || [[ $? -eq 1 ]]; }   # grep -c: rc 1 = zero matches (prints 0), rc 2 = read error
 write_hosts() {  # write_hosts [LINE...]: drop our marker lines, append the given ones
-  local tmp; tmp="$(mktemp)"
-  { grep -v "[[:space:]]$MARKER\$" /etc/hosts || true; [[ $# -eq 0 ]] || printf '%s\n' "$@"; } >"$tmp"
+  local total ours kept
+  tmp="$(mktemp)"
+  if ! total="$(count '' /etc/hosts)" || ! ours="$(count "[[:space:]]$MARKER\$" /etc/hosts)"; then
+    echo "Refusing to rewrite /etc/hosts: cannot read it." >&2; exit 1
+  fi
+  g -v "[[:space:]]$MARKER\$" /etc/hosts >"$tmp" || [[ $? -eq 1 ]] || { echo "Refusing to rewrite /etc/hosts: cannot read it." >&2; exit 1; }
+  kept="$(count '' "$tmp")"
+  if [[ "$kept" -ne $((total - ours)) ]]; then  # every other entry must survive, byte for byte
+    echo "Refusing to rewrite /etc/hosts: would keep $kept of its $((total - ours)) other lines." >&2; exit 1
+  fi
+  [[ $# -eq 0 ]] || printf '%s\n' "$@" >>"$tmp"
   # shellcheck disable=SC2024  # the temp file is ours; only the write to /etc/hosts needs root
   sudo tee /etc/hosts <"$tmp" >/dev/null   # rewrites in place, keeping owner and mode
-  rm -f "$tmp"
   flush_dns
 }
 
