@@ -32,7 +32,7 @@ EXT="$ROOT/scripts/external.sh"
 if "$EXT" enabled 2>/dev/null; then EXTERNAL=1; else EXTERNAL=0; fi          # your own VM over SSH (external-vm.conf) instead of Lima
 if [[ $EXTERNAL == 1 ]]; then node() { "$EXT" run "$@"; }; else node() { limactl shell "$VM" -- sudo "$@"; }; fi  # run a command on the node
 # Air-gapped own VM (egress=host or proxy): no internet from pods, the model comes from the host (no egress policies in llm).
-AIRGAP=0; if [[ $EXTERNAL == 1 && "$("$EXT" egress-mode 2>/dev/null)" != direct ]]; then AIRGAP=1; fi
+AIRGAP=1  # the VM is always air-gapped (Lima or own VM): no internet from it or its pods; the model comes from the host
 vm_present() { if [[ $EXTERNAL == 1 ]]; then "$EXT" reach; else limactl list --quiet 2>/dev/null | grep -qx "$VM"; fi; }
 k()     { kubectl --kubeconfig "$KUBECONFIG_ADMIN" "$@"; }         # admin kubectl from the host
 kop()   { kubectl --kubeconfig "$KUBECONFIG_OPERATOR" "$@"; }      # operator kubectl from the host
@@ -46,6 +46,14 @@ check_1() { # OS preparation, containerd, pinned packages
   if ! vm_present; then fail "VM not reachable ($([[ $EXTERNAL == 1 ]] && echo "ssh, external-vm.conf" || echo "Lima '$VM'"))"; return 0; fi
 
   if [[ "$(node systemctl is-active containerd 2>&1)" == "active" ]]; then pass "containerd is active"; else fail "containerd is not active"; fi
+  # Air gap: the firewall is loaded, and the VM cannot open a connection to the internet itself.
+  if [[ "$(node systemctl is-active indev-airgap 2>&1)" == "active" ]] && node nft list table inet indev_airgap >/dev/null 2>&1; then pass "air-gap firewall indev-airgap is active (nft table inet indev_airgap)"; else fail "air-gap firewall indev-airgap is not active"; fi
+  local direct; direct="$(node python3 -c 'import socket
+try:
+    socket.create_connection(("1.1.1.1", 443), timeout=5); print("OPEN")
+except OSError as e:
+    print("BLOCKED", type(e).__name__)' 2>&1)"
+  if [[ "$direct" == BLOCKED* ]]; then pass "the VM cannot reach the internet itself (1.1.1.1:443: ${direct#BLOCKED })"; else fail "the VM reaches the internet directly: $direct"; fi
 
   local cfg; cfg="$(node containerd config dump 2>&1)"
   if grep -Eq '^[[:space:]]*SystemdCgroup = true' <<<"$cfg"; then pass "containerd effective config: SystemdCgroup = true"; else fail "SystemdCgroup is not true in 'containerd config dump'"; fi
