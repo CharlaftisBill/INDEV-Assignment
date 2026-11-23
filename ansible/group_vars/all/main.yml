@@ -10,6 +10,15 @@ pod_cidr: 10.244.0.0/16
 service_cidr: 10.96.0.0/12
 cluster_dns_domain: cluster.local
 
+# Proxy for the VM's own downloads (apt, containerd, helm, get_url). Empty: direct internet (Lima).
+# inventory/external.yml sets it for an air-gapped VM: the host's egress proxy over SSH, or the reviewer's proxy.
+vm_proxy_url: ""
+vm_no_proxy: "127.0.0.1,localhost,{{ ansible_facts['default_ipv4']['address'] | default('') }},{{ pod_cidr }},{{ service_cidr }},.svc,.{{ cluster_dns_domain }}"
+vm_proxy_env: >-
+  {{ {} if vm_proxy_url | length == 0 else
+     {'http_proxy': vm_proxy_url, 'https_proxy': vm_proxy_url, 'HTTP_PROXY': vm_proxy_url, 'HTTPS_PROXY': vm_proxy_url,
+      'no_proxy': vm_no_proxy, 'NO_PROXY': vm_no_proxy} }}
+
 # Hostnames served by the ingress (resolved on the Mac via /etc/hosts -> 127.0.0.1)
 llm_hostname: llm.local
 grafana_hostname: grafana.local
