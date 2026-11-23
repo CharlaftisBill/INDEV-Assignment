@@ -10,8 +10,7 @@ port=22
 # ssh_key=~/.ssh/id_ed25519
 # Optional: where the VM keeps etcd snapshots (make backups-pull copies them to ./backups)
 # backup_dir=/var/backups/etcd
-# Internet for the VM. host (default): the VM needs none; its downloads go through this machine over SSH, to the
-#   allowlisted sources in scripts/egress-allowlist.txt only (an air-gapped VM). proxy: through your proxy, set below.
-#   direct: the VM has its own internet.
+# The VM is air-gapped (a firewall keeps it so). host (default): its downloads go through this machine over SSH, to the
+#   allowlisted sources in scripts/egress-allowlist.txt only. proxy: through your proxy, set below.
 # egress=host
-# proxy=http://proxy.example.internal:3128
+# proxy=http://10.0.0.5:3128   (an IP address: the VM has no DNS)

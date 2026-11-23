@@ -19,8 +19,10 @@ override EXT          := $(ROOT)/scripts/external.sh
 override INV          := $(if $(EXTERNAL),-i $(ANSIBLE_DIR)/inventory/external.yml,)
 # Lima forwards host 443/80/6443 by itself; over SSH the same forwards come from a tunnel.
 override TUNNEL       := $(if $(EXTERNAL),@$(EXT) tunnel start,@:)
-# An air-gapped VM (egress=host) downloads through the host while Ansible runs; no-op otherwise.
-override EGRESS       := $(if $(EXTERNAL),@$(EXT) egress start,@:)
+# The VM is always air-gapped: its downloads go through the host's egress proxy over SSH while Ansible or verify run.
+# Lima gets a generated conf for scripts/external.sh (its SSH port changes on every start).
+override LIMA_EXT_CONF := $(ROOT)/.cache/lima-vm.conf
+override EGRESS        = $(if $(EXTERNAL),@$(EXT) egress start,@$(ROOT)/scripts/lima-egress.sh $(VM) $(LIMACTL))
 
 # User-settable variables (validated below)
 VM           ?= k8s
@@ -214,6 +216,7 @@ lint: tools ## yamllint + ansible-lint + bug tracker format + shellcheck (if ins
 verify: ## Run requirement checks (REQ=4 for one; STRICT=1 makes SKIP fail)
 	@$(HOST_TOOLS) preflight vm
 	$(TUNNEL)
+	$(EGRESS)
 	$(ROOT)/scripts/verify.sh $(if $(filter 1,$(STRICT)),--strict,) $(REQ)
 
 .PHONY: e2e

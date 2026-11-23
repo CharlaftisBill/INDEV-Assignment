@@ -15,7 +15,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TMPDIR="${TMPDIR:-/tmp}"
-CONF="$ROOT/external-vm.conf"
+CONF="${EXT_CONF:-$ROOT/external-vm.conf}"   # EXT_CONF: the Makefile points Lima's egress here too (.cache/lima-vm.conf)
 
 die() { echo "external: $*" >&2; exit 1; }
 get() { sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*//p" "$CONF" | head -n 1 | sed 's/[[:space:]]*$//'; }
@@ -77,23 +77,27 @@ case "${1:-} ${2:-}" in
     if ssh_up "$EG_SOCK" || alive "$EG_PID"; then egress_stop; echo "egress stopped"; fi
     if ssh_up "$SOCK" || alive "$FWD_PID"; then tunnel_stop; echo "tunnel stopped"; else echo "tunnel not running"; fi
     exit 0; } ;;
-  "tunnel running") ssh_up "$SOCK" || alive "$FWD_PID" || ssh_up "$EG_SOCK" || alive "$EG_PID" || alive "$PULL_PID"; exit ;;
+  "tunnel running") ssh_up "$SOCK" || alive "$FWD_PID" || alive "$PULL_PID"; exit ;;  # what holds host ports (egress is Lima's too)
 esac
 [[ -f "$CONF" ]] || die "no external-vm.conf (copy external-vm.conf.example); the Lima VM is used instead"
 
 HOST="$(get host)"; USER_="$(get user)"; PORT="$(get port)"; KEY="$(get ssh_key)"; BDIR="$(get backup_dir)"
-EGRESS="$(get egress)"; PROXY="$(get proxy)"
+EGRESS="$(get egress)"; PROXY="$(get proxy)"; HKC="$(get host_key_check)"
 PORT="${PORT:-22}"; BDIR="${BDIR:-/var/backups/etcd}"; EGRESS="${EGRESS:-host}"
 [[ -n "$HOST" && -n "$USER_" ]] || die "external-vm.conf needs host= and user="
 [[ "$PORT" =~ ^[0-9]+$ ]] || die "external-vm.conf: port= must be a number"
 [[ "$BDIR" == /* ]] || die "external-vm.conf: backup_dir= must be an absolute path"
 case "$EGRESS" in
-  host | direct) ;;
-  proxy) [[ "$PROXY" =~ ^https?://[^[:space:]]+$ ]] || die "external-vm.conf: egress=proxy needs proxy=http://<host>:<port>" ;;
-  *) die "external-vm.conf: egress= must be host, proxy or direct" ;;
+  host) ;;
+  direct) die "external-vm.conf: egress=direct was removed: the VM is always air-gapped (host or proxy)" ;;
+  # B-093: an IP, not a name: the air-gapped VM has no DNS (the firewall blocks it), so apt/containerd could not resolve it.
+  proxy) [[ "$PROXY" =~ ^http://[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:[0-9]+/?$ ]] || die "external-vm.conf: egress=proxy needs proxy=http://<IPv4>:<port> (the VM has no DNS)" ;;
+  *) die "external-vm.conf: egress= must be host or proxy" ;;
 esac
 
 SSH=(ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 -p "$PORT")
+# host_key_check=no only in the generated Lima conf: Lima's keys change on every rebuild (its own ssh.config does the same).
+[[ "$HKC" == no ]] && SSH=(ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=10 -p "$PORT")
 [[ -n "$KEY" ]] && SSH+=(-i "$KEY" -o IdentitiesOnly=yes)
 TARGET="$USER_@$HOST"
 # root logs in as root: no sudo needed (a minimal Debian may not even have it).
@@ -161,7 +165,7 @@ case "${1:-}" in
       stop) if egress_up || alive "$EG_PID"; then egress_stop; echo "egress stopped"; fi ;;
       status) [[ "$EGRESS" != host ]] && { echo "egress=$EGRESS (no host proxy)"; exit 0; }; if egress_up; then echo "up"; else echo "down"; exit 1; fi ;;
       test)  # can the VM fetch a pinned source the way apt and containerd will?
-        case "$EGRESS" in host) url="http://127.0.0.1:$EGRESS_PORT" ;; proxy) url="$PROXY" ;; direct) url="" ;; esac
+        case "$EGRESS" in host) url="http://127.0.0.1:$EGRESS_PORT" ;; proxy) url="$PROXY" ;; esac
         run python3 -c 'import sys, urllib.request as u
 h = {"https": sys.argv[1]} if sys.argv[1] else {}
 u.build_opener(u.ProxyHandler(h)).open("https://deb.debian.org/debian/dists/trixie/Release", timeout=20).read(1)' "$url" 2>/dev/null \
@@ -190,7 +194,7 @@ u.build_opener(u.ProxyHandler(h)).open("https://deb.debian.org/debian/dists/trix
         if egress_up || alive "$EG_PID"; then egress_stop; echo "egress stopped"; fi
         if ssh_up "$SOCK" || alive "$FWD_PID"; then tunnel_stop; echo "tunnel stopped"; else echo "tunnel not running"; fi ;;
       status) if tunnel_up && { [[ "$EGRESS" != host ]] || egress_up; }; then echo "up"; else echo "down"; exit 1; fi ;;
-      running) ssh_up "$SOCK" || alive "$FWD_PID" || ssh_up "$EG_SOCK" || alive "$EG_PID" || alive "$PULL_PID" ;;  # any part left, for uninstall
+      running) ssh_up "$SOCK" || alive "$FWD_PID" || alive "$PULL_PID" ;;  # what holds host ports (egress is Lima's too)
       *) die "usage: tunnel start|stop|status|running" ;;
     esac ;;
   backups-pull)
