@@ -580,3 +580,10 @@ Sev: Medium · State: Solved · Found: 2026-11-23 · Solved: 2026-11-23 · Fix: 
 - **Root cause:** the handler restarts the unit, whose ExecStop deletes the table before ExecStart loads the new rules.
 - **Fix:** user accepted the risk (2026-11-23): row in `docs/assumptions.md` › Accepted risks.
 - **Verification:** row present; lint OK.
+
+### B-100 · `hosts-entry.sh --apply` writes the terminal height ("50") instead of the 127.0.0.1 line
+Sev: High · State: Solved · Found: 2026-11-23 · Solved: 2026-11-23 · Fix: df9b5ea
+- **Report** (user, Linux host): `make deps && make e2e` failed at preflight; /etc/hosts had `50`/`54` lines and no `127.0.0.1 llm.local`.
+- **Root cause:** the entries array was named `LINES`; after `sudo` (a terminal command) bash resets `LINES` to the window height, overwriting element 0.
+- **Fix:** array renamed `ENTRIES`.
+- **Verification:** `--apply` from the user's terminal wrote both lines; `make e2e` from a destroyed VM: idempotency changed=0, 320 PASS strict.
