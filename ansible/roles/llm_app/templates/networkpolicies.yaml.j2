@@ -6,6 +6,7 @@ metadata: {name: default-deny, namespace: {{ llm_app_namespace }}}
 spec:
   podSelector: {}
   policyTypes: [Ingress, Egress]
+{% if not llm_app_model_from_host | bool %}
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -20,6 +21,7 @@ spec:
       ports:
         - {protocol: UDP, port: 53}
         - {protocol: TCP, port: 53}
+{% endif %}
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -33,6 +35,7 @@ spec:
       ports:
         - {protocol: TCP, port: {{ llm_app_port }}}
 ---
+{% if not llm_app_model_from_host | bool %}
 # Model download by the model-fetch Job only: HTTPS to public addresses (see defaults).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -47,3 +50,4 @@ spec:
             except: {{ llm_app_egress_except | to_json }}
       ports:
         - {protocol: TCP, port: 443}
+{% endif %}
