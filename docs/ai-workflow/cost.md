@@ -12,6 +12,7 @@ The source of truth is the frontmatter in `.claude/agents/*.md` and `.claude/ski
 | `docs-writer` | sonnet | low | Copies facts from the code into the docs |
 | `sre-reviewer` | opus | high | Judgment: finds what the checks miss |
 | `security-reviewer` | opus | high | Security; fixed so it does not depend on the session model |
+| `reviewer-dryrun` | sonnet | medium | Mostly waits on a script; judgment only to tell a project bug from a dry-run artifact |
 
 ## Skills
 
