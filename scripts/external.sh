@@ -203,9 +203,12 @@ u.build_opener(u.ProxyHandler(h)).open("https://deb.debian.org/debian/dists/trix
     mkdir -p "$PULL_DIR"; chmod 700 "$PULL_DIR"
     # Snapshots hold every Secret: read as root on the VM, streamed over SSH, never printed. Only names matching
     # SNAP_RE and not yet here are fetched (B-067, B-070): a name with a newline splits into lines that match nothing.
+    # B-071: list first; inside a process substitution a failed ssh or find would look like "nothing new".
+    list="$(run find "$BDIR" -maxdepth 1 -type f -name 'etcd-snapshot-*.db' -printf '%f\n')" \
+      || die "cannot list snapshots in $TARGET:$BDIR (VM unreachable or backup_dir missing); nothing pulled"
     want=(); while IFS= read -r f; do
       [[ "$f" =~ $SNAP_RE && ! -e "$PULL_DIR/$f" ]] && want+=("$f")
-    done < <(run find "$BDIR" -maxdepth 1 -type f -name 'etcd-snapshot-*.db' -printf '%f\n' | sort | tail -n "$keep")
+    done < <(printf '%s\n' "$list" | sort | tail -n "$keep")
     n=0
     if (( ${#want[@]} > 0 )); then
       tmp="$(mktemp -d "$PULL_DIR/.pull.XXXXXX")"; trap 'rm -rf "$tmp"' EXIT
