@@ -26,6 +26,16 @@ Format and rules: the `bug` skill (`.claude/skills/bug/SKILL.md`); `make lint` c
 - B-089 (M10, Low) [sre] Own-VM snapshots are visible inside a Lima VM's backup mount
 - B-090 (M10, Low) [sre] check_7 freshness limit (2x schedule) can fail when a pull lands just before a snapshot
 - B-091 (M10, Low) [sre] `etcd-backup.sh` mount guard skipped by any `REQUIRE_MOUNT` value other than `1`
+- B-094 (M10, Medium) [sre] Air-gap firewall blocks NTP: no time sync, `NodeClockNotSynchronising` fires
+- B-095 (M10, Medium) [sre] Lima and own-VM egress share one socket/pid; a tunnel to the other VM counts as up
+- B-096 (M10, Low) [sre] Air-gap handler restart drops the table first; template not validated with `nft -c`
+- B-097 (M10, Medium) [sec] Air gap allows the whole pod and Service CIDRs: off-node 10.96/12 and 10.244/16 are reachable
+- B-098 (M10, Low) [sec] hostNetwork containers with CAP_NET_RAW bypass the nftables air gap (AF_PACKET)
+- B-099 (M10, Low) [sec] `host_key_check=no` is honoured from any conf: external-vm.conf can turn off host-key checks
+- B-100 (M10, Low) [sec] A reviewer proxy (`egress=proxy`) is allowed on every port and protocol
+- B-101 (M10, Low) [sec] Air gap fails open: containerd and kubelet start without the firewall unit
+- B-102 (M10, Low) [sre] Lima's host egress proxy outlives `make vm-down` / `vm-destroy`
+- B-103 (M10, Low) [sre] Stale air-gap comments in `external.sh` and versions.yml
 
 ## M0 — Scaffolding
 
@@ -642,3 +652,67 @@ Sev: Low · State: Open · Found: 2026-11-23
 Sev: Low · State: Open · Found: 2026-11-23
 - **Report** (sre r1): `[[ "${REQUIRE_MOUNT:-1}" == 1 ]]`: `true` or `yes` skip the guard. The template only writes 1 or 0.
 - **Direction:** accept only `0` as off; anything else keeps the guard.
+
+### B-092 · [sre] `indev-airgap.service` ordering cycle at boot: systemd deletes a start job to break it
+Sev: High · State: Solved · Found: 2026-11-23 · Solved: 2026-11-23 · Fix: 49653ef
+- **Report** (sre airgap): Reboot journal: "ordering cycle ... networkd-wait-online.service/start deleted"; default deps order the unit after sysinit, cloud-init-network before it; a boot may drop the firewall.
+- **Root cause:** default dependencies put the unit after sysinit.target while it was ordered before network-pre.target.
+- **Fix:** `DefaultDependencies=no`, `After=local-fs.target`, `WantedBy=sysinit.target` (Debian nftables.service pattern); handler reenables.
+- **Verification:** Lima VM stop/start: 0 "ordering cycle" in the boot journal, `indev-airgap` active, REQ=1 21 PASS, smoke OK.
+
+### B-093 · [sre] `egress=proxy` with a proxy hostname: the firewall blocks DNS, the VM cannot resolve it
+Sev: High · State: Solved · Found: 2026-11-23 · Solved: 2026-11-23 · Fix: 49653ef
+- **Report** (sre airgap): `getent ahostsv4 deb.debian.org` exits 2 under the firewall; with `proxy=http://<name>:port` apt/containerd/helm and the getent task (re-runs) fail.
+- **Root cause:** the firewall blocks DNS, so a proxy given by name can be resolved neither by getent nor by apt/containerd.
+- **Fix:** `proxy=` must be `http://<IPv4>:<port>` (`external.sh` check, `os_prep` assert); getent tasks removed; docs say so.
+- **Verification:** `egress-mode` with `proxy=http://proxy.corp:3128` → rc 1 with the message; with `http://10.0.0.5:3128` → rc 0.
+
+### B-094 · [sre] Air-gap firewall blocks NTP: no time sync, `NodeClockNotSynchronising` fires
+Sev: Medium · State: Open · Found: 2026-11-23
+- **Report** (sre airgap): `timesync-status`: no server, 0 packets (udp/123 rejected); `node_timex_sync_status`=0, alert pending after reboot. Drift then hits TLS, etcd, certs.
+- **Direction:** allow udp/123 to pinned NTP servers (or the Lima gateway if it serves time), or sync the clock from the host; else document and silence the alert.
+
+### B-095 · [sre] Lima and own-VM egress share one socket/pid; a tunnel to the other VM counts as up
+Sev: Medium · State: Open · Found: 2026-11-23
+- **Report** (sre airgap, code): `EG_SOCK` is per user, not per target; switching Lima/own VM keeps the old VM's `-R`, so the new VM's :18128 is dead; `tunnel running` ignores egress.
+- **Direction:** record the target (host:port) next to the socket and restart egress when it differs.
+
+### B-096 · [sre] Air-gap handler restart drops the table first; template not validated with `nft -c`
+Sev: Low · State: Open · Found: 2026-11-23
+- **Report** (sre airgap): `systemd_service state: restarted` runs ExecStop (`nft delete table`) then ExecStart; a template the parser rejects leaves the VM with no air-gap table and a failed handler.
+- **Direction:** add `validate: nft -c -f %s` to the template task; reload with `ExecReload=nft -f` (file already deletes+recreates atomically).
+
+### B-097 · [sec] Air gap allows the whole pod and Service CIDRs: off-node 10.96/12 and 10.244/16 are reachable
+Sev: Medium · State: Open · Found: 2026-11-23
+- **Report** (sec airgap, live): node → 1.1.1.1:443 refused, but 10.100.0.1:443 and 10.244.200.1:443 pass `allowed4` and leave via 192.168.5.2 (pods too); any LAN/VPN/kind net in those ranges is reachable.
+- **Direction:** drop the Service CIDR (ClusterIPs are DNATed before priority 10); accept pod traffic by route/interface (`oifname "cali*"`, `fib daddr type local`) instead of the /16.
+
+### B-098 · [sec] hostNetwork containers with CAP_NET_RAW bypass the nftables air gap (AF_PACKET)
+Sev: Low · State: Open · Found: 2026-11-23
+- **Report** (sec airgap, live): a raw AF_PACKET SYN from the node to 1.1.1.1:443 got a SYN-ACK (netfilter never sees it); hostNetwork pods with NET_RAW (tigera-operator, kube-proxy) can too.
+- **Direction:** record in `docs/assumptions.md` that the in-VM gap stops processes, not root/NET_RAW in the host netns (a hard gap is the hypervisor's); drop NET_RAW where the chart allows.
+
+### B-099 · [sec] `host_key_check=no` is honoured from any conf: external-vm.conf can turn off host-key checks
+Sev: Low · State: Open · Found: 2026-11-23
+- **Report** (sec airgap, code): `external.sh` honours `host_key_check` from any `CONF`; in external-vm.conf a MITM can fake `run`/verify output and plant `./backups/external` snapshots (Ansible stays accept-new).
+- **Direction:** honour it only for the generated Lima conf (e.g. an env flag set by `lima-egress.sh`); reject the key in external-vm.conf.
+
+### B-100 · [sec] A reviewer proxy (`egress=proxy`) is allowed on every port and protocol
+Sev: Low · State: Open · Found: 2026-11-23
+- **Report** (sec airgap, code): `vm_egress_allow_extra` puts the proxy host as a /32 in `allowed4`, so every service on that box (SSH, DNS, SMB) is reachable, not just the proxy port.
+- **Direction:** a separate rule `ip daddr <ip> tcp dport <proxy port> accept`.
+
+### B-101 · [sec] Air gap fails open: containerd and kubelet start without the firewall unit
+Sev: Low · State: Open · Found: 2026-11-23
+- **Report** (sec airgap, code): nothing `Requires=` indev-airgap; if `nft -f` fails at boot (or B-092 drops the job) the node runs workloads with full egress until the next verify.
+- **Direction:** drop-ins for containerd/kubelet with `Requires=indev-airgap.service` + `After=`.
+
+### B-102 · [sre] Lima's host egress proxy outlives `make vm-down` / `vm-destroy`
+Sev: Low · State: Open · Found: 2026-11-23
+- **Report** (sre airgap): After `limactl stop k8s` the host `egress-proxy.py` keeps 127.0.0.1:18128 until the next egress start; `make uninstall` misses it (cf. B-075).
+- **Direction:** stop Lima's egress in `vm-down`/`vm-destroy` (`EXT_CONF=.cache/lima-vm.conf external.sh egress stop`).
+
+### B-103 · [sre] Stale air-gap comments in `external.sh` and versions.yml
+Sev: Low · State: Open · Found: 2026-11-23
+- **Report** (sre airgap): `external.sh`: header lists `egress-mode` direct; EGRESS_PORT points at inventory/external.yml (now group_vars). nftables pin says "amd64 unverified" (madison: 1.1.3-1 amd64).
+- **Direction:** update the three comments.

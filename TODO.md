@@ -3,7 +3,7 @@
 Live project state and bug tracker. Agents read this first and update it last (protocol in `CLAUDE.md`).
 
 ## Status
-Current milestone: **Done (M1–M10)** · Own VM over SSH: 2026-11-22 (stand-in Debian 13 VM: idempotency changed=0, 314 PASS strict, smoke OK; Lima re-check 314 PASS); air-gapped 2026-11-23 (313 PASS strict, smoke OK) · macOS arm64 re-check after Linux support: 2026-11-22 (existing VM, `main` e917108: provision + idempotency changed=0, 314 PASS strict, smoke OK) · Linux amd64 host: 2026-11-22 (Ubuntu 24.04, fresh VM: idempotency changed=0, 314 PASS strict, smoke OK) · Last verified: 2026-11-21 PKI persistence (`make e2e` twice, 314 PASS each; after a rebuilt-VM etcd restore 1: 19, 2: 21, 3a: 15, 3b: 18, 4: 48, 5: 15, 6: 76, 7: 23, 8a: 35, 8b: 19, 8c: 8, 9: 17 PASS, strict) · Before: 2026-11-20 M10 final gate (`make e2e` from a destroyed VM 313 PASS; after the review fixes: `make idempotency` changed=0; 1: 19, 2: 20, 3a: 15, 3b: 18, 4: 48, 5: 15, 6: 76, 7: 23, 8a: 35, 8b: 19, 8c: 8, 9: 17 PASS · 0 FAIL · 0 SKIP, strict) · Last SRE review: working tree 2026-11-23 — 2 new bugs (B-071, B-072; own VM final re-review)
+Current milestone: **Done (M1–M10)** · Own VM over SSH: 2026-11-22 (stand-in Debian 13 VM: idempotency changed=0, 314 PASS strict, smoke OK; Lima re-check 314 PASS); air-gapped 2026-11-23 (313 PASS strict, smoke OK) · macOS arm64 re-check after Linux support: 2026-11-22 (existing VM, `main` e917108: provision + idempotency changed=0, 314 PASS strict, smoke OK) · Linux amd64 host: 2026-11-22 (Ubuntu 24.04, fresh VM: idempotency changed=0, 314 PASS strict, smoke OK) · Last verified: 2026-11-21 PKI persistence (`make e2e` twice, 314 PASS each; after a rebuilt-VM etcd restore 1: 19, 2: 21, 3a: 15, 3b: 18, 4: 48, 5: 15, 6: 76, 7: 23, 8a: 35, 8b: 19, 8c: 8, 9: 17 PASS, strict) · Before: 2026-11-20 M10 final gate (`make e2e` from a destroyed VM 313 PASS; after the review fixes: `make idempotency` changed=0; 1: 19, 2: 20, 3a: 15, 3b: 18, 4: 48, 5: 15, 6: 76, 7: 23, 8a: 35, 8b: 19, 8c: 8, 9: 17 PASS · 0 FAIL · 0 SKIP, strict) · Last SRE review: working tree 2026-11-23 — 7 new bugs (B-092..B-096, B-120, B-121 to renumber; air-gap final)
 
 ## Milestones
 - [x] M0 Scaffolding: repo layout, agentic layer (`.claude/`), Makefile, lint configs, Lima config, docs skeleton, commit tooling (`split-commits` skill, `.githooks/commit-msg`)
@@ -21,12 +21,12 @@ Current milestone: **Done (M1–M10)** · Own VM over SSH: 2026-11-22 (stand-in 
 - [x] M10 Final (all IDs: 1 2 3a 3b 4 5 6 7 8a 8b 8c 9): `make e2e` from a destroyed VM, full security review, docs pass (Backlog items marked "before M10" must be done first)
 
 ## Backlog
-- [ ] **Air gap as the only scenario** (user, 2026-11-23): the VM never uses its own internet, whether Lima creates it or the reviewer gives it. Do together with the open B-066..B-070, then one final review.
-  - [ ] Lima uses the same egress path as the own VM: `ssh -R` via `~/.lima/k8s/ssh.config` to `scripts/egress-proxy.py` + allowlist; `vm_proxy_url` always set (drop `egress=direct`?)
-  - [ ] Enforce it: the playbook firewalls the VM's outbound traffic (nftables, as the 2026-11-23 test), so the air gap is real on Lima too
-  - [ ] Model always from the host (`llm_app_model_from_host` default true); `llm` keeps no egress policy; remove `allow-dns`/`allow-model-download` code paths
-  - [ ] `verify.sh` check_3b: one (air-gap) branch only; add a check that the VM cannot reach the internet directly
-  - [ ] Docs: README, install, architecture, ADR 0001/0008, assumptions, requirements matrix; then `make e2e` from a destroyed VM
+- [x] **Air gap as the only scenario** (user, 2026-11-23, `chore/airgap-only`, 49653ef..2d81ce0): the VM never uses its own internet, whether Lima creates it or the reviewer gives it. B-071..B-073 deferred by the user to keep it on schedule. Checked: e2e from a destroyed Lima VM (provision OK, idempotency changed=0, 315 PASS strict incl. firewall + no direct internet, smoke OK).
+  - [x] Lima uses the same egress path as the own VM: `ssh -R` via `~/.lima/k8s/ssh.config` to `scripts/egress-proxy.py` + allowlist; `vm_proxy_url` always set (drop `egress=direct`?)
+  - [x] Enforce it: the playbook firewalls the VM's outbound traffic (nftables, as the 2026-11-23 test), so the air gap is real on Lima too
+  - [x] Model always from the host (`llm_app_model_from_host` default true); `llm` keeps no egress policy; remove `allow-dns`/`allow-model-download` code paths
+  - [x] `verify.sh` check_3b: one (air-gap) branch only; add a check that the VM cannot reach the internet directly
+  - [x] Docs: README, install, architecture, ADR 0001/0008, assumptions, requirements matrix; then `make e2e` from a destroyed VM
 - [x] **External VM over SSH** (2026-11-22, `chore/external-vm-support`, c843493..7663012, [install guide](docs/install.md#your-own-debian-13-vm-over-ssh-instead-of-lima)): `external-vm.conf` switches make, Ansible (`inventory/external.yml`) and `verify.sh` from Lima to a reviewer's Debian 13 VM over SSH (`scripts/external.sh`: checks, tunnel, `backups-pull`; `etcd_backup_require_mount: false`). `user=root` supported (no sudo). Lima path unchanged.
   - Tunnel: B-061 (macOS refuses non-root `127.0.0.1:443`) → ssh to 18443/18000 + loopback-only `scripts/loopback-forward.py` on 443/80.
   - Cross-role: `llm_app` drops a redundant per-task `become: true` (root login without sudo).
