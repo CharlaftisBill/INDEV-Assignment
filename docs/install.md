@@ -96,7 +96,7 @@ The usual ones work: `make deps` (no Lima or QEMU while the file exists; `make d
 ### Internet access from the VM
 
 The VM is always air-gapped, Lima's and yours: `os_prep` installs a firewall (nftables table `inet indev_airgap`,
-unit `indev-airgap`) that lets it reach only itself, the node IP, the pod and Service ranges (and your proxy, with
+unit `indev-airgap`) that lets it reach only itself, the node IP, its own pods (and your proxy, with
 `egress=proxy`), plus NTP (udp/123) to the `ntp=` servers so the clock stays synced (B-094; set `ntp=` if your
 network blocks Google's). `make verify` (check 1) proves it cannot open a connection to the internet and that the
 clock is synced. Its downloads go through:
