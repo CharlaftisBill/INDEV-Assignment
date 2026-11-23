@@ -27,6 +27,7 @@ Project state (milestones, backlog) is in [TODO.md](../../TODO.md).
 | `sre-reviewer` | Reviews the diff and tests the system (lint, idempotency, verify, smoke, targeted and, when allowed, disruptive tests); logs Critical/High/Medium findings as `[sre]` bugs | [`bugs.md`](bugs.md) only |
 | `security-reviewer` | Reviews RBAC, Pod Security, NetworkPolicy, audit, TLS, secrets; logs `[sec]` bugs | [`bugs.md`](bugs.md) only |
 | `docs-writer` | Keeps README and `docs/` in line with the code | docs only |
+| `reviewer-dryrun` | Plays the reviewer: fresh air-gapped stand-in VM, fresh clone, `make deps && make e2e KEEP_VM=1`, `make smoke` (`scripts/reviewer-dryrun.sh`); opens bugs | [`bugs.md`](bugs.md) only |
 
 ## Skills (`.claude/skills/`)
 
