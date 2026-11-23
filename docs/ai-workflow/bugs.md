@@ -5,7 +5,6 @@ Format and rules: the `bug` skill (`.claude/skills/bug/SKILL.md`); `make lint` c
 
 ## Open
 
-- B-071 (M10, Medium) [sre] `backups-pull` exits 0 ("pulled 0 new") when the VM is unreachable or `backup_dir` is missing
 - B-072 (M10, Medium) [sre] Own-VM restore runbook has no step to put a `./backups/external` snapshot back on a rebuilt VM
 - B-073 (M10, Medium) [sec] Pull-loop pid file trusted blindly: a stale or planted pid kills an unrelated process group
 - B-095 (M10, Medium) [sre] Lima and own-VM egress share one socket/pid; a tunnel to the other VM counts as up
@@ -523,9 +522,10 @@ Sev: Medium · State: Solved · Found: 2026-11-23 · Solved: 2026-11-23 · Fix: 
 - **Verification:** VM file `etcd-snapshot-\n-victim.db\n.db`: not copied, cwd `-victim.db` kept; symlink with a valid name skipped.
 
 ### B-071 · [sre] `backups-pull` exits 0 ("pulled 0 new") when the VM is unreachable or `backup_dir` is missing
-Sev: Medium · State: Open · Found: 2026-11-23
-- **Report** (sre final): port=1 or `backup_dir=/nonexistent` → `pulled 0 new snapshot(s)`, rc 0; the list runs in `< <(run find …)` (`scripts/external.sh:204`), so pipefail misses it; check_7's `|| fail` is dead.
-- **Direction:** list into a variable first (`names="$(run find …)" || die …`), then filter; a failed pull exits non-zero and logs an error line.
+Sev: Medium · State: Solved · Found: 2026-11-23 · Solved: 2026-11-23 · Fix: 1c15276
+- **Root cause:** the snapshot list came from `< <(run find …)`; a process substitution's exit status is never checked, so failures read as an empty list.
+- **Fix:** list into a variable first (`list="$(run find …)" || die …`), then filter; check_7's `|| fail` now fires.
+- **Verification:** port=1 and `backup_dir=/nonexistent` → error line, rc 1 (was rc 0 "pulled 0"); a reachable dir → rc 0.
 
 ### B-072 · [sre] Own-VM restore runbook has no step to put a `./backups/external` snapshot back on a rebuilt VM
 Sev: Medium · State: Open · Found: 2026-11-23
