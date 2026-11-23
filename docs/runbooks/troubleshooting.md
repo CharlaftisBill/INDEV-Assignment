@@ -1,5 +1,24 @@
 # Troubleshooting
 
+## Own VM: make vm-up or the tunnel fails
+
+With `external-vm.conf`, `make vm-up` prints the first thing that is wrong (SSH, sudo, Debian 13, size, address).
+Fix it on the VM ([what it needs](../install.md#the-vm)) and run it again.
+
+- `could not open the SSH tunnel` / `could not listen on host 443/80`: another process holds port 443, 80, 6443,
+  18443 or 18000. Usually the Lima VM: `limactl stop k8s`. Check with `lsof -nP -iTCP:443 -sTCP:LISTEN`.
+- Linux: `Permission denied` on 443/80 means `net.ipv4.ip_unprivileged_port_start` is above 80: `make deps` sets it.
+- `curl https://llm.local` hangs or is refused after the laptop slept: `make tunnel-stop`, then `make tunnel`.
+- Back on Lima, `make doctor` says `own-VM tunnel ... IN USE`: a tunnel from `external-vm.conf` still holds 443/80/6443.
+  `make tunnel-stop` (works without the conf) or `make vm-up` stops it.
+- `make verify` check 7: `no scheduled pull` → `make tunnel` (starts the pull loop); `no host copy ... younger than
+  3600s` → read `.cache/backups-pull.log` (VM unreachable over SSH?).
+- `the VM cannot reach deb.debian.org` (end of `make vm-up`), or apt/image pulls fail in `make provision`: with
+  `egress=host`, read `$TMPDIR/indev-k8s-ext-<uid>.egress.log`. A `DENY <host>` for a source you trust (a new CDN):
+  add it to `scripts/egress-allowlist.txt` (reloaded at once) and run `make provision` again. `could not open the egress
+  tunnel`: the VM's sshd must allow forwarding (`AllowTcpForwarding yes`). With `egress=proxy`, check `proxy=`.
+  The forwarder logs to `$TMPDIR/indev-k8s-ext-<uid>.fwd.log`.
+
 ## Lost admin.conf
 
 **Symptom:** `make provision` fails in the `kubeadm` role: "`/etc/kubernetes/admin.conf` is missing but a control
@@ -101,6 +120,8 @@ pod restart and token steps that B-050 describes).
 restart.
 
 **Cause:** pods are not Ready yet, or some targets have not been scraped once.
+After a VM stop/start, `rules unhealthy: …increase30d` with `duplicate sample for timestamp` can also show for a few
+minutes (seen 2026-11-23, cleared within 7 minutes).
 
 **Fix:** wait, then run it again:
 

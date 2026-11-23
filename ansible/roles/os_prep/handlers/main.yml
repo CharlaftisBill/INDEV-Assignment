@@ -1,0 +1,11 @@
+---
+# The unit's [Install] section moved to sysinit.target (B-092): reenable moves the symlink on VMs that had it enabled.
+- name: Re-enable the air-gap firewall unit  # noqa: command-instead-of-module
+  ansible.builtin.command: systemctl reenable indev-airgap
+  changed_when: true
+
+- name: Reload the air-gap firewall
+  ansible.builtin.systemd_service:
+    name: indev-airgap
+    state: restarted
+    daemon_reload: true

@@ -32,6 +32,35 @@
     group: root
   notify: Restart containerd
 
+# Air-gapped VM: image pulls go through the proxy; NO_PROXY keeps node, pod and Service traffic direct.
+- name: Create the containerd drop-in directory
+  ansible.builtin.file:
+    path: /etc/systemd/system/containerd.service.d
+    state: directory
+    mode: "0755"
+    owner: root
+    group: root
+  when: vm_proxy_url | length > 0
+
+- name: Configure the containerd proxy
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/containerd.service.d/http-proxy.conf
+    content: |
+      [Service]
+      Environment="HTTP_PROXY={{ vm_proxy_url }}" "HTTPS_PROXY={{ vm_proxy_url }}" "NO_PROXY={{ vm_no_proxy }}"
+    mode: "0644"
+    owner: root
+    group: root
+  when: vm_proxy_url | length > 0
+  notify: Restart containerd
+
+- name: Remove the containerd proxy when the VM has direct internet
+  ansible.builtin.file:
+    path: /etc/systemd/system/containerd.service.d/http-proxy.conf
+    state: absent
+  when: vm_proxy_url | length == 0
+  notify: Restart containerd
+
 - name: Enable and start containerd
   ansible.builtin.systemd_service:
     name: containerd

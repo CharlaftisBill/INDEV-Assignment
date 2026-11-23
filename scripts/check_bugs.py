@@ -15,7 +15,7 @@ import sys
 MAX_TITLE = 100
 MAX_BULLETS = 4
 MAX_LINE = 220
-SEVS = ("Critical", "High", "Medium", "—")
+SEVS = ("Critical", "High", "Medium", "Low", "—")
 DATE = r"\d{4}-\d{2}-\d{2}"
 META = re.compile(
     rf"Sev: (?P<sev>\S+) · State: (?P<state>\S+) · Found: (?P<found>{DATE})"
@@ -96,7 +96,7 @@ for bid, b in bugs.items():
         continue
     sev, state, solved, fix = meta["sev"], meta["state"], meta["solved"], meta["fix"] or ""
     if sev not in SEVS:
-        problems.append(f"{bid}: Sev must be Critical, High, Medium or —, got '{sev}'")
+        problems.append(f"{bid}: Sev must be Critical, High, Medium, Low or —, got '{sev}'")
     if state not in ("Open", "Solved"):
         problems.append(f"{bid}: State must be Open or Solved, got '{state}'")
     if state == "Solved" and (not solved or not re.search(r"uncommitted|\b[0-9a-f]{7,}\b", fix)):

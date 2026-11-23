@@ -36,6 +36,7 @@ spec:
               if [ -f "$f" ] && echo "$MODEL_SHA256  $f" | sha256sum -c - >/dev/null 2>&1; then
                 echo "model cached: $f verified, no download"; exit 0
               fi
+              if [ -z "$MODEL_URL" ]; then echo "volume bound; the model is copied in from the host (air-gapped VM)"; exit 0; fi
               echo "model missing or corrupt: downloading $MODEL_URL"
               rm -f "$f.part"
               curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 --retry 5 --retry-delay 5 -o "$f.part" "$MODEL_URL"
@@ -43,7 +44,7 @@ spec:
               mv "$f.part" "$f"
               echo "model downloaded: $f"
           env:
-            - {name: MODEL_URL, value: "{{ llm_model_url }}"}
+            - {name: MODEL_URL, value: "{{ '' if llm_app_model_from_host | bool else llm_model_url }}"}
             - {name: MODEL_SHA256, value: "{{ llm_model_sha256 }}"}
             - {name: MODEL_PATH, value: "{{ model }}"}
           resources: {{ llm_app_init_resources | to_json }}

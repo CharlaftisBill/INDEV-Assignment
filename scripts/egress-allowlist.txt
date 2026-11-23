@@ -1,0 +1,28 @@
+# Hosts an air-gapped VM (external-vm.conf egress=host) may reach through scripts/egress-proxy.py, HTTPS only.
+# One per line; a leading dot matches subdomains. Denied hosts are logged: $TMPDIR/indev-k8s-ext-<uid>.egress.log.
+# Debian packages (the VM's own sources, then the pinned snapshot)
+deb.debian.org
+security.debian.org
+snapshot.debian.org
+# Kubernetes packages, helm, etcdctl
+pkgs.k8s.io
+.packages.k8s.io
+get.helm.sh
+github.com
+.githubusercontent.com
+# Helm charts
+docs.tigera.io
+prometheus-community.github.io
+traefik.github.io
+charts.jetstack.io
+# Container registries and their blob CDNs
+registry.k8s.io
+.registry.k8s.io
+.pkg.dev
+quay.io
+.quay.io
+registry-1.docker.io
+auth.docker.io
+production.cloudflare.docker.com
+production.cloudfront.docker.com
+ghcr.io

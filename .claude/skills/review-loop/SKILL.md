@@ -35,7 +35,7 @@ milestones are **deferred** (they concern code that doesn't exist yet and are pi
 
 Stop the loop when **both** hold:
 - this round opened **no new in-scope** Critical/High/Medium bugs (new deferred bugs don't block the stop), and
-- no in-scope Open bugs remain except stuck ones.
+- no in-scope Open Critical/High/Medium bugs remain except stuck ones (Low bugs are logged and fixed when chosen, but never block the stop).
 
 ### C. Fix
 While there are in-scope, Open, non-stuck bugs: run the **fix-next-bug** skill (one bug per call; it filters to in-scope bugs,

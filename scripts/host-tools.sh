@@ -49,6 +49,9 @@ report() {  # report STATUS REQUIRED(1/0) NAME DETAIL [FIX]
 
 # ---------------------------------------------------------------- repo-local tools (.tools/bin)
 TOOL_LIST="python kubectl jq limactl shellcheck"
+# NO_LIMA=1 (make deps NO_LIMA=1) or an external-vm.conf: no Lima, no QEMU.
+no_lima() { [[ "${NO_LIMA:-0}" == 1 || -f "$ROOT/external-vm.conf" ]]; }
+if no_lima; then TOOL_LIST="python kubectl jq shellcheck"; fi
 tool_bin() { case "$1" in python) echo python3.14 ;; *) echo "$1" ;; esac; }
 tool_pin_key() { case "$1" in limactl) echo lima ;; *) echo "$1" ;; esac; }
 tool_want() { local v; v="$(pin "host_$(tool_pin_key "$1")_version")"; echo "${v#v}"; }
@@ -117,6 +120,7 @@ qemu_ok() {
 }
 limactl_bin() { if [[ -x "$BIN/limactl" ]]; then echo "$BIN/limactl"; else command -v limactl 2>/dev/null || true; fi; }
 vm_status() {
+  [[ -f "$ROOT/external-vm.conf" ]] && { echo absent; return 0; }
   local l; l="$(limactl_bin)"; [[ -n "$l" ]] || { echo absent; return 0; }
   local s; s="$("$l" list --format '{{.Status}}' "$VM" 2>/dev/null || true)"
   echo "${s:-absent}"
@@ -128,9 +132,19 @@ check_state() {  # check_state REQUIRE_VM(1/0) REQUIRE_HOSTS(1/0)
   else report MISSING "$need_hosts" "/etc/hosts entry" "$(hosts_any && echo "incomplete: needs the 127.0.0.1 and ::1 lines" || echo "needed for https://llm.local")" "make deps (or scripts/hosts-entry.sh --apply)"; fi
   if port_ok; then report OK 1 "port 443 forwarding" "$([[ $OS == darwin ]] && echo "macOS allows unprivileged binds" || echo "ip_unprivileged_port_start=$(port_start)")"
   else report MISSING 1 "port 443 forwarding" "net.ipv4.ip_unprivileged_port_start=$(port_start) (Lima can't bind 443/80)" "make deps (or sudo sysctl -w net.ipv4.ip_unprivileged_port_start=80)"; fi
-  if [[ "$OS" == linux ]]; then
+  if [[ "$OS" == linux ]] && ! no_lima; then
     if qemu_ok; then report OK 1 "qemu" "$(command -v qemu-img)"
     else report MISSING 1 "qemu" "Lima needs QEMU on Linux" "make deps (or $(pkg_hint "$(qemu_pkgs)"))"; fi
+  fi
+  if [[ -f "$ROOT/external-vm.conf" ]]; then
+    if "$ROOT/scripts/external.sh" reach; then report OK "$need_vm" "external VM" "reachable over SSH (external-vm.conf)"
+    else report MISSING "$need_vm" "external VM" "not reachable over SSH" "check external-vm.conf, then make vm-up"; fi
+    local sched; if sched="$("$ROOT/scripts/external.sh" backups-schedule status 2>/dev/null)"; then report OK 0 "snapshot pull" "$sched"
+    else report MISSING 0 "snapshot pull" "snapshots stay on the VM until pulled (requirement 7)" "make tunnel (or make vm-up)"; fi
+    return 0
+  fi
+  if "$ROOT/scripts/external.sh" tunnel running 2>/dev/null; then  # B-064: left from external-vm.conf, holds Lima's ports
+    report "IN USE" 1 "own-VM tunnel" "still running without external-vm.conf (holds 443/80/6443)" "make tunnel-stop"
   fi
   st="$(vm_status)"
   case "$st" in
@@ -224,7 +238,7 @@ cmd_deps() {
   collections_ok || plan+=("install pinned Ansible collections into ansible/collections")
   hooks_ok || plan+=("git config core.hooksPath .githooks")
   hosts_ok || sudo_steps+=(hosts)
-  qemu_ok || sudo_steps+=(qemu)
+  qemu_ok || no_lima || sudo_steps+=(qemu)
   port_ok || sudo_steps+=(port)
   for t in ${sudo_steps[@]+"${sudo_steps[@]}"}; do
     case "$t" in
@@ -301,7 +315,10 @@ cmd_uninstall() {
   elif [[ "$YES" == 1 ]]; then echo "YES=1: removing every step below without asking."
   else echo "Each step asks first (y/N)."; fi
   local st; st="$(vm_status)"
-  if [[ "$st" != absent ]]; then step "Lima VM '$VM' ($st): the whole cluster, its disk and etcd" "limactl delete --force $VM" delete_vm
+  if [[ -f "$ROOT/external-vm.conf" ]]; then
+    echo "- external VM (external-vm.conf): yours, not touched. Its cluster stays; reinstall Debian 13 to wipe it."
+    if "$ROOT/scripts/external.sh" tunnel running >/dev/null 2>&1; then step "SSH tunnels, proxies and snapshot pull for the external VM" "make tunnel-stop" "$ROOT/scripts/external.sh" tunnel stop; fi
+  elif [[ "$st" != absent ]]; then step "Lima VM '$VM' ($st): the whole cluster, its disk and etcd" "limactl delete --force $VM" delete_vm
   else echo "- VM '$VM': not present"; fi
   if hosts_any; then step "/etc/hosts lines '$HOSTS_MARKER' (sudo)" "scripts/hosts-entry.sh --remove" "$ROOT/scripts/hosts-entry.sh" --remove
   else echo "- /etc/hosts lines: not present"; fi

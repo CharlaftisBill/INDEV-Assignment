@@ -28,7 +28,12 @@ fail() { FAIL=$((FAIL + 1)); printf '  %sFAIL%s [%s] %s\n' "$R" "$N" "$CURRENT_R
 skip() { SKIP=$((SKIP + 1)); printf '  %sSKIP%s [%s] %s\n' "$Y" "$N" "$CURRENT_REQ" "$1"; }
 
 # Helpers
-node()  { limactl shell "$VM" -- sudo "$@"; }                      # run a command on the node
+EXT="$ROOT/scripts/external.sh"
+if "$EXT" enabled 2>/dev/null; then EXTERNAL=1; else EXTERNAL=0; fi          # your own VM over SSH (external-vm.conf) instead of Lima
+if [[ $EXTERNAL == 1 ]]; then node() { "$EXT" run "$@"; }; else node() { limactl shell "$VM" -- sudo "$@"; }; fi  # run a command on the node
+# Air-gapped own VM (egress=host or proxy): no internet from pods, the model comes from the host (no egress policies in llm).
+AIRGAP=1  # the VM is always air-gapped (Lima or own VM): no internet from it or its pods; the model comes from the host
+vm_present() { if [[ $EXTERNAL == 1 ]]; then "$EXT" reach; else limactl list --quiet 2>/dev/null | grep -qx "$VM"; fi; }
 k()     { kubectl --kubeconfig "$KUBECONFIG_ADMIN" "$@"; }         # admin kubectl from the host
 kop()   { kubectl --kubeconfig "$KUBECONFIG_OPERATOR" "$@"; }      # operator kubectl from the host
 need_cluster() {
@@ -38,9 +43,17 @@ need_cluster() {
 # ------------------------------------------------------------------ checks
 check_1() { # OS preparation, containerd, pinned packages
   CURRENT_REQ=1
-  if ! limactl list --quiet 2>/dev/null | grep -qx "$VM"; then fail "Lima VM '$VM' not found"; return 0; fi
+  if ! vm_present; then fail "VM not reachable ($([[ $EXTERNAL == 1 ]] && echo "ssh, external-vm.conf" || echo "Lima '$VM'"))"; return 0; fi
 
   if [[ "$(node systemctl is-active containerd 2>&1)" == "active" ]]; then pass "containerd is active"; else fail "containerd is not active"; fi
+  # Air gap: the firewall is loaded, and the VM cannot open a connection to the internet itself.
+  if [[ "$(node systemctl is-active indev-airgap 2>&1)" == "active" ]] && node nft list table inet indev_airgap >/dev/null 2>&1; then pass "air-gap firewall indev-airgap is active (nft table inet indev_airgap)"; else fail "air-gap firewall indev-airgap is not active"; fi
+  local direct; direct="$(node python3 -c 'import socket
+try:
+    socket.create_connection(("1.1.1.1", 443), timeout=5); print("OPEN")
+except OSError as e:
+    print("BLOCKED", type(e).__name__)' 2>&1)"
+  if [[ "$direct" == BLOCKED* ]]; then pass "the VM cannot reach the internet itself (1.1.1.1:443: ${direct#BLOCKED })"; else fail "the VM reaches the internet directly: $direct"; fi
 
   local cfg; cfg="$(node containerd config dump 2>&1)"
   if grep -Eq '^[[:space:]]*SystemdCgroup = true' <<<"$cfg"; then pass "containerd effective config: SystemdCgroup = true"; else fail "SystemdCgroup is not true in 'containerd config dump'"; fi
@@ -272,19 +285,28 @@ check_3b() { # app pods accept only the traffic they need: NetworkPolicies in ap
 
   # --- the policy set: default-deny both ways, DNS, ingress from the node IP only, HTTPS-only egress for the downloader
   local names; names="$(k get networkpolicies -n "$ns" -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>&1 | sort | tr '\n' ' ')"
-  if [[ "$names" == "allow-dns allow-model-download allow-traefik-ingress default-deny " ]]; then pass "$ns has exactly default-deny, allow-dns, allow-traefik-ingress, allow-model-download"; else fail "$ns NetworkPolicies: $names"; fi
+  if [[ $AIRGAP == 1 ]]; then
+    if [[ "$names" == "allow-traefik-ingress default-deny " ]]; then pass "$ns has exactly default-deny, allow-traefik-ingress (air-gapped: the model comes from the host, no egress allows)"; else fail "$ns NetworkPolicies: $names"; fi
+  elif [[ "$names" == "allow-dns allow-model-download allow-traefik-ingress default-deny " ]]; then pass "$ns has exactly default-deny, allow-dns, allow-traefik-ingress, allow-model-download"; else fail "$ns NetworkPolicies: $names"; fi
   out="$(k get networkpolicies default-deny -n "$ns" -o jsonpath='{.spec.podSelector} {.spec.policyTypes} {.spec.ingress} {.spec.egress}' 2>&1)"
   if [[ "$out" == '{} ["Ingress","Egress"]  ' ]]; then pass "default-deny selects every pod and denies Ingress + Egress (no rules)"; else fail "default-deny: $out"; fi
   local node_ip; node_ip="$(k get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}' 2>&1)"
   out="$(k get networkpolicies allow-traefik-ingress -n "$ns" -o jsonpath='{.spec.policyTypes} {.spec.ingress[*].from[*].ipBlock.cidr} {.spec.ingress[*].from[*].podSelector} {.spec.ingress[*].ports[*].port} {.spec.ingress[*].ports[*].protocol}' 2>&1)"
   if [[ "$out" == "[\"Ingress\"] $node_ip/32  $LLM_PORT TCP" ]]; then pass "allow-traefik-ingress: only node IP $node_ip/32 (hostNetwork Traefik, ADR 0003) on TCP $LLM_PORT"; else fail "allow-traefik-ingress: $out"; fi
+  if [[ $AIRGAP == 1 ]]; then
+    if ! k get networkpolicies allow-model-download -n "$ns" >/dev/null 2>&1; then pass "no allow-model-download: no pod in $ns gets HTTPS egress"; else fail "allow-model-download exists on an air-gapped VM"; fi
+    if ! k get networkpolicies allow-dns -n "$ns" >/dev/null 2>&1; then pass "no allow-dns: no pod in $ns gets DNS"; else fail "allow-dns exists on an air-gapped VM"; fi
+  else
   out="$(k get networkpolicies allow-model-download -n "$ns" -o jsonpath='{.spec.podSelector.matchLabels} {.spec.policyTypes} {.spec.egress[*].to[*].ipBlock.cidr} {.spec.egress[*].ports[*].port} {.spec.egress[*].ports[*].protocol} {.spec.egress[*].to[*].ipBlock.except}' 2>&1)"
   if [[ "$out" == "{\"app.kubernetes.io/component\":\"$LLM_FETCH\"} [\"Egress\"] 0.0.0.0/0 443 TCP "*10.0.0.0/8*100.64.0.0/10*172.16.0.0/12*192.168.0.0/16*169.254.0.0/16* ]]; then pass "allow-model-download: only $LLM_FETCH Job pods, TCP 443 to public addresses (private, CGNAT, link-local excluded); the server pod is not selected"; else fail "allow-model-download: $out"; fi
   out="$(k get networkpolicies allow-dns -n "$ns" -o jsonpath='{.spec.podSelector.matchLabels} {.spec.egress[*].to[*].namespaceSelector.matchLabels} {.spec.egress[*].to[*].podSelector.matchLabels} {.spec.egress[*].ports[*].port}' 2>&1)"
   if [[ "$out" == "{\"app.kubernetes.io/component\":\"$LLM_FETCH\"} "'{"kubernetes.io/metadata.name":"kube-system"} {"k8s-app":"kube-dns"} 53 53' ]]; then pass "allow-dns: only $LLM_FETCH Job pods, CoreDNS in kube-system on port 53 only (server pod gets no egress)"; else fail "allow-dns: $out"; fi
+  fi
 
   # --- enforcement, from probe pods (pinned busybox, PSA restricted): one in another namespace, one in llm without the app label
-  local llm_ip dns_ip busy ext=1.1.1.1
+  # ctl: a target any pod reaches without a policy, so a block is the policy's doing. Air-gapped: the node's API port.
+  local llm_ip dns_ip busy ext=1.1.1.1 ctl=1.1.1.1 ctl_port=80
+  if [[ $AIRGAP == 1 ]]; then ctl="$node_ip"; ctl_port=6443; fi
   llm_ip="$(k get pod "$(llm_pod)" -n "$ns" -o jsonpath='{.status.podIP}' 2>&1)"
   if [[ ! "$llm_ip" =~ ^[0-9.]+$ ]]; then fail "llama.cpp pod IP not found: $llm_ip"; return 0; fi
   dns_ip="$(k get pods -n kube-system -l k8s-app=kube-dns -o jsonpath='{.items[0].status.podIP}' 2>&1)"
@@ -311,7 +333,7 @@ spec:
       command:
         - sh
         - -c
-        - "nc -w 3 $dns_ip 9153 </dev/null && echo CTRL_DNS_OPEN; nc -w 3 $ext 80 </dev/null && echo CTRL_EXT_OPEN; nc -w 3 $llm_ip $LLM_PORT </dev/null && echo POD_OPEN || echo POD_BLOCKED; nc -w 3 $LLM_NAME.$ns.svc $LLM_PORT </dev/null && echo SVC_OPEN || echo SVC_BLOCKED"
+        - "nc -w 3 $dns_ip 9153 </dev/null && echo CTRL_DNS_OPEN; nc -w 3 $ctl $ctl_port </dev/null && echo CTRL_EXT_OPEN; nc -w 3 $llm_ip $LLM_PORT </dev/null && echo POD_OPEN || echo POD_BLOCKED; nc -w 3 $LLM_NAME.$ns.svc $LLM_PORT </dev/null && echo SVC_OPEN || echo SVC_BLOCKED"
       resources: {requests: {cpu: 10m, memory: 8Mi}}
       securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
 ---
@@ -328,7 +350,7 @@ spec:
       command:
         - sh
         - -c
-        - "nc -w 3 $llm_ip $LLM_PORT </dev/null && echo SAMENS_OPEN || echo SAMENS_BLOCKED; nc -w 3 $dns_ip 9153 </dev/null && echo DNSMETRICS_OPEN || echo DNSMETRICS_BLOCKED; nc -w 3 $ext 80 </dev/null && echo EXT_OPEN || echo EXT_BLOCKED; nslookup -timeout=3 kubernetes.default.svc.cluster.local >/dev/null 2>&1 && echo DNS_OK || echo DNS_FAIL"
+        - "nc -w 3 $llm_ip $LLM_PORT </dev/null && echo SAMENS_OPEN || echo SAMENS_BLOCKED; nc -w 3 $dns_ip 9153 </dev/null && echo DNSMETRICS_OPEN || echo DNSMETRICS_BLOCKED; nc -w 3 $ctl $ctl_port </dev/null && echo EXT_OPEN || echo EXT_BLOCKED; nslookup -timeout=3 kubernetes.default.svc.cluster.local >/dev/null 2>&1 && echo DNS_OK || echo DNS_FAIL"
       resources: {requests: {cpu: 10m, memory: 8Mi}}
       securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
 ---
@@ -362,13 +384,17 @@ MANIFEST
   lf="$(k logs verify-3b-fetch -n "$ns" 2>&1 | tr '\n' ' ')"
   lo="$(k logs verify-3b-out -n "$VERIFY_NS" 2>&1 | tr '\n' ' ')"
   li="$(k logs verify-3b-in -n "$ns" 2>&1 | tr '\n' ' ')"
-  if [[ "$lo" == *CTRL_DNS_OPEN* && "$lo" == *CTRL_EXT_OPEN* ]]; then pass "probe control: a pod outside $ns reaches CoreDNS:9153 and $ext:80 (the probes can connect)"; else fail "probe control ($phase_out): ${lo:0:200}"; fi
+  if [[ "$lo" == *CTRL_DNS_OPEN* && "$lo" == *CTRL_EXT_OPEN* ]]; then pass "probe control: a pod outside $ns reaches CoreDNS:9153 and $ctl:$ctl_port (the probes can connect)"; else fail "probe control ($phase_out): ${lo:0:200}"; fi
   if [[ "$lo" == *POD_BLOCKED* && "$lo" != *POD_OPEN* ]]; then pass "ingress denied: a pod in $VERIFY_NS cannot reach llama.cpp $llm_ip:$LLM_PORT"; else fail "pod-IP probe from another namespace ($phase_out): ${lo:0:200}"; fi
   if [[ "$lo" == *SVC_BLOCKED* && "$lo" != *SVC_OPEN* ]]; then pass "ingress denied: a pod in $VERIFY_NS cannot reach the Service $LLM_NAME.$ns:$LLM_PORT"; else fail "Service probe from another namespace ($phase_out): ${lo:0:200}"; fi
   if [[ "$li" == *SAMENS_BLOCKED* && "$li" != *SAMENS_OPEN* ]]; then pass "default-deny: an unlabelled pod in $ns cannot reach llama.cpp either"; else fail "same-namespace probe ($phase_in): ${li:0:200}"; fi
-  if [[ "$li" == *DNSMETRICS_BLOCKED* && "$li" == *EXT_BLOCKED* && "$li" == *DNS_FAIL* && "$li" != *_OPEN* && "$li" != *DNS_OK* ]]; then pass "egress denied: an unlabelled pod in $ns has no egress at all (not CoreDNS:53/9153, not $ext:80)"; else fail "egress probe from $ns ($phase_in): ${li:0:200}"; fi
+  if [[ "$li" == *DNSMETRICS_BLOCKED* && "$li" == *EXT_BLOCKED* && "$li" == *DNS_FAIL* && "$li" != *_OPEN* && "$li" != *DNS_OK* ]]; then pass "egress denied: an unlabelled pod in $ns has no egress at all (not CoreDNS:53/9153, not $ctl:$ctl_port)"; else fail "egress probe from $ns ($phase_in): ${li:0:200}"; fi
+  if [[ $AIRGAP == 1 ]]; then
+    if [[ "$lf" == *FETCH_HTTPS_BLOCKED* && "$lf" == *FETCH_DNS_FAIL* && "$lf" == *FETCH_NODE_BLOCKED* && "$lf" == *FETCH_POD_BLOCKED* && "$lf" == *FETCH_LLM_BLOCKED* && "$lf" != *_OPEN* ]]; then pass "air-gapped: a pod with the $LLM_FETCH Job label has no egress either (no DNS, node IP:6443, pod IPs, llama.cpp all blocked)"; else fail "Job-labelled probe, air-gapped ($phase_fetch): ${lf:0:250}"; fi
+  else
   if [[ "$lf" == *FETCH_HTTPS_OPEN* && "$lf" == *FETCH_DNS_OK* ]]; then pass "positive control: a pod with the $LLM_FETCH Job label reaches $ext:443 and resolves names (probe method works)"; else fail "Job-labelled probe ($phase_fetch): ${lf:0:250}"; fi
   if [[ "$lf" == *FETCH_80_BLOCKED* && "$lf" == *FETCH_NODE_BLOCKED* && "$lf" == *FETCH_POD_BLOCKED* && "$lf" == *FETCH_LLM_BLOCKED* ]]; then pass "the Job's egress is HTTPS only: $ext:80, node IP:6443, a pod IP and llama.cpp are blocked from the Job label too"; else fail "Job-labelled probe beyond 443 ($phase_fetch): ${lf:0:250}"; fi
+  fi
   cleanup_3b; trap - EXIT
 
   # --- from the llama.cpp pod itself (image ships curl): no egress at all, not even HTTPS or DNS (B-044)
@@ -1196,20 +1222,43 @@ check_7() { # scheduled etcd snapshots stored outside the cluster (M7, B-010)
     fail "etcd_backup defaults or group_vars keys not found"; return 0
   fi
   hstat() { stat -c '%s %Y' "$1" 2>/dev/null || stat -f '%z %m' "$1" 2>/dev/null; } # size mtime (GNU, then BSD)
+  local hbk="$ROOT/backups"; [[ $EXTERNAL == 1 ]] && hbk="$ROOT/backups/external"  # own VM: its own folder (B-069)
+  # Your own VM over SSH has no host mount: a loop on this host (started with the tunnel) pulls the VM's backup_dir into
+  # ./backups every 30 min (B-063). Checked before this check pulls, counting only copies of snapshots that are on the VM
+  # (./backups may also hold Lima's), so a missing loop or a stale copy cannot pass.
+  if [[ $EXTERNAL == 1 ]]; then
+    bdir="$("$EXT" backup-dir)"
+    local sched; if sched="$("$EXT" backups-schedule status 2>&1)"; then pass "snapshots leave the VM on a schedule: $sched"; else fail "no scheduled pull on this host, snapshots stay on the VM (make tunnel)"; fi
+    local vm_names copy copy_m age=-1 t
+    vm_names="$(node find "$bdir" -maxdepth 1 -name "$glob" -printf '%f\n' 2>/dev/null | sort)"
+    for t in $(seq 1 15); do  # the loop's first pull may still be running (the tunnel, and so the loop, just started)
+      copy=""; while IFS= read -r f; do [[ -n "$f" && -f "$hbk/$f" ]] && copy="$f"; done <<<"$vm_names"
+      if [[ -n "$copy" ]]; then read -r _ copy_m <<<"$(hstat "$hbk/$copy")"; age=$(( $(date +%s) - copy_m )); fi
+      [[ $age -ge 0 && $age -le $stale ]] && break; sleep 2
+    done
+    if [[ $age -ge 0 && $age -le $stale ]]; then pass "before this check pulled: host copy of the VM's $copy is ${age}s old (limit ${stale}s), so the scheduled pull works"
+    else fail "before this check pulled: no host copy of a VM snapshot younger than ${stale}s (log: .cache/backups-pull.log)"; fi
+    "$EXT" backups-pull >/dev/null 2>&1 || fail "could not pull snapshots from the VM"
+  fi
 
   # --- Timer and unit
   if [[ "$(node systemctl is-active "$unit.timer" 2>&1)" == "active" ]]; then pass "$unit.timer is active"; else fail "$unit.timer is not active"; fi
   if [[ "$(node systemctl is-enabled "$unit.timer" 2>&1)" == "enabled" ]]; then pass "$unit.timer is enabled"; else fail "$unit.timer is not enabled"; fi
   if node systemctl cat "$unit.timer" 2>&1 | grep -q '^Persistent=true'; then pass "timer is Persistent (catches up after downtime)"; else fail "timer is not Persistent"; fi
-  if [[ "$(node systemctl show "$unit.service" -p RequiresMountsFor --value 2>&1)" == *"$bdir"* ]]; then pass "$unit.service has RequiresMountsFor=$bdir"; else fail "$unit.service lacks RequiresMountsFor=$bdir (B-010)"; fi
+  if [[ $EXTERNAL == 1 ]]; then pass "external VM: no host mount, $unit.service writes to $bdir on the VM (the host pulls it into ./backups/external)"
+  elif [[ "$(node systemctl show "$unit.service" -p RequiresMountsFor --value 2>&1)" == *"$bdir"* ]]; then pass "$unit.service has RequiresMountsFor=$bdir"; else fail "$unit.service lacks RequiresMountsFor=$bdir (B-010)"; fi
   if [[ "$(node systemctl show "$unit.service" -p Result --value 2>&1)" == "success" ]]; then pass "last $unit.service run succeeded"; else fail "last $unit.service run did not succeed (journalctl -u $unit)"; fi
 
   # --- B-010: the node directory is the host mount, and the script refuses to write anywhere else
   local fs; fs="$(node findmnt -n -o FSTYPE -M "$bdir" 2>&1)"
-  if [[ -n "$fs" && ",$fstype," == *",$fs,"* ]]; then pass "$bdir on the node is a $fs mountpoint (allowed: $fstype)"; else fail "$bdir on the node: '$fs' (want a mountpoint of: $fstype)"; fi
+  if [[ $EXTERNAL == 1 ]]; then pass "external VM: $bdir is a plain directory on the VM (outside Kubernetes, mount check not applicable)"
+  elif [[ -n "$fs" && ",$fstype," == *",$fs,"* ]]; then pass "$bdir on the node is a $fs mountpoint (allowed: $fstype)"; else fail "$bdir on the node: '$fs' (want a mountpoint of: $fstype)"; fi
   local out rc
+  if [[ $EXTERNAL == 1 ]]; then out=""; rc=1; else
   out="$(node env BACKUP_DIR=/var/tmp KEEP=1 TEXTFILE_DIR=/var/tmp METRICS_FILE=check7.prom MOUNT_FSTYPES="$fstype" ENDPOINT=x PKI_DIR=x SNAPSHOT_GLOB="$glob" "$script" 2>&1)"; rc=$?
-  if [[ $rc -ne 0 && "$out" == *"refusing to write"* ]] && ! node sh -c 'ls /var/tmp/etcd-snapshot-* /var/tmp/.etcd-snapshot-* /var/tmp/check7.prom' >/dev/null 2>&1; then
+  fi
+  if [[ $EXTERNAL == 1 ]]; then pass "mount guard not applicable on an external VM"
+  elif [[ $rc -ne 0 && "$out" == *"refusing to write"* ]] && ! node sh -c 'ls /var/tmp/etcd-snapshot-* /var/tmp/.etcd-snapshot-* /var/tmp/check7.prom' >/dev/null 2>&1; then
     pass "the script refuses to write to a directory that is not a host mount (nothing written to the VM disk)"
   else fail "the script did not refuse a non-mount directory (rc=$rc): ${out:0:200}"; fi
 
@@ -1223,23 +1272,27 @@ check_7() { # scheduled etcd snapshots stored outside the cluster (M7, B-010)
   # --- Snapshots in host ./backups, the same files on the node (proves the mount), fresh, pruned
   local f name host_names="" latest="" now; now="$(date +%s)"
   shopt -s nullglob
-  for f in "$ROOT"/backups/$glob; do
+  for f in "$hbk"/$glob; do
     name="${f##*/}"; host_names+="$name"$'\n'; latest="$name"
   done
   shopt -u nullglob
   host_names="$(sort <<<"${host_names%$'\n'}")"
   if [[ -z "$latest" ]]; then fail "no snapshot ($glob) in host ./backups"; else
     latest="$(tail -n 1 <<<"$host_names")"
-    local hs hm age; read -r hs hm <<<"$(hstat "$ROOT/backups/$latest")"
+    local hs hm age; read -r hs hm <<<"$(hstat "$hbk/$latest")"
     age=$((now - hm))
     if [[ "$hs" -gt 1000000 ]]; then pass "latest host snapshot $latest is $hs bytes"; else fail "latest host snapshot $latest is only $hs bytes"; fi
     if [[ $age -le $stale ]]; then pass "latest snapshot is ${age}s old (limit ${stale}s = 2x schedule)"; else fail "latest snapshot is ${age}s old (limit ${stale}s)"; fi
     local ns_ nm; read -r ns_ nm <<<"$(node stat -c '%s %Y' "$bdir/$latest" 2>&1)"
-    if [[ "$ns_" == "$hs" && $((nm - hm)) -ge -2 && $((nm - hm)) -le 2 ]]; then pass "the same file ($hs bytes, same mtime) is visible on the node at $bdir: it is the host mount"
+    if [[ "$ns_" == "$hs" && $((nm - hm)) -ge -2 && $((nm - hm)) -le 2 ]]; then pass "the same file ($hs bytes, same mtime) is on the node at $bdir and in host ./backups ($([[ $EXTERNAL == 1 ]] && echo pulled || echo "it is the host mount"))"
     else fail "host $latest ($hs B, $hm) differs from the node's view ($ns_ B, $nm)"; fi
     local node_names; node_names="$(node find "$bdir" -maxdepth 1 -name "$glob" -printf '%f\n' 2>&1 | sort)"
-    if [[ "$node_names" == "$host_names" ]]; then pass "host ./backups and $bdir list the same $(wc -l <<<"$host_names" | tr -d ' ') snapshot(s)"; else fail "host and node snapshot lists differ"; fi
-    if [[ "$(wc -l <<<"$host_names" | tr -d ' ')" -le "$keep" ]]; then pass "at most $keep snapshots kept (retention)"; else fail "more than $keep snapshots kept"; fi
+    if [[ $EXTERNAL == 1 ]] && [[ -z "$(comm -23 <(echo "$node_names") <(echo "$host_names"))" ]]; then pass "every snapshot on the VM is also in host ./backups"
+    elif [[ "$node_names" == "$host_names" ]]; then pass "host ./backups and $bdir list the same $(wc -l <<<"$host_names" | tr -d ' ') snapshot(s)"; else fail "host and node snapshot lists differ"; fi
+    if [[ $EXTERNAL == 1 ]]; then  # retention counted on the VM (the host keeps the same newest N)
+      local n_node; n_node="$(wc -l <<<"$node_names" | tr -d ' ')"
+      if [[ "$n_node" -le "$keep" ]]; then pass "at most $keep snapshots kept on the VM ($n_node in $bdir)"; else fail "$n_node snapshots in $bdir on the VM (max $keep)"; fi
+    elif [[ "$(wc -l <<<"$host_names" | tr -d ' ')" -le "$keep" ]]; then pass "at most $keep snapshots kept (retention)"; else fail "more than $keep snapshots kept"; fi
     if [[ "$(node find "$bdir" -maxdepth 1 -name '.etcd-snapshot-*.tmp*' 2>&1)" == "" ]]; then pass "no half-written tmp snapshot left behind"; else fail "tmp snapshot left in $bdir"; fi
     local st; st="$(node etcdutl snapshot status "$bdir/$latest" --write-out=json 2>&1)"
     if jq -e '.revision > 0 and .totalKey > 0 and (.hash | type == "number")' >/dev/null 2>&1 <<<"$st"; then pass "etcdutl snapshot status OK for $latest (revision $(jq .revision <<<"$st"), $(jq .totalKey <<<"$st") keys)"
@@ -1676,8 +1729,8 @@ if [[ ${#ids[@]} -eq 0 ]]; then
   for id in $ALL_IDS; do ids+=("$id"); done
 fi
 
-if ! limactl list --quiet 2>/dev/null | grep -qx "$VM"; then
-  echo "${Y}warning:${N} Lima VM '$VM' not found; node-side checks will fail or skip."
+if ! vm_present; then
+  echo "${Y}warning:${N} the VM ($([[ $EXTERNAL == 1 ]] && echo "external-vm.conf" || echo "Lima '$VM'")) is not reachable; node-side checks will fail or skip."
 fi
 
 for id in "${ids[@]}"; do

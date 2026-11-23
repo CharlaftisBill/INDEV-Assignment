@@ -15,6 +15,18 @@
     force: true
     template: networkpolicies.yaml.j2
 
+# Model from the host: the Job needs no DNS or HTTPS, so these two allows go (the template leaves them out).
+- name: Remove the model-download egress policies (model comes from the host)
+  kubernetes.core.k8s:
+    kubeconfig: "{{ llm_app_kubeconfig }}"
+    state: absent
+    api_version: networking.k8s.io/v1
+    kind: NetworkPolicy
+    name: "{{ item }}"
+    namespace: "{{ llm_app_namespace }}"
+  loop: [allow-dns, allow-model-download]
+  when: llm_app_model_from_host | bool
+
 # No wait: the local-path PVC binds when the pod is scheduled (WaitForFirstConsumer).
 - name: Create the model PVC on the default StorageClass
   kubernetes.core.k8s:
@@ -49,7 +61,6 @@
   ansible.builtin.stat:
     path: "{{ llm_app_model_host_path }}"
     checksum_algorithm: sha256
-  become: true
   register: llm_app_model_stat
   when: llm_app_model_host_path | length > 0
 
@@ -69,6 +80,28 @@
 - name: Fetch the model with a one-shot Job
   when: not (llm_app_model_stat.stat.exists | default(false)) or llm_app_model_stat.stat.checksum != llm_model_sha256
   block:
+    - name: Create the model cache on the host (model from host)
+      ansible.builtin.file:
+        path: "{{ llm_app_model_cache | dirname }}"
+        state: directory
+        mode: "0755"
+      delegate_to: localhost
+      become: false
+      when: llm_app_model_from_host | bool
+
+    # The host is online even when the VM is not; checksum-pinned, kept in .cache/ for rebuilds. Direct, not via the egress proxy.
+    - name: Download the model on the host (model from host)
+      ansible.builtin.get_url:
+        url: "{{ llm_model_url }}"
+        dest: "{{ llm_app_model_cache }}"
+        checksum: "sha256:{{ llm_model_sha256 }}"
+        mode: "0644"
+        timeout: 60
+      environment: {http_proxy: "", https_proxy: "", HTTP_PROXY: "", HTTPS_PROXY: ""}
+      delegate_to: localhost
+      become: false
+      when: llm_app_model_from_host | bool
+
     - name: Create the model-fetch Job
       kubernetes.core.k8s:
         kubeconfig: "{{ llm_app_kubeconfig }}"
@@ -113,6 +146,34 @@
         delete_options: {propagationPolicy: Foreground}
         wait: true
         wait_timeout: 120
+
+    - name: Copy the model from the host into the volume (model from host)
+      when: llm_app_model_from_host | bool
+      block:
+        - name: Read the model PVC after the Job bound it
+          kubernetes.core.k8s_info:
+            kubeconfig: "{{ llm_app_kubeconfig }}"
+            api_version: v1
+            kind: PersistentVolumeClaim
+            name: "{{ llm_app_model_pvc }}"
+            namespace: "{{ llm_app_namespace }}"
+          register: llm_app_pvc
+
+        - name: Read the PersistentVolume the Job bound
+          kubernetes.core.k8s_info:
+            kubeconfig: "{{ llm_app_kubeconfig }}"
+            api_version: v1
+            kind: PersistentVolume
+            name: "{{ llm_app_pvc.resources[0].spec.volumeName }}"
+          register: llm_app_pv
+
+        - name: Copy the model into the volume
+          ansible.builtin.copy:
+            src: "{{ llm_app_model_cache }}"
+            dest: "{{ llm_app_model_host_path }}"
+            owner: "{{ llm_app_uid }}"
+            group: "{{ llm_app_uid }}"
+            mode: "0644"
 
     # A server pod stuck in Init:Error (model was missing) is in back-off: restart it now instead of waiting for the next retry.
     # It also loads a re-pinned model. Nothing to delete on a fresh VM; the Deployment rollout wait below covers readiness.

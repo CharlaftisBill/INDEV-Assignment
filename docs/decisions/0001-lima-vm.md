@@ -18,6 +18,13 @@ The VM is defined in `lima/k8s.yaml`. Lima's built-in containerd is off, so Ansi
 - Lima forwards only TCP 443, 80 and 6443. A catch-all ignore rule stops it from forwarding any other port the VM
   opens, including loopback and UDP ports (B-025, B-028).
 
+> **Amended (2026-11-22):** a reviewer can bring their own Debian 13 VM instead: `external-vm.conf` switches Ansible
+> and the checks to it over SSH, an SSH tunnel plus a loopback-only forwarder stands in for Lima's ports, and snapshots
+> are pulled with `make backups-pull` ([install guide](../install.md#your-own-debian-13-vm-over-ssh-instead-of-lima)).
+> Lima stays the default and the only path `make e2e` covers, since it can recreate the VM.
+> **Amended (2026-11-23):** every VM, Lima's included, is air-gapped (firewall from `os_prep`): its downloads go through the reviewer's machine (SSH reverse
+> tunnel to an allowlisting proxy) and the model is copied in ([install guide](../install.md#internet-access-from-the-vm)).
+
 ## Alternatives
 | Option | Why not |
 |---|---|

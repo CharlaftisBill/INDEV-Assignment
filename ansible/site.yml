@@ -6,6 +6,7 @@
   hosts: k8s
   gather_facts: true
   tags: [always]
+  environment: "{{ vm_proxy_env }}"
   tasks:
     - name: Assert the VM matches the assignment environment
       ansible.builtin.assert:
@@ -23,6 +24,7 @@
 - name: Build the single-node cluster
   hosts: k8s
   gather_facts: true
+  environment: "{{ vm_proxy_env }}"
   roles:
     - { role: os_prep, tags: [os_prep] }
     - { role: containerd, tags: [containerd] }

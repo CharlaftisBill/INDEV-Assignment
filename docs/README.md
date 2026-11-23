@@ -5,6 +5,7 @@
 | … | Read |
 |---|---|
 | set up my Mac, or remove everything | [Install and uninstall](install.md) |
+| use a Debian 13 VM I already have | [Your own VM](install.md#your-own-debian-13-vm-over-ssh-instead-of-lima) |
 | run the usual commands, use kubectl, open Grafana | [Daily use](usage.md) |
 | see how the pieces fit together | [Architecture](architecture.md) |
 | know which version of something runs | [Versions](versions.md) |
@@ -53,7 +54,10 @@ Step-by-step tasks.
 ```
 ansible/            playbook (site.yml), roles, inventory, pinned versions
 lima/k8s.yaml       VM definition
-scripts/            verify.sh (requirement checks), host-tools.sh (doctor/deps/uninstall), hosts-entry.sh
+external-vm.conf.example   copy to external-vm.conf to use your own VM over SSH instead of Lima
+scripts/            verify.sh (requirement checks), host-tools.sh (doctor/deps/uninstall), hosts-entry.sh,
+                    external.sh + loopback-forward.py + egress-proxy.py, egress-allowlist.txt
+                    (own VM: SSH, tunnels, air-gapped downloads, backups-pull)
 certs/ca.crt        our CA certificate (the key is never committed)
 docs/               these docs
 backups/            etcd snapshots from the VM (gitignored)

@@ -17,6 +17,7 @@ The assignment is `k8s-single-node-assignment.md`. Project state: **`TODO.md`**;
 
 ## Environment
 - Host: Apple Silicon Mac (vz + virtiofs, arm64) or Linux amd64 (QEMU/KVM + 9p, `generic` image; B-058). VM: Lima instance `k8s` (`lima/k8s.yaml`, Debian 13, 4 CPU / 8 GiB / 40 GiB). "Mac" below means the host.
+- Own VM instead of Lima: `external-vm.conf` (gitignored) switches make, Ansible (`inventory/external.yml`) and `verify.sh` to it over SSH (`scripts/external.sh`); a tunnel replaces Lima's forwards, snapshots are pulled (`make backups-pull`). Every VM (Lima too) is air-gapped: `os_prep` firewalls it (nftables `indev-airgap`), its downloads go through the host's allowlisting proxy over `ssh -R` (`scripts/lima-egress.sh` for Lima, `egress=host|proxy` for an own VM) (`scripts/egress-proxy.py`, `scripts/egress-allowlist.txt`), the model is copied in. Guide: `docs/install.md`.
 - Ansible runs **on the Mac** and pushes over SSH (`ansible/ansible.cfg` uses `~/.lima/k8s/ssh.config`, host alias `lima-k8s`).
 - Shell in VM: `limactl shell k8s`. Admin kubeconfig (after M2): `out/admin.conf` → `kubectl --kubeconfig out/admin.conf ...`.
 - Host-forwarded ports: Mac 443, 80, 6443 only (443/80 map to Traefik's 8443/8000 in the VM). `/etc/hosts` on the Mac maps `llm.local grafana.local` to 127.0.0.1 (`scripts/hosts-entry.sh`).
@@ -47,8 +48,8 @@ The assignment is `k8s-single-node-assignment.md`. Project state: **`TODO.md`**;
 - Bug states are only **Open** or **Solved**. IDs are sequential `B-NNN`, never reused or deleted.
 - Format (defined in the `bug` skill, checked by `make lint`): an `## Open` list, then one `## M<n>` section per milestone with a block per bug: `### B-NNN · <title>` (≤ ~100 chars), a meta line (`Sev · State · Found · Solved · Fix`) and **at most 4** one-line bullets (Report, Direction or Root cause/Fix/Verification).
 - A bug becomes **Solved** only with the fixing commit hash (or `uncommitted` until committed) in its Fix field and a passing check.
-- Verifier/reviewer agents (`k8s-verifier`, `sre-reviewer`, `security-reviewer`) only *open* bugs; review findings set the Sev column and only Critical/High/Medium are logged. Fixes go through the `fix-next-bug` skill (one bug per run, reproduce → root cause → fix → verify). Use the `bug` skill to keep the format.
-- A milestone can't be ticked while Open bugs exist for it or an earlier milestone. Open bugs for later milestones are *deferred*: tracked, not worked, until their milestone becomes current.
+- Verifier/reviewer agents (`k8s-verifier`, `sre-reviewer`, `security-reviewer`) only *open* bugs; review findings set the Sev column; Critical/High/Medium/Low are all logged (Low since 2026-11-23, user). Fixes go through the `fix-next-bug` skill (one bug per run, reproduce → root cause → fix → verify). Use the `bug` skill to keep the format.
+- A milestone can't be ticked while Open Critical/High/Medium bugs exist for it or an earlier milestone (Lows don't block). Open bugs for later milestones are *deferred*: tracked, not worked, until their milestone becomes current.
 - Assumptions made where the brief is unclear, and risks the user accepts, go in `docs/assumptions.md`; implementation details go in the ADRs.
 
 ## Definition of done (per milestone)

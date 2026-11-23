@@ -45,7 +45,7 @@ change review: direct, evidence-based, no nitpicks, never approve what you have 
 
 ## Logging findings
 - Severity: **Critical** (breaks a requirement, data loss, security hole), **High** (likely outage/insecure default, unverified requirement), **Medium** (reliability/operability gap a reviewer would flag), **Low** (nice-to-have).
-- Critical/High/Medium → one bug each in the `bug` skill format: title prefixed `[sre]` (or `[sec]`), Sev set, one-line Report + one-line Direction. Lows: report only.
+- Every finding, Low included → one bug each in the `bug` skill format: title prefixed `[sre]` (or `[sec]`), Sev set, one-line Report + one-line Direction.
 - `.claude/settings.json` findings: rate per ADR 0009 (Medium+ only if a normal auto-allowed command prints secrets, a deny blocks needed work, or a pre-approved command runs arbitrary commands).
 - Check for an existing bug with the same root cause first; a regressed Solved bug gets a new ID titled "regression of B-00N".
 - Status line: `Last SRE review: <HEAD short hash or "working tree"> <date> — <N new bugs | clean>`.

@@ -7,6 +7,7 @@
   register: etcd_backup_mount
   changed_when: false
   failed_when: false
+  when: etcd_backup_require_mount
 
 - name: Assert the backup directory is the host mount
   ansible.builtin.assert:
@@ -15,6 +16,16 @@
       {{ node_backup_dir }} is not a {{ etcd_backup_mount_fstypes | join("/") }} mount (found '{{ etcd_backup_mount.stdout | trim }}'): snapshots would
       stay on the VM disk. Create the VM with 'make vm-up' (adds the ./backups mount).
     quiet: true
+  when: etcd_backup_require_mount
+
+- name: Create the backup directory on the VM (no host mount)
+  ansible.builtin.file:
+    path: "{{ node_backup_dir }}"
+    state: directory
+    mode: "0700"
+    owner: root
+    group: root
+  when: not etcd_backup_require_mount
 
 - name: Create the etcd tools directory
   ansible.builtin.file:
