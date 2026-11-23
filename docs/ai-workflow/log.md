@@ -108,3 +108,6 @@ review before a PR found B-021 and B-022 in that fix; both fixed on their own br
   B-057 (GNU `stat`), B-058 (no 9p in `genericcloud`; virtiofs on QEMU filled `/dev/shm` and froze the VM → `generic` x86_64
   image + 9p); `make provision` asks restore/new CA on a fresh clone. `review-loop` r1 (disruptive, incl. VM restart):
   `sre-reviewer` and `security-reviewer` clean; Lows folded in (CA check before `e2e`'s `vm-reset`, `TAGS=all`, Ctrl-D).
+- 2026-11-23, `fix/b-059-hosts-ipv6-entry` (`::1` hosts line, 5 s macOS lookup → 0.004 s): `review-loop` r1: `security-reviewer`
+  opened B-060 (`hosts-entry.sh` rewrite could wipe `/etc/hosts` on a grep error; `sre-reviewer` added the GNU non-UTF-8 case),
+  fixed on `fix/b-060-*` (byte-wise grep, abort if any other line would be lost); sec re-check and r2 `sre-reviewer` clean.

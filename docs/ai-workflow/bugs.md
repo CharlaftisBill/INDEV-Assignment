@@ -439,3 +439,10 @@ Sev: — · State: Solved · Found: 2026-11-23 · Solved: 2026-11-23 · Fix: 810
 - **Root cause:** no AAAA answer in `/etc/hosts`, so macOS sends the `.local` AAAA query to mDNS, which times out after 5 s.
 - **Fix:** `hosts-entry.sh` adds/removes a `::1` line too (upgrades the old single line), `--check`; `host-tools.sh` requires both (Lima listens `*:443`).
 - **Verification:** after `--apply`: `time_namelookup` 0.004 s without `-4` (via `::1`); `make smoke` 0.18 s; `make doctor` OK; `make lint` clean.
+
+### B-060 · [sec] `hosts-entry.sh --apply` can wipe `/etc/hosts` and report success when `grep` fails
+Sev: Medium · State: Solved · Found: 2026-11-23 · Solved: 2026-11-23 · Fix: ce2afa7
+- **Report** (sec r1, sre r1): `write_hosts` masked `grep -v` errors (`|| true`); unreadable/NUL-byte hosts, or a non-UTF-8 line under GNU grep, → lines lost, rc 0.
+- **Root cause:** `write_hosts` hid every `grep -v` failure (`|| true`), and grep's text/locale handling drops lines without failing.
+- **Fix:** byte-wise `LC_ALL=C grep -a`; abort on read error or if any non-marker line is lost (line count); temp file removed by `trap`.
+- **Verification:** temp copies (sudo shim), BSD + GNU 3.11 (`C.UTF-8`): NUL/latin1 lines kept, unreadable → rc 1, file untouched; `make lint` clean.
