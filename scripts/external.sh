@@ -40,13 +40,22 @@ EG_LOG="${TMPDIR%/}/indev-k8s-ext-$(id -u).egress.log"
 # B-063: requirement 7 wants snapshots off the node on a schedule. The VM may be air-gapped and cannot reach this host,
 # so this host pulls them every 30 min, from a background loop that starts and stops with the tunnel. Not launchd or
 # systemd: macOS keeps launchd jobs out of ~/Desktop, ~/Documents and ~/Downloads (TCC), where a clone often lives.
-PULL_PID="${TMPDIR%/}/indev-k8s-ext-$(id -u).pull.pid"
+PULL_PID="$ROOT/.cache/backups-pull.pid"   # B-073: in the repo, not a shared /tmp another user could plant it in
 PULL_LOG="$ROOT/.cache/backups-pull.log"
 PULL_EVERY=1800
 PULL_DIR="$ROOT/backups/external"   # B-069: own folder; ./backups itself is Lima's (shared mount, own retention)
 SNAP_RE='^etcd-snapshot-[0-9]{8}T[0-9]{6}Z\.db$'   # the names etcd-backup.sh writes; nothing else is copied (B-070)
 
 alive() { [[ -f "$1" ]] && kill -0 "$(cat "$1")" 2>/dev/null; }
+# B-073: the pid file is trusted only when it names this loop: a group leader (pgid == pid) running "backups-pull --scheduled".
+# A stale or foreign pid is dropped, so stop never signals an unrelated process group.
+pull_alive() {
+  [[ -f "$PULL_PID" ]] || return 1
+  local p pg cmd; p="$(cat "$PULL_PID")"
+  if [[ "$p" =~ ^[0-9]+$ ]] && read -r pg cmd < <(ps -o pgid=,command= -p "$p" 2>/dev/null) \
+     && [[ "$pg" == "$p" && "$cmd" == *"backups-pull --scheduled"* ]]; then return 0; fi
+  rm -f "$PULL_PID"; return 1
+}
 # -O commands only talk to the control socket; the host argument is a placeholder until the conf is read.
 TARGET=indev-ext
 ssh_up() { ssh -S "$1" -O check "$TARGET" >/dev/null 2>&1; }
@@ -56,7 +65,7 @@ tunnel_up() { ssh_up "$SOCK" && alive "$FWD_PID"; }
 tunnel_stop() { ssh_stop "$SOCK"; proc_stop "$FWD_PID"; }
 # B-068: the loop leads its own process group, so stopping it also stops a pull in flight (ssh, tar); wait for all of it.
 pull_stop() {
-  if alive "$PULL_PID"; then
+  if pull_alive; then
     local g; g="$(cat "$PULL_PID")"; kill -TERM -- "-$g" 2>/dev/null || true
     local i=0; while pgrep -g "$g" >/dev/null 2>&1 && (( i < 20 )); do sleep 0.5; i=$((i + 1)); done
     kill -KILL -- "-$g" 2>/dev/null || true
@@ -69,7 +78,7 @@ egress_stop() { ssh_stop "$EG_SOCK"; proc_stop "$EG_PID"; }
 # Work without external-vm.conf: removing the schedule, and a scheduled run after going back to Lima (nothing to pull).
 case "${1:-} ${2:-}" in
   "backups-pull --scheduled") [[ -f "$CONF" ]] || exit 0 ;;
-  "backups-schedule status") if alive "$PULL_PID"; then echo "pull loop (pid $(cat "$PULL_PID")), every $((PULL_EVERY / 60)) min"; exit 0; else echo "no scheduled pull"; exit 1; fi ;;
+  "backups-schedule status") if pull_alive; then echo "pull loop (pid $(cat "$PULL_PID")), every $((PULL_EVERY / 60)) min"; exit 0; else echo "no scheduled pull"; exit 1; fi ;;
   "backups-schedule stop") pull_stop; exit 0 ;;
   # B-064: going back to Lima means deleting the conf; a tunnel left from before must still stop.
   "tunnel stop" | "egress stop") [[ -f "$CONF" ]] || {
@@ -77,7 +86,7 @@ case "${1:-} ${2:-}" in
     if ssh_up "$EG_SOCK" || alive "$EG_PID"; then egress_stop; echo "egress stopped"; fi
     if ssh_up "$SOCK" || alive "$FWD_PID"; then tunnel_stop; echo "tunnel stopped"; else echo "tunnel not running"; fi
     exit 0; } ;;
-  "tunnel running") ssh_up "$SOCK" || alive "$FWD_PID" || alive "$PULL_PID"; exit ;;  # what holds host ports (egress is Lima's too)
+  "tunnel running") ssh_up "$SOCK" || alive "$FWD_PID" || pull_alive; exit ;;  # what holds host ports (egress is Lima's too)
 esac
 [[ -f "$CONF" ]] || die "no external-vm.conf (copy external-vm.conf.example); the Lima VM is used instead"
 
@@ -107,7 +116,7 @@ if [[ "$USER_" == root ]]; then SUDO=""; else SUDO="sudo -n "; fi
 run() { "${SSH[@]}" "$TARGET" "$SUDO$(printf '%q ' "$@")"; }
 
 pull_start() {
-  alive "$PULL_PID" && return 0
+  pull_alive && return 0
   mkdir -p "$(dirname "$PULL_LOG")"
   # Detached loop in its own process group (job control on: a background job gets pgid = its pid); pull_stop kills the group.
   set -m
@@ -190,11 +199,11 @@ u.build_opener(u.ProxyHandler(h)).open("https://deb.debian.org/debian/dists/trix
           || { tunnel_stop; die "could not listen on host 443/80: in use (a running Lima VM 'k8s': limactl stop k8s)? Linux: make deps sets ip_unprivileged_port_start"; }
         echo "tunnel up: host 443/80/6443 -> $HOST (local connections only; make tunnel-stop closes it)" ;;
       stop)
-        if alive "$PULL_PID"; then pull_stop; echo "snapshot pull stopped"; fi
+        if pull_alive; then pull_stop; echo "snapshot pull stopped"; fi
         if egress_up || alive "$EG_PID"; then egress_stop; echo "egress stopped"; fi
         if ssh_up "$SOCK" || alive "$FWD_PID"; then tunnel_stop; echo "tunnel stopped"; else echo "tunnel not running"; fi ;;
       status) if tunnel_up && { [[ "$EGRESS" != host ]] || egress_up; }; then echo "up"; else echo "down"; exit 1; fi ;;
-      running) ssh_up "$SOCK" || alive "$FWD_PID" || alive "$PULL_PID" ;;  # what holds host ports (egress is Lima's too)
+      running) ssh_up "$SOCK" || alive "$FWD_PID" || pull_alive ;;  # what holds host ports (egress is Lima's too)
       *) die "usage: tunnel start|stop|status|running" ;;
     esac ;;
   backups-pull)
