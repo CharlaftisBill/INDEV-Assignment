@@ -3,6 +3,8 @@
 Design: [ADR 0006](../decisions/0006-etcd-backups-outside-cluster.md).
 
 Snapshots are `etcd-snapshot-<UTC>.db` files in `./backups` on the Mac (`/mnt/host-backups` in the VM).
+With your own VM (`external-vm.conf`) they are in `/var/backups/etcd` on the VM (the host pulls them into
+`./backups/external`): use `make vm-shell` instead of `limactl shell k8s`, and that folder instead of `/mnt/host-backups`.
 They contain every Secret: never open, print or share them.
 
 Tested on the same VM (2026-11-20) and on a rebuilt VM with kept PKI (2026-11-21). Same VM again on 2026-11-21

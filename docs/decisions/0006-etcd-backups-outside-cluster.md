@@ -48,6 +48,11 @@ pod restarted and legacy token Secrets reissued (B-050). Now the `kubeadm` role 
 | New kubeadm CAs per VM | Restoring onto a rebuilt VM then needs every pod restarted and legacy tokens reissued |
 
 ## Consequences
+- With your own VM (`external-vm.conf`) there is no shared folder: `etcd_backup_require_mount: false` drops the
+  mount guard, snapshots go to `/var/backups/etcd` on the VM (mode 0700), and a loop on the host that runs with the
+  tunnel pulls new ones into `./backups/external` every 30 minutes, 0600, newest 48 (B-063, B-067..B-070). A VM that may be air-gapped cannot
+  push, so the host pulls; launchd was rejected because macOS keeps its jobs out of `~/Desktop` and similar folders
+  ([install guide](../install.md#backups)).
 - Snapshots survive `make vm-reset`. Restore: [runbook](../runbooks/etcd-restore.md).
 - Snapshots contain every Secret in plain form. `./backups` is gitignored; treat it as secret.
 - `.secrets/kubeadm-pki/` can mint cluster-admin certificates and tokens for every VM built from it

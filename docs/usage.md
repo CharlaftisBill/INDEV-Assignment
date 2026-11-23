@@ -1,6 +1,7 @@
 # Daily use
 
 Run all commands from the repo root. `make help` lists every target.
+Using your own VM (`external-vm.conf`)? A few commands differ: [install guide](install.md#commands).
 
 ## Commands
 
@@ -8,15 +9,16 @@ Run all commands from the repo root. `make help` lists every target.
 |---|---|
 | `make doctor` | Checks the host tools (changes nothing) |
 | `make deps` | Installs missing host tools ([install guide](install.md)) |
-| `make vm-up` / `make vm-down` | Starts / stops the VM |
-| `make vm-shell` | Opens a shell in the VM (same as `limactl shell k8s`) |
+| `make vm-up` / `make vm-down` | Starts / stops the VM (own VM: checks it and opens / closes the [tunnel](install.md#ports-the-tunnel)) |
+| `make vm-shell` | Opens a shell in the VM (same as `limactl shell k8s`; own VM: root shell over SSH) |
 | `make vm-reset` | Deletes the VM and makes a clean one. **Destroys the cluster** |
 | `make provision` | Runs the Ansible playbook. `TAGS=<role>` runs one role |
 | `make idempotency` | Runs the playbook again and fails if anything changed |
 | `make verify` | Runs the requirement checks. `REQ=<id>` for one, `STRICT=1` to fail on SKIP |
 | `make smoke` | Sends the test question to `https://llm.local` |
 | `make lint` | yamllint, ansible-lint, bug tracker format, shellcheck |
-| `make e2e` | Clean VM → provision → all checks |
+| `make e2e` | Clean VM → provision → all checks (Lima only) |
+| `make tunnel` / `make tunnel-stop` / `make backups-pull` | Own VM only: open / close the tunnels (ports, and the air-gapped VM's downloads), copy snapshots to `./backups/external` |
 | `make uninstall` | Removes what make installed ([install guide](install.md#uninstall)) |
 
 Requirement IDs: `1 2 3a 3b 4 5 6 7 8a 8b 8c 9` ([requirements](requirements-matrix.md)).
@@ -25,7 +27,7 @@ Roles: see [provisioning order](architecture.md#provisioning-order).
 ## Admin access
 
 `make provision` writes the admin kubeconfig to `out/admin.conf`. It points at `https://127.0.0.1:6443`
-(Lima forwards that port to the VM). It does not touch `~/.kube/config`, so pass it each time:
+(Lima forwards that port to the VM; with your own VM, the SSH tunnel from `make vm-up` does). It does not touch `~/.kube/config`, so pass it each time:
 
 ```bash
 kubectl --kubeconfig out/admin.conf get nodes

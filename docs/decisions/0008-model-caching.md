@@ -39,6 +39,9 @@ The server pod never has outbound access.
 - Restarting or deleting the pod reuses the volume; no Job runs. `check_9` tests this.
 - `make vm-reset` deletes the volume, so each fresh VM downloads the model once.
 - Outbound access exists only while the Job runs.
+- Air-gapped own VM (`llm_app_model_from_host`): the host downloads and checks the model, Ansible copies it into the
+  volume, the Job only binds it, and `allow-dns`/`allow-model-download` are removed. No pod in `llm` has any egress,
+  so the Job-label risk below does not apply there.
 - Accepted Low risks: anyone who can create pods in `llm` could copy the Job label to get outbound access (today only
   admins and controllers); the pod restart after a download does not wait for the rollout; a failed Job and its logs
   are deleted after 1 hour.
