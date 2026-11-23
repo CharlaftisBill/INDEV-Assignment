@@ -8,3 +8,7 @@ os_prep_sysctls:
   net.bridge.bridge-nf-call-iptables: "1"
   net.bridge.bridge-nf-call-ip6tables: "1"
   net.ipv4.ip_forward: "1"
+
+# Air-gap firewall: the VM never reaches the internet itself (downloads go through the egress proxy on 127.0.0.1).
+os_prep_airgap_rules: /etc/indev-airgap.nft
+os_prep_node_ip: "{{ ansible_facts['default_ipv4']['address'] }}"

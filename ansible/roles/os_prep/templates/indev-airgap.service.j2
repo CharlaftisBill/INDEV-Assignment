@@ -1,0 +1,18 @@
+# Managed by Ansible (os_prep). Loads the air-gap firewall (own nftables table) early at boot, before networking.
+# Same ordering as Debian's nftables.service: no default dependencies, so no cycle with cloud-init/network (B-092).
+[Unit]
+Description=INDEV air-gap firewall (nftables table inet indev_airgap)
+DefaultDependencies=no
+Wants=network-pre.target
+Before=network-pre.target shutdown.target
+After=local-fs.target
+Conflicts=shutdown.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/nft -f {{ os_prep_airgap_rules }}
+ExecStop=/usr/sbin/nft delete table inet indev_airgap
+
+[Install]
+WantedBy=sysinit.target
