@@ -54,6 +54,10 @@ try:
 except OSError as e:
     print("BLOCKED", type(e).__name__)' 2>&1)"
   if [[ "$direct" == BLOCKED* ]]; then pass "the VM cannot reach the internet itself (1.1.1.1:443: ${direct#BLOCKED })"; else fail "the VM reaches the internet directly: $direct"; fi
+  # B-094: the clock syncs over NTP through the air gap (a restarted timesyncd needs a few seconds).
+  local synced=""
+  for _ in $(seq 1 30); do synced="$(node timedatectl show -p NTPSynchronized --value 2>&1)"; [[ "$synced" == yes ]] && break; sleep 2; done
+  if [[ "$synced" == yes ]]; then pass "clock synchronized over NTP ($(node timedatectl show-timesync -p ServerAddress --value 2>&1))"; else fail "clock not synchronized over NTP (timedatectl timesync-status; own VM: ntp= in external-vm.conf)"; fi
 
   local cfg; cfg="$(node containerd config dump 2>&1)"
   if grep -Eq '^[[:space:]]*SystemdCgroup = true' <<<"$cfg"; then pass "containerd effective config: SystemdCgroup = true"; else fail "SystemdCgroup is not true in 'containerd config dump'"; fi

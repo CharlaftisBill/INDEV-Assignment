@@ -24,6 +24,7 @@ The VM is defined in `lima/k8s.yaml`. Lima's built-in containerd is off, so Ansi
 > Lima stays the default and the only path `make e2e` covers, since it can recreate the VM.
 > **Amended (2026-11-23):** every VM, Lima's included, is air-gapped (firewall from `os_prep`): its downloads go through the reviewer's machine (SSH reverse
 > tunnel to an allowlisting proxy) and the model is copied in ([install guide](../install.md#internet-access-from-the-vm)).
+> One exception: NTP (udp/123) to pinned server IPs (Google Public NTP by default, `ntp=` for your own), so the clock syncs (B-094).
 
 ## Alternatives
 | Option | Why not |

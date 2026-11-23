@@ -1,0 +1,4 @@
+# Managed by Ansible (os_prep). The air-gap firewall allows udp/123 to these servers only (B-094).
+[Time]
+NTP={{ vm_ntp_servers | join(' ') }}
+FallbackNTP=

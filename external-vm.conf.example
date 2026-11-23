@@ -14,3 +14,5 @@ port=22
 #   allowlisted sources in scripts/egress-allowlist.txt only. proxy: through your proxy, set below.
 # egress=host
 # proxy=http://10.0.0.5:3128   (an IP address: the VM has no DNS)
+# Time sync: the firewall lets the VM reach these NTP servers (udp/123) only. Default: Google Public NTP (time.google.com).
+# ntp=216.239.35.0,216.239.35.4
