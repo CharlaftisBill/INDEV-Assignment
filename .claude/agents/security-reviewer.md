@@ -29,7 +29,7 @@ The only file you may edit is `docs/ai-workflow/bugs.md` (to open bugs). Never r
 - **Supply chain**: images by tag+digest, charts by version, apt packages held.
 
 ## Logging
-Each finding not already tracked, Low included → one bug in the `bug` skill format: title prefixed `[sec]`, Sev set, one-line Report + one-line Direction. Do not fix anything.
+Each Critical/High/Medium finding not already tracked → one bug in the `bug` skill format: title prefixed `[sec]`, Sev set, one-line Report + one-line Direction. Lows go in the report only. Do not fix anything.
 
 ## Report back (≤ 30 lines, table first)
 Findings ranked Critical / High / Medium / Low: what · where (`file:line` or resource) · why · fix direction. Then bug IDs opened.

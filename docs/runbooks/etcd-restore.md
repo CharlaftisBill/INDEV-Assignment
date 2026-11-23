@@ -83,6 +83,15 @@ make vm-up
 make provision     # new cluster with a new etcd; takes a first snapshot
 ```
 
+**Your own VM:** a reinstalled VM has only new snapshots; the old ones exist only in `./backups/external` on the host.
+Copy the one you want back first (root, `0600`, never printed), outside the VM's snapshot folder so its retention cannot
+delete it, then use `SNAP=/root/etcd-restore.db` in step 1 (B-072). The host keeps only the newest 48 pulls (24 h):
+copy an older one out of `./backups/external` to keep it. The copy holds every Secret and nothing prunes it: delete
+it after the restore (`scripts/external.sh run rm -f /root/etcd-restore.db`).
+```bash
+scripts/external.sh run sh -c 'umask 077; cat > "$1"' sh /root/etcd-restore.db < backups/external/etcd-snapshot-<UTC>.db
+```
+
 Now run the same-VM steps above with the old snapshot. Node name and IP are fixed in `group_vars`, so they match.
 Tested 2026-11-21 (snapshot from the VM of the first `make e2e`, restored after a second one; same CA fingerprint):
 the API was back 2 s after the manifests returned with the old cluster's objects, kubelet ran the snapshot's pods 3 s

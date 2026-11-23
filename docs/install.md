@@ -71,6 +71,7 @@ One `key=value` per line, no trailing comments:
 | `backup_dir` | `/var/backups/etcd` | Where the VM keeps etcd snapshots |
 | `egress` | `host` | Where the VM's downloads go: `host` or `proxy` ([below](#internet-access-from-the-vm)) |
 | `proxy` | | Your proxy URL, with `egress=proxy` |
+| `ntp` | Google Public NTP (`216.239.35.0,…4,…8,…12`) | NTP servers the VM may reach, `<IPv4>[,<IPv4>...]` |
 
 The host key is accepted on first use (`StrictHostKeyChecking=accept-new`) and checked after that.
 
@@ -96,7 +97,9 @@ The usual ones work: `make deps` (no Lima or QEMU while the file exists; `make d
 
 The VM is always air-gapped, Lima's and yours: `os_prep` installs a firewall (nftables table `inet indev_airgap`,
 unit `indev-airgap`) that lets it reach only itself, the node IP, the pod and Service ranges (and your proxy, with
-`egress=proxy`). `make verify` (check 1) proves it cannot open a connection to the internet. Its downloads go through:
+`egress=proxy`), plus NTP (udp/123) to the `ntp=` servers so the clock stays synced (B-094; set `ntp=` if your
+network blocks Google's). `make verify` (check 1) proves it cannot open a connection to the internet and that the
+clock is synced. Its downloads go through:
 
 | `egress=` | The VM's downloads | Needs |
 |---|---|---|

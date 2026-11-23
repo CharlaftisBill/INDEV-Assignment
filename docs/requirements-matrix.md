@@ -8,7 +8,7 @@ Disruptive tests (kubelet restart, containerd restart, pod deletion, VM reboot) 
 
 | ID | Requirement | Role | Checks | Milestone | Status |
 |---|---|---|---|---|---|
-| [1](#1-os-and-container-runtime) | OS prep, containerd, pinned packages | `os_prep`, `containerd` | 19 | M1 | Done |
+| [1](#1-os-and-container-runtime) | OS prep, containerd, pinned packages | `os_prep`, `containerd` | 22 | M1 | Done |
 | [2](#2-kubeadm-single-node) | kubeadm, one node runs everything | `kubeadm` | 21 | M2 | Done |
 | [3a](#3a-network-plugin) | CNI installed and healthy | `cni_calico` | 15 | M3 | Done |
 | [3b](#3b-app-network-policy) | App pods accept only needed traffic | `llm_app` | 18 | M9 | Done |
@@ -25,7 +25,8 @@ Disruptive tests (kubelet restart, containerd restart, pod deletion, VM reboot) 
 
 - **Built:** swap off (also after reboot); `overlay` and `br_netfilter` modules; 3 network sysctls; 9 base packages
   plus containerd and runc, pinned and held; containerd uses systemd cgroups. runc's known CVEs are accepted (B-026).
-- **Checked:** all of the above, including persistence and `apt-mark showhold`. `make idempotency` passes.
+  Air-gap firewall; the clock syncs over NTP to pinned server IPs only (B-094).
+- **Checked:** all of the above, including persistence, `apt-mark showhold`, no direct internet and `NTPSynchronized=yes`. `make idempotency` passes.
 
 ## 2. kubeadm single node
 

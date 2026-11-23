@@ -100,6 +100,14 @@
     fail_msg: "proxy= must be an IPv4 address (the air-gapped VM has no DNS): {{ vm_egress_allow_extra }}"
     quiet: true
 
+- name: Check the NTP servers are IPv4 addresses
+  ansible.builtin.assert:
+    that:
+      - vm_ntp_servers | length > 0
+      - vm_ntp_servers | reject('match', '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$') | list | length == 0
+    fail_msg: "ntp= must list IPv4 addresses (the air-gapped VM has no DNS): {{ vm_ntp_servers }}"
+    quiet: true
+
 - name: Set the extra egress addresses
   ansible.builtin.set_fact:
     os_prep_egress_allow_ips: "{{ vm_egress_allow_extra }}"
@@ -131,3 +139,38 @@
 
 - name: Apply a changed firewall now
   ansible.builtin.meta: flush_handlers
+
+# B-094: timesyncd syncs to the NTP servers the firewall allows (its Debian pool default needs DNS).
+- name: Check systemd-timesyncd is installed
+  ansible.builtin.stat:
+    path: /usr/lib/systemd/systemd-timesyncd
+  register: os_prep_timesyncd
+
+- name: Fail without systemd-timesyncd
+  ansible.builtin.assert:
+    that: os_prep_timesyncd.stat.exists
+    fail_msg: systemd-timesyncd is missing (Debian 13 installs it by default); the VM would have no time sync
+    quiet: true
+
+- name: Create the timesyncd drop-in directory
+  ansible.builtin.file:
+    path: /etc/systemd/timesyncd.conf.d
+    state: directory
+    mode: "0755"
+    owner: root
+    group: root
+
+- name: Point timesyncd at the allowed NTP servers
+  ansible.builtin.template:
+    src: timesyncd.conf.j2
+    dest: /etc/systemd/timesyncd.conf.d/indev.conf
+    mode: "0644"
+    owner: root
+    group: root
+  notify: Restart timesyncd
+
+- name: Enable and start timesyncd
+  ansible.builtin.systemd_service:
+    name: systemd-timesyncd
+    enabled: true
+    state: started

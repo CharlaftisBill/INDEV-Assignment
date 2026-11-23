@@ -17,6 +17,10 @@ vm_proxy_url: "http://127.0.0.1:{{ vm_egress_port }}"
 # Outbound traffic the os_prep firewall still lets through, besides loopback, the node IP and the cluster ranges
 # (e.g. the reviewer's proxy, set in inventory/external.yml).
 vm_egress_allow_extra: []
+# B-094: time sync through the air gap: udp/123 to these IPv4 NTP servers only (no DNS on the VM). Default: Google Public
+# NTP (time.google.com, one leap-smear source; developers.google.com/time/faq, dig 2026-11-23). Own VM: ntp= in external-vm.conf.
+vm_ntp_default_servers: [216.239.35.0, 216.239.35.4, 216.239.35.8, 216.239.35.12]
+vm_ntp_servers: "{{ vm_ntp_default_servers }}"
 vm_no_proxy: "127.0.0.1,localhost,{{ ansible_facts['default_ipv4']['address'] | default('') }},{{ pod_cidr }},{{ service_cidr }},.svc,.{{ cluster_dns_domain }}"
 vm_proxy_env: >-
   {{ {} if vm_proxy_url | length == 0 else
